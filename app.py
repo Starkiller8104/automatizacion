@@ -12,9 +12,17 @@ Original file is located at
 # Streamlit app SIN archivo base, tokens en código y Excel NUEVO con indicadores.
 # Incluye: Banxico (SIE), INEGI (UMA), FRED (Fed Funds + US CPI YoY) y hoja "Gráficos".
 # ──────────────────────────────────────────────────────────────────────────────
+# app.py
+# ──────────────────────────────────────────────────────────────────────────────
+# Streamlit app SIN archivo base, tokens en código y Excel NUEVO con indicadores.
+# Incluye: Banxico (SIE), INEGI (UMA), FRED (Fed Funds + US CPI YoY),
+# hoja "Gráficos" y hoja "Datos crudos" para Power BI (toggle).
+# Sidebar con "semáforos" (estado de fuentes + latencia).
+# ──────────────────────────────────────────────────────────────────────────────
 
 import io
-from datetime import datetime, timedelta, date
+import time
+from datetime import datetime, timedelta
 import pytz
 import requests
 from requests.adapters import HTTPAdapter, Retry
@@ -28,16 +36,15 @@ from openpyxl.chart.axis import DateAxis
 # =========================
 #  TOKENS (repo privado)
 # =========================
-BANXICO_TOKEN = "TU_TOKEN_BANXICO"
-INEGI_TOKEN   = "TU_TOKEN_INEGI"
-FRED_TOKEN    = "TU_TOKEN_FRED"
+BANXICO_TOKEN = "677aaedf11d11712aa2ccf73da4d77b6b785474eaeb2e092f6bad31b29de6609"
+INEGI_TOKEN   = "9886fe68-e51f-c345-0b8f-adb99da1a1fd"
+FRED_TOKEN    = ""  # Opcional; si lo dejas vacío, habrá fallbacks
 
 TZ_MX = pytz.timezone("America/Mexico_City")
 
 # =========================
 #  SERIES SIE DE BANXICO
 # =========================
-# Ajusta si usas otros IDs.
 SIE_SERIES = {
     "USD_FIX":   "SF43718",   # Tipo de cambio FIX
     "EUR_FIX":   "SF46410",   # Euro
@@ -45,7 +52,7 @@ SIE_SERIES = {
     "TIIE_28":   "SF60653",   # TIIE 28 días
     "CETES_28":  "SF43936",   # CETES 28 días
     "UDIS":      "SP68257",   # UDIS
-    # Si conoces la serie exacta de inflación MX YoY, colócala aquí.
+    # Si conoces la serie exacta de inflación MX YoY, colócala aquí (si no, usamos fallback).
     "MX_INFL_YOY": ""
 }
 
@@ -79,6 +86,17 @@ def try_float(x):
 def is_empty(x: str) -> bool:
     return (x is None) or (str(x).strip() == "")
 
+def _check_tokens():
+    # Banxico e INEGI son requeridos; FRED es opcional.
+    missing = []
+    if not BANXICO_TOKEN.strip():
+        missing.append("BANXICO_TOKEN")
+    if not INEGI_TOKEN.strip():
+        missing.append("INEGI_TOKEN")
+    if missing:
+        st.error("Configura los siguientes tokens antes de continuar: " + ", ".join(missing))
+        st.stop()
+
 # =========================
 #  BANXICO SIE (último dato)
 # =========================
@@ -109,10 +127,6 @@ def sie_latest(series_id):
 # =========================
 @st.cache_data(ttl=60*30)
 def sie_range(series_id: str, start_iso: str, end_iso: str):
-    """
-    Devuelve lista de dicts [{'fecha': 'YYYY-MM-DD', 'dato': 'x'}, ...]
-    usando el endpoint de rango de fechas.
-    """
     url = f"https://www.banxico.org.mx/SieAPIRest/service/v1/series/{series_id}/datos/{start_iso}/{end_iso}"
     headers = {"Bmx-Token": BANXICO_TOKEN}
     s = http_session(timeout=20)
@@ -125,11 +139,8 @@ def sie_range(series_id: str, start_iso: str, end_iso: str):
     return series[0].get("datos", []) or []
 
 def sie_last_n(series_id: str, n: int = 12):
-    """
-    Últimos n datos (fecha_str, valor_float). Si no alcanza, devuelve lo disponible.
-    """
     end = today_cdmx()
-    start = end - timedelta(days=365*2)  # rango suficientemente amplio
+    start = end - timedelta(days=365*2)
     obs = sie_range(series_id, start.isoformat(), end.isoformat())
     vals = []
     for o in obs:
@@ -142,44 +153,68 @@ def sie_last_n(series_id: str, n: int = 12):
     return vals[-n:]
 
 # =========================
-#  INEGI (UMA)
+#  INEGI (UMA) – robusto
 # =========================
 @st.cache_data(ttl=60*60)
 def get_uma(inegi_token: str):
-    # Serie 620706, 620707, 620708: UMA diaria, mensual, anual
-    url = (
-        "https://www.inegi.org.mx/app/api/indicadores/desarrolladores/jsonxml/"
-        "INDICATOR/620706,620707,620708/es/0700/false/BISE/2.0/"
-        f"{inegi_token}?type=json"
-    )
+    """
+    UMA desde INEGI (nacional):
+    - Indicadores: 620706 (diaria), 620707 (mensual), 620708 (anual)
+    - Área geográfica: '00'
+    - Dato más reciente: 'true'
+    """
+    base = "https://www.inegi.org.mx/app/api/indicadores/desarrolladores/jsonxml/INDICATOR"
+    ids = "620706,620707,620708"
+    url = f"{base}/{ids}/es/00/true/BISE/2.0/{inegi_token}?type=json"
+
     s = http_session(timeout=20)
-    r = s.get(url, timeout=s.request_timeout)
-    r.raise_for_status()
-    data = r.json()
-    series = data["Series"]
+    try:
+        r = s.get(url, timeout=s.request_timeout)
+        status = r.status_code
+        if status == 401 or status == 403:
+            st.warning("INEGI UMA: autenticación/autorización fallida (401/403). Usando fallback.")
+            return {"fecha": str(today_cdmx()), "diaria": None, "mensual": None, "anual": None}
+        if status != 200:
+            st.warning(f"INEGI UMA: respuesta HTTP {status}. Usando fallback.")
+            return {"fecha": str(today_cdmx()), "diaria": None, "mensual": None, "anual": None}
 
-    diaria_obs  = series[0]["OBSERVATIONS"][-1]
-    mensual_obs = series[1]["OBSERVATIONS"][-1]
-    anual_obs   = series[2]["OBSERVATIONS"][-1]
+        data = r.json()
+        series = data.get("Series", [])
+        if not series or any("OBSERVATIONS" not in s for s in series):
+            st.warning("INEGI UMA: respuesta sin 'Series/OBSERVATIONS'. Usando fallback.")
+            return {"fecha": str(today_cdmx()), "diaria": None, "mensual": None, "anual": None}
 
-    return {
-        "fecha":   diaria_obs["TIME_PERIOD"],
-        "diaria":  try_float(diaria_obs["OBS_VALUE"]),
-        "mensual": try_float(mensual_obs["OBS_VALUE"]),
-        "anual":   try_float(anual_obs["OBS_VALUE"])
-    }
+        diaria_obs  = series[0]["OBSERVATIONS"][-1]
+        mensual_obs = series[1]["OBSERVATIONS"][-1] if series[1]["OBSERVATIONS"] else None
+        anual_obs   = series[2]["OBSERVATIONS"][-1] if series[2]["OBSERVATIONS"] else None
+
+        fecha   = diaria_obs.get("TIME_PERIOD") or str(today_cdmx())
+        diaria  = try_float(diaria_obs.get("OBS_VALUE"))
+        mensual = try_float(mensual_obs.get("OBS_VALUE")) if mensual_obs else None
+        anual   = try_float(anual_obs.get("OBS_VALUE")) if anual_obs else None
+
+        # Derivar si faltan mensual/anual
+        if diaria is not None:
+            if mensual is None:
+                mensual = diaria * 30.4
+            if anual is None and mensual is not None:
+                anual = mensual * 12
+
+        return {"fecha": fecha, "diaria": diaria, "mensual": mensual, "anual": anual}
+
+    except Exception as e:
+        st.warning(f"INEGI UMA: error {type(e).__name__}. Usando fallback.")
+        return {"fecha": str(today_cdmx()), "diaria": None, "mensual": None, "anual": None}
 
 # =========================
-#  FRED (Fed Funds + CPI YoY)
+#  FRED (Fed Funds + CPI YoY) – opcional
 # =========================
 @st.cache_data(ttl=60*30)
 def fred_observations(series_id: str, start_date: str = None, end_date: str = None):
     base = "https://api.stlouisfed.org/fred/series/observations"
-    params = {
-        "series_id": series_id,
-        "api_key": FRED_TOKEN,
-        "file_type": "json",
-    }
+    params = {"series_id": series_id, "file_type": "json"}
+    if FRED_TOKEN.strip():
+        params["api_key"] = FRED_TOKEN.strip()
     if start_date:
         params["observation_start"] = start_date
     if end_date:
@@ -191,52 +226,57 @@ def fred_observations(series_id: str, start_date: str = None, end_date: str = No
     return j.get("observations", [])
 
 def fred_latest_value(series_id: str):
-    end = datetime.utcnow().date()
-    start = (end - timedelta(days=3*365)).isoformat()
-    obs = fred_observations(series_id, start_date=start, end_date=end.isoformat())
-    obs = [o for o in obs if o.get("value") not in (".", None)]
-    if not obs:
+    try:
+        end = datetime.utcnow().date()
+        start = (end - timedelta(days=3*365)).isoformat()
+        obs = fred_observations(series_id, start_date=start, end_date=end.isoformat())
+        obs = [o for o in obs if o.get("value") not in (".", None)]
+        if not obs:
+            return None, None
+        last = obs[-1]
+        return last["date"], try_float(last["value"])
+    except:
         return None, None
-    last = obs[-1]
-    return last["date"], try_float(last["value"])
 
 def fred_last_n(series_id: str, n: int = 12):
-    """
-    Últimos n datos de FRED (fecha_str, valor_float).
-    """
-    end = datetime.utcnow().date()
-    start = (end - timedelta(days=5*365)).isoformat()
-    obs = fred_observations(series_id, start_date=start, end_date=end.isoformat())
-    out = []
-    for o in obs:
-        v = o.get("value")
-        if v not in (".", None):
-            out.append((o.get("date"), try_float(v)))
-    if not out:
+    try:
+        end = datetime.utcnow().date()
+        start = (end - timedelta(days=5*365)).isoformat()
+        obs = fred_observations(series_id, start_date=start, end_date=end.isoformat())
+        out = []
+        for o in obs:
+            v = o.get("value")
+            if v not in (".", None):
+                out.append((o.get("date"), try_float(v)))
+        if not out:
+            return []
+        return out[-n:]
+    except:
         return []
-    return out[-n:]
 
 def fred_cpi_yoy_series(n: int = 12):
     """
-    Serie de YoY % para CPIAUCSL: últimos n meses (fecha, yoy).
+    Serie YoY % de CPIAUCSL: (CPI(t)/CPI(t-12) - 1) * 100, últimos n meses.
     """
-    end = datetime.utcnow().date()
-    start = (end - timedelta(days=6*365)).isoformat()
-    obs = fred_observations("CPIAUCSL", start_date=start, end_date=end.isoformat())
-    obs = [(o["date"], try_float(o["value"])) for o in obs if o.get("value") not in (".", None)]
-    if len(obs) < 13:
+    try:
+        end = datetime.utcnow().date()
+        start = (end - timedelta(days=6*365)).isoformat()
+        obs = fred_observations("CPIAUCSL", start_date=start, end_date=end.isoformat())
+        obs = [(o["date"], try_float(o["value"])) for o in obs if o.get("value") not in (".", None)]
+        if len(obs) < 13:
+            return []
+        yoy = []
+        for i in range(12, len(obs)):
+            f_now, v_now = obs[i]
+            f_prev, v_prev = obs[i-12]
+            if v_now is None or v_prev in (None, 0):
+                continue
+            yoy.append((f_now, (v_now / v_prev - 1.0) * 100.0))
+        if not yoy:
+            return []
+        return yoy[-n:]
+    except:
         return []
-    yoy = []
-    # Empezamos desde el índice 12 (t-12)
-    for i in range(12, len(obs)):
-        f_now, v_now = obs[i]
-        f_prev, v_prev = obs[i-12]
-        if v_now is None or v_prev in (None, 0):
-            continue
-        yoy.append((f_now, (v_now / v_prev - 1.0) * 100.0))
-    if not yoy:
-        return []
-    return yoy[-n:]
 
 def get_us_from_fred():
     fed_date, fed_val = fred_latest_value("FEDFUNDS")
@@ -302,16 +342,11 @@ def autosize(ws, min_col=1, max_col=10):
         ws.column_dimensions[letter].width = min(max_len + 2, 60)
 
 # -------------------------
-# Hoja "Gráficos"
+# Hoja "Gráficos" (helpers)
 # -------------------------
 def write_series_table(ws, start_row: int, start_col: int, title: str, series):
-    """
-    Escribe una tabla (Fecha, Valor) y retorna (row0, col0, row1, col1) del rango de datos.
-    'series' debe ser lista de tuplas (fecha_str, valor_float).
-    """
     r = start_row
     c = start_col
-    # Título
     ws.cell(row=r, column=c, value=title).font = Font(bold=True)
     r += 1
     ws.cell(row=r, column=c, value="Fecha").font = Font(bold=True)
@@ -321,17 +356,11 @@ def write_series_table(ws, start_row: int, start_col: int, title: str, series):
         ws.cell(row=r, column=c, value=f)
         ws.cell(row=r, column=c+1, value=v)
         r += 1
-    # Rango datos (sin encabezado)
     data_start_row = start_row + 2
     data_end_row = r - 1
     return (data_start_row, c, data_end_row, c+1)
 
 def add_line_chart(ws, title: str, data_range, cat_is_dates=True, place_at=("H", 2)):
-    """
-    Inserta un LineChart usando el rango de datos:
-      data_range = (row0, col0, row1, col1) donde col1 es la columna de valores y col0 la de fechas.
-    place_at = ("ColLetra", fila_superior) para colocar el chart.
-    """
     (r0, c0, r1, c1) = data_range
     chart = LineChart()
     chart.title = title
@@ -341,17 +370,49 @@ def add_line_chart(ws, title: str, data_range, cat_is_dates=True, place_at=("H",
         chart.x_axis = DateAxis()
         chart.x_axis.number_format = "yyyy-mm-dd"
         chart.x_axis.title = "Fecha"
-
     data = Reference(ws, min_col=c1, min_row=r0, max_col=c1, max_row=r1)
     cats = Reference(ws, min_col=c0, min_row=r0, max_row=r1)
     chart.add_data(data, titles_from_data=False)
     chart.set_categories(cats)
-
-    # Colocar el gráfico
     anchor_col, anchor_row = place_at
     ws.add_chart(chart, f"{anchor_col}{anchor_row}")
 
-def crear_excel(datos: dict, graficos_data: dict | None = None) -> bytes:
+# -------------------------
+# Hoja "Datos crudos" (helper)
+# -------------------------
+def add_raw_data_sheet(wb, raw_data: dict):
+    """
+    raw_data: dict con listas de (fecha_str, valor_float). Claves esperadas:
+      USD_LAST12, TIIE_LAST12, FEDFUNDS_LAST12, US_CPI_YOY_LAST12
+    Se escribe en formato "largo": Serie | Fecha | Valor (ideal para Power BI).
+    """
+    ws = wb.create_sheet("Datos crudos")
+    set_cell(ws, "A1", "Datos crudos (últimos 12 datos por serie)", bold=True)
+    # Encabezados
+    ws.cell(row=3, column=1, value="Serie").font = Font(bold=True)
+    ws.cell(row=3, column=2, value="Fecha").font = Font(bold=True)
+    ws.cell(row=3, column=3, value="Valor").font = Font(bold=True)
+
+    mapping = [
+        ("USD/MXN (FIX)",          raw_data.get("USD_LAST12", [])),
+        ("TIIE 28d (%)",           raw_data.get("TIIE_LAST12", [])),
+        ("Fed Funds (%)",          raw_data.get("FEDFUNDS_LAST12", [])),
+        ("Inflación EUA YoY (%)",  raw_data.get("US_CPI_YOY_LAST12", [])),
+    ]
+    r = 4
+    for serie_nombre, serie_vals in mapping:
+        for (fecha, valor) in serie_vals:
+            ws.cell(row=r, column=1, value=serie_nombre)
+            ws.cell(row=r, column=2, value=fecha)   # Deja la fecha como texto; Power BI la parsea fácil
+            ws.cell(row=r, column=3, value=valor)
+            r += 1
+
+    autosize(ws, 1, 6)
+
+# -------------------------
+# Construcción del Excel completo
+# -------------------------
+def crear_excel(datos: dict, graficos_data: dict | None = None, raw_data: dict | None = None) -> bytes:
     wb = Workbook()
     ws = wb.active
     ws.title = "Indicadores"
@@ -359,7 +420,6 @@ def crear_excel(datos: dict, graficos_data: dict | None = None) -> bytes:
     set_cell(ws, "A1", "Actualización de Indicadores", bold=True)
     set_cell(ws, "A2", f"Generado: {now_ts()} (CDMX)")
 
-    # Tabla consolidada
     rows = [
         ("Indicador", "Fecha", "Valor", "Unidad / Nota"),
         ("USD/MXN",           datos["fx"]["USD"][0],              datos["fx"]["USD"][1],              ""),
@@ -421,16 +481,91 @@ def crear_excel(datos: dict, graficos_data: dict | None = None) -> bytes:
 
         autosize(ws3, 1, 12)
 
+    # Hoja "Datos crudos"
+    if raw_data:
+        add_raw_data_sheet(wb, raw_data)
+
     bio = io.BytesIO()
     wb.save(bio)
     return bio.getvalue()
+
+# =========================
+#  Sidebar "Semáforos" de fuentes
+# =========================
+def _probe(fn, ok_pred, name: str):
+    t0 = time.perf_counter()
+    status = "err"
+    msg = ""
+    try:
+        res = fn()
+        status = ok_pred(res)
+        msg = "OK" if status == "ok" else ("Parcial" if status == "warn" else "Sin datos")
+    except Exception as e:
+        status = "err"
+        msg = f"Excepción: {type(e).__name__}"
+    ms = int((time.perf_counter() - t0) * 1000)
+    return status, msg, ms
+
+def _render_sidebar_status():
+    st.sidebar.header("🔎 Estado de fuentes")
+    st.sidebar.caption(f"Última verificación: {now_ts()}")
+
+    # Banxico
+    def _banxico_fn():
+        return sie_latest(SIE_SERIES["USD_FIX"])
+    def _banxico_pred(res):
+        f, v = res if isinstance(res, tuple) else (None, None)
+        if f and (v is not None):
+            return "ok"
+        return "err"
+    b_status, b_msg, b_ms = _probe(_banxico_fn, _banxico_pred, "Banxico")
+
+    # INEGI
+    def _inegi_fn():
+        return get_uma(INEGI_TOKEN)
+    def _inegi_pred(res):
+        if not isinstance(res, dict):
+            return "err"
+        if res.get("diaria") is None:
+            return "warn"  # tenemos fecha pero sin valor -> parcial
+        return "ok"
+    i_status, i_msg, i_ms = _probe(_inegi_fn, _inegi_pred, "INEGI")
+
+    # FRED (opcional)
+    if not FRED_TOKEN.strip():
+        f_status, f_msg, f_ms = ("warn", "Sin token (usando fallback)", 0)
+    else:
+        def _fred_fn():
+            return get_us_from_fred()
+        def _fred_pred(res):
+            try:
+                fed = res.get("FEDFUNDS", (None, None))[1]
+                cpi = res.get("US_CPI_YoY", (None, None))[1]
+                if fed is not None and cpi is not None:
+                    return "ok"
+                return "warn"
+            except:
+                return "err"
+        f_status, f_msg, f_ms = _probe(_fred_fn, _fred_pred, "FRED")
+
+    def badge(status, label, msg, ms):
+        dot = "🟢" if status == "ok" else ("🟡" if status == "warn" else "🔴")
+        st.sidebar.write(f"{dot} **{label}** — {msg} · {ms} ms")
+
+    badge(b_status, "Banxico (SIE)", b_msg, b_ms)
+    badge(i_status, "INEGI (UMA)", i_msg, i_ms)
+    badge(f_status, "FRED (USA)", f_msg, f_ms)
+
+    st.sidebar.divider()
+    if st.sidebar.button("Revisar fuentes ahora"):
+        st.rerun()
 
 # =========================
 #  STREAMLIT UI
 # =========================
 st.set_page_config(page_title="Indicadores Económicos", page_icon="📈", layout="centered")
 st.title("📈 Actualización de Indicadores (Automática)")
-st.caption("Genera un Excel nuevo con datos de Banxico, INEGI y FRED. Incluye hoja de Gráficos. No requiere archivo base.")
+st.caption("Genera un Excel nuevo con datos de Banxico, INEGI y (opcional) FRED. Incluye hojas de Gráficos y Datos crudos. No requiere archivo base.")
 
 with st.expander("Opciones (activa/desactiva)"):
     do_fx = st.toggle("Tipos de cambio (USD, EUR, JPY)", value=True)
@@ -440,8 +575,13 @@ with st.expander("Opciones (activa/desactiva)"):
     do_mx_infl = st.toggle("Inflación México (YoY)", value=True)
     do_us = st.toggle("EUA: Fed Funds / Inflación YoY (FRED)", value=True)
     do_charts = st.toggle("Incluir hoja de Gráficos (últimos 12 datos)", value=True)
+    do_raw = st.toggle("Exportar hoja 'Datos crudos' (últimos 12 datos)", value=True)
+
+_check_tokens()
+_render_sidebar_status()
 
 if st.button("Generar Excel nuevo"):
+    # Últimos datos (tabla principal)
     fx = get_fx_from_sie() if do_fx else {"USD": (None, None), "EUR": (None, None), "JPY": (None, None)}
     tiie_cetes = get_tiie_cetes_from_sie() if do_tiie else {"TIIE_28": (None, None), "CETES_28": (None, None)}
     udis = get_udis_from_sie() if do_udis else (None, None)
@@ -451,31 +591,35 @@ if st.button("Generar Excel nuevo"):
 
     datos = {"fx": fx, "tiie_cetes": tiie_cetes, "udis": udis, "uma": uma, "infl_mx": infl_mx, "us": us}
 
-    # Históricos para gráficos
+    # Históricos (para gráficos y/o datos crudos)
     graficos_data = None
-    if do_charts:
+    raw_data = None
+    if do_charts or do_raw:
         try:
             usd_last12 = sie_last_n(SIE_SERIES["USD_FIX"], n=12) if do_fx else []
             tiie_last12 = sie_last_n(SIE_SERIES["TIIE_28"], n=12) if do_tiie else []
             fed_last12 = fred_last_n("FEDFUNDS", n=12) if do_us else []
             cpiyoy_last12 = fred_cpi_yoy_series(n=12) if do_us else []
-            # Fallbacks suaves si alguna lista vino vacía
+            # Fallbacks suaves para no dejar hojas vacías
             if not usd_last12:     usd_last12 = [(str(today_cdmx()), 18.5)]
             if not tiie_last12:    tiie_last12 = [(str(today_cdmx()), 11.3)]
             if not fed_last12:     fed_last12 = [(str(today_cdmx()), 5.5)]
             if not cpiyoy_last12:  cpiyoy_last12 = [(str(today_cdmx()), 3.2)]
+
             graficos_data = {
                 "USD_LAST12": usd_last12,
                 "TIIE_LAST12": tiie_last12,
                 "FEDFUNDS_LAST12": fed_last12,
                 "US_CPI_YOY_LAST12": cpiyoy_last12,
             }
+            raw_data = graficos_data if do_raw else None
         except Exception as e:
-            st.warning(f"No se pudieron preparar todas las series de gráficos: {e}")
+            st.warning(f"No se pudieron preparar series históricas: {e}")
             graficos_data = None
+            raw_data = None
 
     try:
-        xlsx = crear_excel(datos, graficos_data=graficos_data)
+        xlsx = crear_excel(datos, graficos_data=graficos_data if do_charts else None, raw_data=raw_data)
         st.success("¡Listo! Archivo generado correctamente.")
         st.download_button(
             "Descargar Excel de Indicadores",
@@ -487,6 +631,6 @@ if st.button("Generar Excel nuevo"):
         st.error(f"Ocurrió un error al generar el Excel: {e}")
 
 st.info(
-    "Sugerencia: si haces público el repo, mueve BANXICO_TOKEN / INEGI_TOKEN / FRED_TOKEN a `st.secrets`.\n"
-    "Si conoces el ID SIE exacto de Inflación MX YoY, colócalo en `SIE_SERIES['MX_INFL_YOY']`."
+    "Si haces público el repo, mueve BANXICO_TOKEN / INEGI_TOKEN / FRED_TOKEN a `st.secrets`.\n"
+    "Si conoces el ID SIE de Inflación MX YoY, colócalo en `SIE_SERIES['MX_INFL_YOY']`."
 )
