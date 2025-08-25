@@ -7,13 +7,7 @@ Original file is located at
     https://colab.research.google.com/drive/18xSjlYum0k2ndcM1f52KaFCunTC81E2U
 """
 
-# app.py
-# ──────────────────────────────────────────────────────────────────────────────
-# Indicadores (6 puntos) + Noticias + (opc) Gráficos y Datos crudos
-# Exportación con XlsxWriter y charts robustos. Fechas reales en B2..G2.
-# CETES conectados, UMA robusto + fallback manual.
-# Branding: logo favicon + encabezado sticky; menú y footer ocultos.
-# ──────────────────────────────────────────────────────────────────────────────
+
 
 import io
 import re
@@ -79,23 +73,20 @@ def logo_base64(max_height_px=40):
     except Exception:
         return None
 
-# =========================
-#  TOKENS
-# =========================
 BANXICO_TOKEN = "677aaedf11d11712aa2ccf73da4d77b6b785474eaeb2e092f6bad31b29de6609"
 INEGI_TOKEN   = "0146a9ed-b70f-4ea2-8781-744b900c19d1"
 FRED_TOKEN    = ""  # opcional para gráficos
 
 TZ_MX = pytz.timezone("America/Mexico_City")
 
-# ── Page config (debe ir antes de cualquier otro st.*)
+
 st.set_page_config(
     page_title="Indicadores Económicos",
     page_icon=logo_image_or_emoji(),
     layout="centered"
 )
 
-# CSS: ocultar menú y footer + estilos del header sticky
+
 st.markdown("""
 <style>
 #MainMenu {visibility: hidden;}      /* oculta hamburguesa */
@@ -117,7 +108,7 @@ footer {visibility: hidden;}         /* oculta footer */
 </style>
 """, unsafe_allow_html=True)
 
-# Encabezado sticky con logo
+
 _logo_b64 = logo_base64()
 if _logo_b64:
     st.markdown(
@@ -126,36 +117,34 @@ if _logo_b64:
           <img class="logo" src="data:image/png;base64,{_logo_b64}" alt="logo"/>
           <div class="titles">
             <h1>Indicadores (últimos 6 días) + Noticias</h1>
-            <p>Excel con tu layout (B2..G2 fechas reales), noticias y gráficos con XlsxWriter.</p>
+            <p>Indicadores Económicos.</p>
           </div>
         </div>
         """,
         unsafe_allow_html=True
     )
 else:
-    # Fallback normal si no hay logo
+    
     st.title("📈 Indicadores (últimos 6 días) + Noticias")
-    st.caption("Excel con tu layout (B2..G2 fechas reales), noticias y gráficos con XlsxWriter.")
+    st.caption("Indicadores Económicos.")
 
-# Logo también en el sidebar (si existe)
+
 if _logo_b64:
     st.sidebar.image(f"data:image/png;base64,{_logo_b64}", use_column_width=True)
 
-# =========================
-#  SERIES SIE
-# =========================
+
 SIE_SERIES = {
     "USD_FIX":   "SF43718",
     "EUR_FIX":   "SF46410",
     "JPY_FIX":   "SF46406",
 
-    # TIIE (conecta los que te interesen cuando tengas los IDs)
+    
     "TIIE_OBJ":  "",
     "TIIE_28":   "SF60653",
     "TIIE_91":   "",
     "TIIE_182":  "",
 
-    # CETES (subasta semanal)
+    
     "CETES_28":  "SF43936",
     "CETES_91":  "SF43939",
     "CETES_182": "SF43942",
@@ -164,9 +153,7 @@ SIE_SERIES = {
     "UDIS":      "SP68257",
 }
 
-# =========================
-#  Utilidades generales
-# =========================
+
 def http_session(timeout=15):
     s = requests.Session()
     retries = Retry(total=3, backoff_factor=0.8,
@@ -216,9 +203,7 @@ def _check_tokens():
         st.error("Faltan tokens: " + ", ".join(missing))
         st.stop()
 
-# =========================
-#  Banxico SIE
-# =========================
+
 @st.cache_data(ttl=60*30)
 def sie_opportuno(series_id):
     url = f"https://www.banxico.org.mx/SieAPIRest/service/v1/series/{series_id}/datos/oportuno"
@@ -277,9 +262,7 @@ def rolling_movex_for_last6(window:int=20):
         out.append(sum(sub)/len(sub) if sub else None)
     return out
 
-# =========================
-#  INEGI UMA – robusto (con fallback y diagnóstico)
-# =========================
+
 @st.cache_data(ttl=60*60)
 def get_uma(inegi_token: str):
     """
@@ -290,7 +273,7 @@ def get_uma(inegi_token: str):
     ids = "620706,620707,620708"
     urls = [
         f"{base}/{ids}/es/00/true/BISE/2.0/{inegi_token}?type=json",
-        f"{base}/{ids}/es/00/true/BIE/2.0/{inegi_token}?type=json",  # fallback
+        f"{base}/{ids}/es/00/true/BIE/2.0/{inegi_token}?type=json",  
     ]
 
     def _num(x):
@@ -339,9 +322,7 @@ def get_uma(inegi_token: str):
     return {"fecha": str(today_cdmx()), "diaria": None, "mensual": None, "anual": None,
             "_status": f"Fallo ({last_err})", "_source": urls[-1]}
 
-# =========================
-#  FRED (opcional, para gráficos)
-# =========================
+
 @st.cache_data(ttl=60*30)
 def fred_observations(series_id: str, start_date: str = None, end_date: str = None):
     base = "https://api.stlouisfed.org/fred/series/observations"
@@ -384,9 +365,7 @@ def fred_cpi_yoy_series(n: int = 12):
     except:
         return []
 
-# =========================
-#  Noticias (RSS)
-# =========================
+
 RSS_FEEDS = [
     "https://feeds.reuters.com/reuters/businessNews",
     "https://feeds.reuters.com/reuters/marketsNews",
@@ -424,9 +403,7 @@ def fetch_financial_news(limit_per_feed=8, total_limit=20):
     items.sort(key=lambda x: x["dt_str"], reverse=True)
     return items[:total_limit]
 
-# =========================
-#  Sidebar: estado, diagnóstico y limpieza de caché
-# =========================
+
 def _probe(fn, ok_pred):
     t0 = time.perf_counter()
     try:
@@ -471,9 +448,7 @@ def _render_sidebar_status():
             st.write("Estado:", res.get("_status"), "— Fuente:", res.get("_source"))
             st.write("Diaria:", res.get("diaria"), "Mensual:", res.get("mensual"), "Anual:", res.get("anual"))
 
-# =========================
-#  STREAMLIT UI
-# =========================
+
 with st.expander("Opciones"):
     movex_win = st.number_input("Ventana MOVEX (días hábiles)", min_value=5, max_value=60, value=20, step=1)
     margen_pct = st.number_input("Margen Compra/Venta sobre FIX (% por lado)", min_value=0.0, max_value=5.0, value=0.5, step=0.1)
@@ -484,9 +459,7 @@ with st.expander("Opciones"):
 _check_tokens()
 _render_sidebar_status()
 
-# =========================
-#  Generar Excel (XlsxWriter)
-# =========================
+
 if st.button("Generar Excel"):
     def pad6(lst): return ([None]*(6-len(lst)))+lst if len(lst)<6 else lst
 
@@ -517,7 +490,7 @@ if st.button("Generar Excel"):
     tiie91_6  = none6 if not SIE_SERIES["TIIE_91"]  else pad6([v for _, v in sie_last_n(SIE_SERIES["TIIE_91"],  n=6)])
     tiie182_6 = none6 if not SIE_SERIES["TIIE_182"] else pad6([v for _, v in sie_last_n(SIE_SERIES["TIIE_182"], n=6)])
 
-    # --- UMA con fallback manual
+    
     uma = get_uma(INEGI_TOKEN)
     if uma.get("diaria") is None and uma_manual > 0:
         uma["diaria"]  = uma_manual
@@ -525,20 +498,20 @@ if st.button("Generar Excel"):
         uma["anual"]   = uma["mensual"] * 12
         uma["_status"] = "MANUAL"
 
-    # --- Noticias
+    
     news = fetch_financial_news(limit_per_feed=8, total_limit=20)
 
-    # ========= Crear archivo con XlsxWriter =========
+    
     bio = io.BytesIO()
     wb = xlsxwriter.Workbook(bio, {'in_memory': True})
 
-    # Formatos
+    
     fmt_bold = wb.add_format({'bold': True})
     fmt_wrap = wb.add_format({'text_wrap': True, 'valign': 'top'})
     fmt_date = wb.add_format({'num_format': 'yyyy-mm-dd'})
     fmt_head = wb.add_format({'bold': True, 'bg_color': '#F2F2F2'})
 
-    # -------- Hoja: Indicadores --------
+    
     ws = wb.add_worksheet("Indicadores")
     ws.write("A2", "Fecha:", fmt_bold)
     for idx, s in enumerate(fechas6_str):
@@ -549,7 +522,7 @@ if st.button("Generar Excel"):
         (4, "TIPOS DE CAMBIO:", True),
         (6, "DÓLAR AMERICANO.", True),
         (7, "Dólar/Pesos:", False),
-        (8, "MOVEX:", False),
+        (8, "MONEX:", False),
         (9, "Compra:", False),
         (10,"Venta:", False),
 
@@ -622,10 +595,10 @@ if st.button("Generar Excel"):
     write_row_values(41, uma_mensual6)
     write_row_values(42, uma_anual6)
 
-    ws.set_column(0, 0, 26)   # Col A
-    ws.set_column(1, 6, 14)   # B..G
+    ws.set_column(0, 0, 26)   
+    ws.set_column(1, 6, 14)   
 
-    # -------- Hoja: Noticias --------
+    
     ws2 = wb.add_worksheet("Noticias")
     ws2.write(0, 0, "Resumen de noticias financieras", fmt_bold)
     ws2.write(1, 0, f"Generado: {now_ts()} (CDMX)")
@@ -645,14 +618,14 @@ if st.button("Generar Excel"):
             rnews += 1
     ws2.set_column(0, 0, 18); ws2.set_column(1, 1, 14); ws2.set_column(2, 2, 60); ws2.set_column(3, 3, 90); ws2.set_column(4, 4, 40)
 
-    # -------- (opc) Hoja: Gráficos + Datos crudos --------
+    
     def add_table_and_chart(workbook, sheet, sheet_name, start_row, start_col, title, series_pairs, chart_anchor):
         """Escribe tabla 'Fecha, Valor' y grafica si hay >=2 puntos."""
         pairs = [(parse_any_date(f), v) for (f, v) in series_pairs if v is not None]
         pairs = [(p[0], p[1]) for p in pairs if p[0] is not None]
         if len(pairs) < 2:
-            return start_row  # nada que graficar
-        # Tabla
+            return start_row  
+        
         sheet.write(start_row,   start_col, title, fmt_bold)
         sheet.write(start_row+1, start_col,   "Fecha", fmt_head)
         sheet.write(start_row+1, start_col+1, "Valor", fmt_head)
@@ -661,7 +634,7 @@ if st.button("Generar Excel"):
             sheet.write(r, start_col, fmt_date_str(dt), fmt_date)
             sheet.write_number(r, start_col+1, val)
             r += 1
-        # Rangos
+        
         first = start_row + 2; last = r - 1
         chart = workbook.add_chart({'type': 'line'})
         chart.set_title({'name': title})
@@ -673,12 +646,12 @@ if st.button("Generar Excel"):
         chart.set_x_axis({'name': 'Fecha'})
         chart.set_y_axis({'name': 'Valor'})
         sheet.insert_chart(chart_anchor, chart)
-        return r + 2  # próxima sección
+        return r + 2  
 
     if do_charts or do_raw:
         ws3 = wb.add_worksheet("Gráficos")
         next_row = 0
-        # preparar series largas (12 puntos)
+        
         usd_last12  = sie_last_n(SIE_SERIES["USD_FIX"], n=12)
         tiie_last12 = sie_last_n(SIE_SERIES["TIIE_28"], n=12)
         fed_last12  = fred_last_n("FEDFUNDS", n=12)
@@ -717,9 +690,9 @@ if st.button("Generar Excel"):
             if cpi_last12: rraw = dump_raw(ws4, rraw, "Inflación EUA YoY (%)", cpi_last12)
             ws4.set_column(0, 0, 22); ws4.set_column(1, 1, 12); ws4.set_column(2, 2, 12)
 
-    # Cerrar y servir
+    
     wb.close()
-    st.success("¡Listo! Archivo generado con branding (logo sticky) y gráficos.")
+    st.success("¡Listo! Archivo generado con indicadores.")
     st.download_button(
         "Descargar Excel",
         data=bio.getvalue(),
