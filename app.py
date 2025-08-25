@@ -17,7 +17,7 @@ from requests.adapters import HTTPAdapter, Retry
 import streamlit as st
 import xlsxwriter  # Motor para Excel y gráficos
 
-# Logo (favicon / encabezado / sidebar)
+
 try:
     from PIL import Image
 except Exception:
@@ -123,7 +123,7 @@ else:
 
 
 if _logo_b64:
-    st.sidebar.image(f"data:image/png;base64,{_logo_b64}", use_column_width=True)
+    st.sidebar.image(f"data:image/png;base64,{_logo_b64}", use_container_width=True)
 
 
 SIE_SERIES = {
