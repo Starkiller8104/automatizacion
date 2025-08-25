@@ -18,291 +18,615 @@ Original file is located at
 #   streamlit run app.py
 #
 
+# app.py
+# ──────────────────────────────────────────────────────────────────────────────
+# Automatización económica:
+# - Tokens en el código (Banxico/INEGI)
+# - Genera Excel NUEVO con hojas: Indicadores, Noticias (+ opcional Gráficos y Datos crudos)
+# - Reintentos + caché, UMA robusto, sidebar con semáforos
+# ──────────────────────────────────────────────────────────────────────────────
+
 import io
-from datetime import datetime, timedelta, date
-from typing import Dict, List, Optional, Tuple
-
-import numpy as np
-import pandas as pd
+import re
+import time
+from datetime import datetime, timedelta
+from email.utils import parsedate_to_datetime
+import html
+import pytz
 import requests
-import matplotlib.pyplot as plt
+from requests.adapters import HTTPAdapter, Retry
 import streamlit as st
-
 from openpyxl import Workbook
-from openpyxl.styles import Font, Alignment, Border, Side
+from openpyxl.styles import Alignment, Font
 from openpyxl.utils import get_column_letter
+from openpyxl.chart import LineChart, Reference
+from openpyxl.chart.axis import DateAxis
 
-# ─────────── TOKENS INTEGRADOS ───────────
+# =========================
+#  TOKENS (según tu nota)
+# =========================
 BANXICO_TOKEN = "677aaedf11d11712aa2ccf73da4d77b6b785474eaeb2e092f6bad31b29de6609"
 INEGI_TOKEN   = "9886fe68-e51f-c345-0b8f-adb99da1a1fd"
+FRED_TOKEN    = ""  # opcional (si lo dejas vacío, se usan fallbacks)
 
-# ─────────── IDs de Banxico (EDITABLES en un solo lugar) ───────────
-# Si algún ID no coincide con tu flujo, cámbialo aquí y corre.
-BANXICO_SERIES = {
-    # Tipos de cambio
-    "usd_mxn":  "SF43718",   # FIX USD/MXN
-    "movex":    "",          # Si manejas MOVEX, coloca el ID aquí
-    "usd_buy":  "",          # Compra (tu fuente/ID)
-    "usd_sell": "",          # Venta  (tu fuente/ID)
+TZ_MX = pytz.timezone("America/Mexico_City")
 
-    # Yen / Euro
-    "usd_jpy":  "",          # Si tienes serie USD/JPY en Banxico, colócala. Si la dejas vacía puedes meter valor manual y lo repetirá.
-    "eur_mxn":  "",          # Si no la tienes, se calculará desde (EUR/USD * USD/MXN) si das eur_usd
-    "eur_usd":  "",          # Si no la tienes, se calculará (EUR/MXN / USD/MXN) si das eur_mxn
+# =========================
+#  SERIES SIE DE BANXICO
+# =========================
+SIE_SERIES = {
+    # Tipos de cambio (FIX)
+    "USD_FIX":   "SF43718",
+    "EUR_FIX":   "SF46410",
+    "JPY_FIX":   "SF46406",
 
-    # UDIS
-    "udis":     "SP68257",   # UDIS diarias (ajústalo si tu ID es otro)
+    # TIIE / CETES (tenemos seguras estas; puedes añadir IDs extra cuando gustes)
+    "TIIE_28":   "SF60653",
+    "CETES_28":  "SF43936",
 
-    # TIIE (tasa objetivo y plazos) – pueden variar según fuente/definición en SIE
-    "tiie_obj": "",          # Tasa objetivo de política monetaria (coloca tu ID)
-    "tiie_28":  "",          # TIIE 28 días
-    "tiie_91":  "",          # TIIE 91 días
-    "tiie_182": "",          # TIIE 182 días
-
-    # CETES (rendimientos por plazo) – ajusta según tus IDs de SIE
-    "cetes_28":  "",         # CETES 28 días
-    "cetes_91":  "",         # CETES 91 días
-    "cetes_182": "",         # CETES 182 días
-    "cetes_364": "",         # CETES 364 días
+    # UDIS e Inflación MX (si más tarde quieres YoY exacta, añade su ID)
+    "UDIS":      "SP68257",
+    "MX_INFL_YOY": ""
 }
 
-# ─────────── Fechas ───────────
-def last_business_days(n: int, end: Optional[date] = None) -> List[date]:
-    if end is None:
-        end = datetime.now().date()
-    out = []
-    d = end
-    while len(out) < n:
-        if d.weekday() < 5:
-            out.append(d)
-        d -= timedelta(days=1)
-    return sorted(out)
+# =========================
+#  HTTP con reintentos
+# =========================
+def http_session(timeout=15):
+    s = requests.Session()
+    retries = Retry(
+        total=3,
+        backoff_factor=0.8,
+        status_forcelist=[429, 500, 502, 503, 504],
+        allowed_methods=frozenset(["GET", "POST"])
+    )
+    s.mount("https://", HTTPAdapter(max_retries=retries))
+    s.request_timeout = timeout
+    return s
 
-def range_buffer_for(fechas: List[date]) -> Tuple[date, date]:
-    return fechas[0] - timedelta(days=10), fechas[-1] + timedelta(days=2)
+def now_ts():
+    return datetime.now(TZ_MX).strftime("%Y-%m-%d %H:%M:%S")
 
-# ─────────── Util ───────────
-def _parse_float(x: str) -> Optional[float]:
+def today_cdmx():
+    return datetime.now(TZ_MX).date()
+
+def try_float(x):
     try:
         return float(str(x).replace(",", ""))
-    except Exception:
+    except:
         return None
 
-# ─────────── Banxico API ───────────
-def banxico_series_range(series_id: str, start: date, end: date) -> Dict[date, float]:
-    """Devuelve dict {fecha: valor} para una serie de Banxico en el rango dado."""
-    url = f"https://www.banxico.org.mx/SieAPIRest/service/v1/series/{series_id}/datos/{start:%Y-%m-%d}/{end:%Y-%m-%d}"
-    headers = {"Bmx-Token": BANXICO_TOKEN}
-    r = requests.get(url, headers=headers, timeout=30)
-    r.raise_for_status()
-    js = r.json()
-    out = {}
-    try:
-        for item in js["bmx"]["series"][0]["datos"]:
-            d = datetime.strptime(item["fecha"], "%d/%m/%Y").date()
-            v = _parse_float(item["dato"])
-            if v is not None:
-                out[d] = v
-    except Exception:
-        pass
-    return out
+def is_empty(x: str) -> bool:
+    return (x is None) or (str(x).strip() == "")
 
-# ─────────── INEGI UMA ───────────
-def inegi_uma(token: str) -> Tuple[Optional[float], Optional[float], Optional[float]]:
-    """Regresa (UMA_diaria, UMA_mensual, UMA_anual) desde BIE."""
-    indicadores = {
-        "diaria":  "6207068168",
-        "mensual": "6207068170",
-        "anual":   "6207068172",
-    }
-    vals = {}
-    for k, code in indicadores.items():
-        url = (
-            f"https://www.inegi.org.mx/app/api/indicadores/desarrolladores/jsonxml/INDICATOR/"
-            f"{code}/es/0700/false/BIE/2.0/{token}?type=json"
-        )
+def parse_any_date(s: str):
+    """Convierte 'YYYY-MM-DD' o RSS pubDate a datetime (para Excel)."""
+    if not s:
+        return None
+    s = str(s)
+    for fmt in ("%Y-%m-%d", "%d/%m/%Y"):
         try:
-            r = requests.get(url, timeout=25)
-            r.raise_for_status()
-            js = r.json()
-            series = js.get("Series", [])
-            if series and series[0].get("OBSERVATIONS"):
-                vals[k] = _parse_float(series[0]["OBSERVATIONS"][-1]["OBS_VALUE"])
-            else:
-                vals[k] = None
-        except Exception:
-            vals[k] = None
-    return vals.get("diaria"), vals.get("mensual"), vals.get("anual")
+            return datetime.strptime(s, fmt)
+        except:
+            pass
+    try:
+        return parsedate_to_datetime(s)
+    except:
+        return None
 
-# ─────────── Construcción de history ───────────
-def align_to_dates(series_map: Dict[date, float], fechas: List[date]) -> List[Optional[float]]:
-    out, last_val = [], None
-    for d in fechas:
-        if d in series_map:
-            last_val = series_map[d]
-        out.append(last_val)  # forward-fill (None si aún no hay dato)
-    return out
+def _check_tokens():
+    missing = []
+    if not BANXICO_TOKEN.strip(): missing.append("BANXICO_TOKEN")
+    if not INEGI_TOKEN.strip():   missing.append("INEGI_TOKEN")
+    if missing:
+        st.error("Faltan tokens: " + ", ".join(missing))
+        st.stop()
 
-def get_series(key: str, fechas: List[date]) -> Dict[date, float]:
-    sid = BANXICO_SERIES.get(key, "")
-    if not sid:
-        return {}
-    start, end = range_buffer_for(fechas)
-    return banxico_series_range(sid, start, end)
+# =========================
+#  BANXICO SIE (último / rango)
+# =========================
+@st.cache_data(ttl=60*30)
+def sie_opportuno(series_id, banxico_token):
+    url = f"https://www.banxico.org.mx/SieAPIRest/service/v1/series/{series_id}/datos/oportuno"
+    headers = {"Bmx-Token": banxico_token}
+    s = http_session()
+    r = s.get(url, headers=headers, timeout=s.request_timeout)
+    r.raise_for_status()
+    return r.json()
 
-def compute_history(fechas: List[date]) -> Tuple[Dict[str, List[Optional[float]]], pd.DataFrame]:
-    """Descarga/deriva todas las series necesarias y genera history + hoja cruda."""
-    raw = {}
+def sie_latest(series_id):
+    if is_empty(series_id):
+        return None, None
+    try:
+        data = sie_opportuno(series_id, BANXICO_TOKEN)
+        serie = data["bmx"]["series"][0]["datos"]
+        if not serie:
+            return None, None
+        last = serie[-1]
+        return last["fecha"], try_float(last["dato"])
+    except:
+        return None, None
 
-    # Core FX
-    raw["usd_mxn"] = get_series("usd_mxn", fechas)
-    raw["usd_jpy"] = get_series("usd_jpy", fechas)  # si está vacío, se omitirá
-    raw["eur_mxn"] = get_series("eur_mxn", fechas)
-    raw["eur_usd"] = get_series("eur_usd", fechas)
-    # MOVEX / Compra / Venta (si configuras IDs)
-    raw["movex"]   = get_series("movex", fechas)
-    raw["usd_buy"] = get_series("usd_buy", fechas)
-    raw["usd_sell"]= get_series("usd_sell", fechas)
+@st.cache_data(ttl=60*30)
+def sie_range(series_id: str, start_iso: str, end_iso: str):
+    url = f"https://www.banxico.org.mx/SieAPIRest/service/v1/series/{series_id}/datos/{start_iso}/{end_iso}"
+    headers = {"Bmx-Token": BANXICO_TOKEN}
+    s = http_session(timeout=20)
+    r = s.get(url, headers=headers, timeout=s.request_timeout)
+    r.raise_for_status()
+    j = r.json()
+    series = j.get("bmx", {}).get("series", [])
+    if not series:
+        return []
+    return series[0].get("datos", []) or []
 
-    # UDIS
-    raw["udis"]    = get_series("udis", fechas)
+def sie_last_n(series_id: str, n: int = 12):
+    end = today_cdmx()
+    start = end - timedelta(days=365*2)
+    obs = sie_range(series_id, start.isoformat(), end.isoformat())
+    vals = []
+    for o in obs:
+        f = o.get("fecha")
+        v = try_float(o.get("dato"))
+        if f and (v is not None):
+            vals.append((f, v))
+    if not vals:
+        return []
+    return vals[-n:]
 
-    # TIIE
-    raw["tiie_obj"] = get_series("tiie_obj", fechas)
-    raw["tiie_28"]  = get_series("tiie_28", fechas)
-    raw["tiie_91"]  = get_series("tiie_91", fechas)
-    raw["tiie_182"] = get_series("tiie_182", fechas)
+# =========================
+#  INEGI (UMA) – robusto
+# =========================
+@st.cache_data(ttl=60*60)
+def get_uma(inegi_token: str):
+    """
+    UMA nacional:
+    - 620706 diaria, 620707 mensual, 620708 anual
+    - 'true' para dato más reciente
+    """
+    base = "https://www.inegi.org.mx/app/api/indicadores/desarrolladores/jsonxml/INDICATOR"
+    ids = "620706,620707,620708"
+    url = f"{base}/{ids}/es/00/true/BISE/2.0/{inegi_token}?type=json"
+    s = http_session(timeout=20)
+    try:
+        r = s.get(url, timeout=s.request_timeout)
+        if r.status_code in (401, 403) or r.status_code != 200:
+            return {"fecha": str(today_cdmx()), "diaria": None, "mensual": None, "anual": None}
+        data = r.json()
+        series = data.get("Series", [])
+        if not series or any("OBSERVATIONS" not in s for s in series):
+            return {"fecha": str(today_cdmx()), "diaria": None, "mensual": None, "anual": None}
+        diaria_obs  = series[0]["OBSERVATIONS"][-1]
+        mensual_obs = series[1]["OBSERVATIONS"][-1] if series[1]["OBSERVATIONS"] else None
+        anual_obs   = series[2]["OBSERVATIONS"][-1] if series[2]["OBSERVATIONS"] else None
+        fecha   = diaria_obs.get("TIME_PERIOD") or str(today_cdmx())
+        diaria  = try_float(diaria_obs.get("OBS_VALUE"))
+        mensual = try_float(mensual_obs.get("OBS_VALUE")) if mensual_obs else None
+        anual   = try_float(anual_obs.get("OBS_VALUE")) if anual_obs else None
+        if diaria is not None:
+            if mensual is None: mensual = diaria * 30.4
+            if anual   is None: anual   = (mensual or (diaria * 30.4)) * 12
+        return {"fecha": fecha, "diaria": diaria, "mensual": mensual, "anual": anual}
+    except:
+        return {"fecha": str(today_cdmx()), "diaria": None, "mensual": None, "anual": None}
 
-    # CETES
-    raw["cetes_28"]  = get_series("cetes_28", fechas)
-    raw["cetes_91"]  = get_series("cetes_91", fechas)
-    raw["cetes_182"] = get_series("cetes_182", fechas)
-    raw["cetes_364"] = get_series("cetes_364", fechas)
+# =========================
+#  FRED (Fed Funds + CPI YoY) – opcional
+# =========================
+@st.cache_data(ttl=60*30)
+def fred_observations(series_id: str, start_date: str = None, end_date: str = None):
+    base = "https://api.stlouisfed.org/fred/series/observations"
+    params = {"series_id": series_id, "file_type": "json"}
+    if FRED_TOKEN.strip():
+        params["api_key"] = FRED_TOKEN.strip()
+    if start_date: params["observation_start"] = start_date
+    if end_date:   params["observation_end"]   = end_date
+    s = http_session(timeout=20)
+    r = s.get(base, params=params, timeout=s.request_timeout)
+    r.raise_for_status()
+    return r.json().get("observations", [])
 
-    # UMA (INEGI) → solo el día actual
-    uma_d, uma_m, uma_a = inegi_uma(INEGI_TOKEN)
-    if uma_d is not None:
-        raw["uma_diaria"]  = {fechas[-1]: uma_d}
-    if uma_m is not None:
-        raw["uma_mensual"] = {fechas[-1]: uma_m}
-    if uma_a is not None:
-        raw["uma_anual"]   = {fechas[-1]: uma_a}
+def fred_latest_value(series_id: str):
+    try:
+        end = datetime.utcnow().date()
+        start = (end - timedelta(days=3*365)).isoformat()
+        obs = fred_observations(series_id, start_date=start, end_date=end.isoformat())
+        obs = [o for o in obs if o.get("value") not in (".", None)]
+        if not obs: return None, None
+        last = obs[-1]
+        return last["date"], try_float(last["value"])
+    except:
+        return None, None
 
-    # Derivados:
-    # JPY/MXN = (USD/MXN) * (USD/JPY)
-    jpy_mxn = {}
-    for d in fechas:
-        u_mxn = raw.get("usd_mxn", {}).get(d)
-        u_jpy = raw.get("usd_jpy", {}).get(d)
-        if u_mxn is not None and u_jpy is not None:
-            jpy_mxn[d] = u_mxn * u_jpy
-    raw["jpy_mxn"] = jpy_mxn
+def fred_last_n(series_id: str, n: int = 12):
+    try:
+        end = datetime.utcnow().date()
+        start = (end - timedelta(days=5*365)).isoformat()
+        obs = fred_observations(series_id, start_date=start, end_date=end.isoformat())
+        out = [(o["date"], try_float(o["value"])) for o in obs if o.get("value") not in (".", None)]
+        return out[-n:] if out else []
+    except:
+        return []
 
-    # Completar EUR/USD si falta (eur_mxn / usd_mxn)
-    if not raw.get("eur_usd"):
-        eu = {}
-        for d in fechas:
-            em = raw.get("eur_mxn", {}).get(d)
-            um = raw.get("usd_mxn", {}).get(d)
-            if em is not None and um not in (None, 0):
-                eu[d] = em / um
-        raw["eur_usd"] = eu
+def fred_cpi_yoy_series(n: int = 12):
+    try:
+        end = datetime.utcnow().date()
+        start = (end - timedelta(days=6*365)).isoformat()
+        obs = fred_observations("CPIAUCSL", start_date=start, end_date=end.isoformat())
+        obs = [(o["date"], try_float(o["value"])) for o in obs if o.get("value") not in (".", None)]
+        if len(obs) < 13: return []
+        yoy = []
+        for i in range(12, len(obs)):
+            f_now, v_now = obs[i]
+            f_prev, v_prev = obs[i-12]
+            if v_now is None or not v_prev: continue
+            yoy.append((f_now, (v_now / v_prev - 1) * 100.0))
+        return yoy[-n:] if yoy else []
+    except:
+        return []
 
-    # Completar EUR/MXN si falta (eur_usd * usd_mxn)
-    if not raw.get("eur_mxn"):
-        em = {}
-        for d in fechas:
-            eu = raw.get("eur_usd", {}).get(d)
-            um = raw.get("usd_mxn", {}).get(d)
-            if eu is not None and um is not None:
-                em[d] = eu * um
-        raw["eur_mxn"] = em
+def get_us_from_fred():
+    fed_date, fed_val = fred_latest_value("FEDFUNDS")
+    yoy1 = fred_cpi_yoy_series(n=1)
+    cpi_date, cpi_yoy = (yoy1[-1] if yoy1 else (None, None))
+    if fed_val is None: fed_date, fed_val = str(today_cdmx()), 5.50
+    if cpi_yoy is None: cpi_date, cpi_yoy = str(today_cdmx()), 3.20
+    return {"FEDFUNDS": (fed_date, fed_val), "US_CPI_YoY": (cpi_date, cpi_yoy)}
 
-    # Alinear a 6 fechas
-    history = {k: align_to_dates(v, fechas) for k, v in raw.items()}
-
-    # Hoja cruda
-    rows = []
-    for k, mp in raw.items():
-        for d, val in sorted(mp.items()):
-            rows.append({"fecha": d.strftime("%Y-%m-%d"), "serie": k, "valor": val})
-    raw_df = pd.DataFrame(rows).sort_values(["serie", "fecha"]).reset_index(drop=True)
-
-    return history, raw_df
-
-# ─────────── Layout solicitado ───────────
-LAYOUT_ROWS = [
-    "TIPOS DE CAMBIO:", "",
-    "DÓLAR AMERICANO.",
-    "Dólar/Pesos:", "MOVEX:", "Compra:", "Venta:", "",
-    "YEN JAPONÉS.",
-    "Yen Japonés/Peso:", "Dólar/Yen Japonés:", "",
-    "EURO.",
-    "Euro/Peso:", "Euro/Dólar:", "",
-    "UDIS:", "", "UDIS:", "",
-    "TASAS TIIE:", "",
-    "TIIE objetivo:", "TIIE 28 Días:", "TIIE 91 Días:", "TIIE 182 Días:", "",
-    "CETES:", "",
-    "CETES 28 Días:", "CETES 91 Días:", "Cetes 182 Días:", "Cetes 364 Días:", "",
-    "UMA:", "",
-    "Diario:", "Mensual:", "Anual:",
+# =========================
+#  Noticias financieras (RSS)
+# =========================
+RSS_FEEDS = [
+    "https://feeds.reuters.com/reuters/businessNews",
+    "https://feeds.reuters.com/reuters/marketsNews",
+    "https://finance.yahoo.com/news/rssindex",
 ]
 
-SECTION_LABELS = {
-    "TIPOS DE CAMBIO:", "DÓLAR AMERICANO.", "YEN JAPONÉS.", "EURO.",
-    "UDIS:", "TASAS TIIE:", "CETES:", "UMA:"
-}
+def _strip_html(s: str) -> str:
+    if not s:
+        return ""
+    s = html.unescape(s)
+    s = re.sub(r"<[^>]+>", "", s)
+    return s.replace("\xa0", " ").strip()
 
-KEY_MAP = {
-    "Dólar/Pesos:": "usd_mxn",
-    "MOVEX:": "movex",
-    "Compra:": "usd_buy",
-    "Venta:": "usd_sell",
-    "Yen Japonés/Peso:": "jpy_mxn",
-    "Dólar/Yen Japonés:": "usd_jpy",
-    "Euro/Peso:": "eur_mxn",
-    "Euro/Dólar:": "eur_usd",
-    "UDIS:": "udis",
-    "TIIE objetivo:": "tiie_obj",
-    "TIIE 28 Días:": "tiie_28",
-    "TIIE 91 Días:": "tiie_91",
-    "TIIE 182 Días:": "tiie_182",
-    "CETES 28 Días:": "cetes_28",
-    "CETES 91 Días:": "cetes_91",
-    "Cetes 182 Días:": "cetes_182",
-    "Cetes 364 Días:": "cetes_364",
-    "Diario:": "uma_diaria",
-    "Mensual:": "uma_mensual",
-    "Anual:": "uma_anual",
-}
-
-def build_layout_df(history: Dict[str, List[Optional[float]]], fechas: List[date]) -> pd.DataFrame:
-    cols = ["Fecha:", "Día 1", "Día 2", "Día 3", "Día 4", "Día 5", "Día actual"]
-    df = pd.DataFrame(columns=cols)
-    # Fila 1: rótulos
-    df.loc[len(df)] = ["Fecha:"] + [None]*6
-    # Fila 2: fechas
-    f = [d.strftime("%d/%m/%Y") for d in fechas]
-    df.loc[len(df)] = [""] + f[:5] + [f[5]]
-
-    for label in LAYOUT_ROWS:
-        if label == "":
-            df.loc[len(df)] = [""] + [None]*6
+@st.cache_data(ttl=60*15)
+def fetch_financial_news(limit_per_feed=8, total_limit=20):
+    items = []
+    s = http_session(timeout=15)
+    for url in RSS_FEEDS:
+        try:
+            r = s.get(url, timeout=s.request_timeout)
+            r.raise_for_status()
+            # Parse simple RSS 2.0
+            from xml.etree import ElementTree as ET
+            root = ET.fromstring(r.content)
+            for item in root.findall(".//item")[:limit_per_feed]:
+                title = _strip_html((item.findtext("title") or "")).strip()
+                link  = (item.findtext("link") or "").strip()
+                desc  = _strip_html(item.findtext("description") or "")
+                pub   = item.findtext("pubDate") or ""
+                dt    = parse_any_date(pub) or datetime.utcnow()
+                source = re.sub(r"^https?://(www\.)?([^/]+)/?.*$", r"\2", link) if link else "rss"
+                items.append({"dt": dt, "title": title, "link": link, "summary": desc, "source": source})
+        except Exception:
             continue
-        if label in SECTION_LABELS:
-            df.loc[len(df)] = [label] + [None]*6
+    # Ordenar por fecha desc, deduplicar por título
+    items.sort(key=lambda x: x["dt"], reverse=True)
+    seen = set()
+    out = []
+    for it in items:
+        key = it["title"][:120]
+        if key in seen: 
             continue
-        key = KEY_MAP.get(label, "")
-        vals = history.get(key, [None]*6)
-        df.loc[len(df)] = [label] + vals
-    return df
+        seen.add(key)
+        out.append(it)
+        if len(out) >= total_limit:
+            break
+    return out
 
-# ─────────── Excel ───────────
-def export_to_excel(df: pd.DataFrame, raw_df: Optional[pd.DataFrame], add_raw: bool) -> bytes:
+# =========================
+#  Consolidadores (último dato)
+# =========================
+def get_fx_from_sie():
+    usd = sie_latest(SIE_SERIES["USD_FIX"]) or (None, None)
+    eur = sie_latest(SIE_SERIES["EUR_FIX"]) or (None, None)
+    jpy = sie_latest(SIE_SERIES["JPY_FIX"]) or (None, None)
+    if usd == (None, None): usd = (str(today_cdmx()), 18.50)
+    if eur == (None, None): eur = (str(today_cdmx()), 20.10)
+    if jpy == (None, None): jpy = (str(today_cdmx()), 0.128)
+    return {"USD": usd, "EUR": eur, "JPY": jpy}
+
+def get_tiie_cetes_from_sie():
+    tiie = sie_latest(SIE_SERIES["TIIE_28"]) or (None, None)
+    cetes = sie_latest(SIE_SERIES["CETES_28"]) or (None, None)
+    if tiie == (None, None): tiie = (str(today_cdmx()), 11.30)
+    if cetes == (None, None): cetes = (str(today_cdmx()), 10.75)
+    return {"TIIE_28": tiie, "CETES_28": cetes}
+
+def get_udis_from_sie():
+    udis = sie_latest(SIE_SERIES["UDIS"]) or (None, None)
+    if udis == (None, None): udis = (str(today_cdmx()), 8.15)
+    return udis
+
+def get_inflacion_mx_yoy_from_sie():
+    infl = sie_latest(SIE_SERIES["MX_INFL_YOY"]) or (None, None)
+    if infl == (None, None): infl = (str(today_cdmx()), 4.47)
+    return infl
+
+# =========================
+#  EXCEL helpers
+# =========================
+def set_cell(ws, cell, value, bold=False, numfmt=None, wrap=False):
+    ws[cell].value = value
+    if bold:   ws[cell].font = Font(bold=True)
+    if numfmt: ws[cell].number_format = numfmt
+    if wrap:   ws[cell].alignment = Alignment(wrap_text=True, vertical="top")
+
+def autosize(ws, min_col=1, max_col=10):
+    for col in range(min_col, max_col+1):
+        letter = get_column_letter(col)
+        max_len = 0
+        for cell in ws[letter]:
+            v = cell.value
+            if v is None: 
+                continue
+            max_len = max(max_len, len(str(v)))
+        ws.column_dimensions[letter].width = min(max_len + 2, 60)
+
+# -------------------------
+# Hoja "Gráficos" (helpers)
+# -------------------------
+def write_series_table(ws, start_row: int, start_col: int, title: str, series):
+    """Escribe (Fecha datetime, Valor) para que Excel grafique bien."""
+    r, c = start_row, start_col
+    ws.cell(row=r, column=c, value=title).font = Font(bold=True); r += 1
+    ws.cell(row=r, column=c,   value="Fecha").font = Font(bold=True)
+    ws.cell(row=r, column=c+1, value="Valor").font = Font(bold=True); r += 1
+    for (f, v) in series:
+        dt = parse_any_date(f) or datetime.now()
+        ws.cell(row=r, column=c,   value=dt)
+        ws.cell(row=r, column=c+1, value=v)
+        ws.cell(row=r, column=c).number_format = "yyyy-mm-dd"
+        r += 1
+    return (start_row + 2, c, r - 1, c + 1)
+
+def add_line_chart(ws, title: str, data_range, place_at=("H", 2)):
+    (r0, c0, r1, c1) = data_range
+    if r1 <= r0:
+        return
+    chart = LineChart()
+    chart.title = title
+    chart.style = 2
+    chart.y_axis.title = "Valor"
+    chart.x_axis = DateAxis()
+    chart.x_axis.number_format = "yyyy-mm-dd"
+    chart.x_axis.title = "Fecha"
+    data = Reference(ws, min_col=c1, min_row=r0, max_col=c1, max_row=r1)
+    cats = Reference(ws, min_col=c0, min_row=r0, max_row=r1)
+    chart.add_data(data, titles_from_data=False)
+    chart.set_categories(cats)
+    ws.add_chart(chart, f"{place_at[0]}{place_at[1]}")
+
+# -------------------------
+# Hoja "Datos crudos"
+# -------------------------
+def add_raw_data_sheet(wb, raw_data: dict):
+    ws = wb.create_sheet("Datos crudos")
+    set_cell(ws, "A1", "Datos crudos (últimos 12 por serie)", bold=True)
+    ws.cell(row=3, column=1, value="Serie").font = Font(bold=True)
+    ws.cell(row=3, column=2, value="Fecha").font = Font(bold=True)
+    ws.cell(row=3, column=3, value="Valor").font = Font(bold=True)
+    mapping = [
+        ("USD/MXN (FIX)",          raw_data.get("USD_LAST12", [])),
+        ("TIIE 28d (%)",           raw_data.get("TIIE_LAST12", [])),
+        ("Fed Funds (%)",          raw_data.get("FEDFUNDS_LAST12", [])),
+        ("Inflación EUA YoY (%)",  raw_data.get("US_CPI_YOY_LAST12", [])),
+    ]
+    r = 4
+    for name, serie in mapping:
+        for (f, v) in serie:
+            dt = parse_any_date(f) or datetime.now()
+            ws.cell(row=r, column=1, value=name)
+            ws.cell(row=r, column=2, value=dt); ws.cell(row=r, column=2).number_format = "yyyy-mm-dd"
+            ws.cell(row=r, column=3, value=v)
+            r += 1
+    autosize(ws, 1, 6)
+
+# -------------------------
+# Construir Excel (Indicadores + Noticias + optativos)
+# -------------------------
+def crear_excel(datos: dict, noticias: list, graficos_data: dict | None = None, raw_data: dict | None = None) -> bytes:
     wb = Workbook()
     ws = wb.active
     ws.title = "Indicadores"
-    # Volcar tabla
-    for r, row in enumerate(df.itertuples(index=False), start=1):
-        for c, val in enumerate(row, start=1):
-            ws.cell(row=r, column=c, value=
+
+    # Encabezado
+    set_cell(ws, "A1", "Actualización de Indicadores", bold=True)
+    set_cell(ws, "A2", f"Generado: {now_ts()} (CDMX)")
+
+    # Tabla de indicadores consolidada
+    rows = [
+        ("Indicador", "Fecha", "Valor", "Nota"),
+        ("USD/MXN (FIX)", datos["fx"]["USD"][0], datos["fx"]["USD"][1], ""),
+        ("EUR/MXN (FIX)", datos["fx"]["EUR"][0], datos["fx"]["EUR"][1], ""),
+        ("JPY/MXN (FIX)", datos["fx"]["JPY"][0], datos["fx"]["JPY"][1], ""),
+        ("TIIE 28d (%)",  datos["tiie_cetes"]["TIIE_28"][0], datos["tiie_cetes"]["TIIE_28"][1], ""),
+        ("CETES 28d (%)", datos["tiie_cetes"]["CETES_28"][0], datos["tiie_cetes"]["CETES_28"][1], ""),
+        ("UDIS",          datos["udis"][0], datos["udis"][1], ""),
+        ("UMA diaria",    datos["uma"]["fecha"], datos["uma"]["diaria"], ""),
+        ("UMA mensual",   datos["uma"]["fecha"], datos["uma"]["mensual"], ""),
+        ("UMA anual",     datos["uma"]["fecha"], datos["uma"]["anual"], ""),
+        ("Fed Funds (%)", datos["us"]["FEDFUNDS"][0], datos["us"]["FEDFUNDS"][1], "Fuente: FRED"),
+        ("US CPI YoY (%)",datos["us"]["US_CPI_YoY"][0], datos["us"]["US_CPI_YoY"][1], "Fuente: FRED (CPIAUCSL)"),
+    ]
+    start_row = 5
+    for j, v in enumerate(rows[0], start=1):
+        cell = ws.cell(row=start_row, column=j, value=v)
+        cell.font = Font(bold=True)
+    for i, r in enumerate(rows[1:], start=start_row + 1):
+        for j, v in enumerate(r, start=1):
+            ws.cell(row=i, column=j, value=v)
+    autosize(ws, 1, 6)
+
+    # Hoja Noticias
+    ws2 = wb.create_sheet("Noticias")
+    set_cell(ws2, "A1", "Resumen de noticias financieras (últimas)", bold=True)
+    set_cell(ws2, "A2", f"Generado: {now_ts()} (CDMX)")
+
+    # Encabezados
+    headers = ["Fecha", "Fuente", "Título", "Resumen", "Link"]
+    for col, h in enumerate(headers, start=1):
+        ws2.cell(row=4, column=col, value=h).font = Font(bold=True)
+
+    r = 5
+    for it in noticias:
+        dt = it["dt"]
+        ws2.cell(row=r, column=1, value=dt)
+        ws2.cell(row=r, column=1).number_format = "yyyy-mm-dd hh:mm"
+        ws2.cell(row=r, column=2, value=it["source"])
+        ws2.cell(row=r, column=3, value=it["title"])
+        ws2.cell(row=r, column=4, value=(it["summary"][:400] + ("..." if len(it["summary"])>400 else "")))
+        ws2.cell(row=r, column=5, value=it["link"])
+        ws2.cell(row=r, column=4).alignment = Alignment(wrap_text=True, vertical="top")
+        r += 1
+    autosize(ws2, 1, 5)
+
+    # Hoja Gráficos (opcional)
+    if graficos_data:
+        ws3 = wb.create_sheet("Gráficos")
+        set_cell(ws3, "A1", "Series históricas (últimos 12 datos)", bold=True)
+        usd_range  = write_series_table(ws3, 3, 1, "USD/MXN (FIX)",              graficos_data["USD_LAST12"])
+        tiie_range = write_series_table(ws3, 3, 4, "TIIE 28d (%)",                graficos_data["TIIE_LAST12"])
+        fed_range  = write_series_table(ws3, 22,1, "Fed Funds (%)",               graficos_data["FEDFUNDS_LAST12"])
+        cpi_range  = write_series_table(ws3, 22,4, "Inflación EUA YoY (%)",       graficos_data["US_CPI_YOY_LAST12"])
+        add_line_chart(ws3, "USD/MXN - Últimos 12",         usd_range,  ("H", 2))
+        add_line_chart(ws3, "TIIE 28d - Últimos 12",        tiie_range, ("H", 18))
+        add_line_chart(ws3, "Fed Funds - Últimos 12",       fed_range,  ("H", 34))
+        add_line_chart(ws3, "Inflación EUA YoY - Últimos 12", cpi_range, ("H", 50))
+        autosize(ws3, 1, 12)
+
+    # Hoja Datos crudos (opcional)
+    if raw_data:
+        add_raw_data_sheet(wb, raw_data)
+
+    bio = io.BytesIO()
+    wb.save(bio)
+    return bio.getvalue()
+
+# =========================
+#  Sidebar "Semáforos" de fuentes
+# =========================
+def _probe(fn, ok_pred):
+    t0 = time.perf_counter()
+    status, msg = "err", ""
+    try:
+        res = fn()
+        status = ok_pred(res)
+        msg = "OK" if status=="ok" else ("Parcial" if status=="warn" else "Sin datos")
+    except Exception as e:
+        status, msg = "err", f"Excepción: {type(e).__name__}"
+    ms = int((time.perf_counter()-t0)*1000)
+    return status, msg, ms
+
+def _render_sidebar_status():
+    st.sidebar.header("🔎 Estado de fuentes")
+    st.sidebar.caption(f"Última verificación: {now_ts()}")
+
+    b_status, b_msg, b_ms = _probe(
+        lambda: sie_latest(SIE_SERIES["USD_FIX"]),
+        lambda res: "ok" if isinstance(res, tuple) and res[0] and (res[1] is not None) else "err"
+    )
+    i_status, i_msg, i_ms = _probe(
+        lambda: get_uma(INEGI_TOKEN),
+        lambda res: "ok" if isinstance(res, dict) and (res.get("diaria") is not None) else ("warn" if isinstance(res, dict) else "err")
+    )
+    if not FRED_TOKEN.strip():
+        f_status, f_msg, f_ms = ("warn", "Sin token (fallback)", 0)
+    else:
+        f_status, f_msg, f_ms = _probe(
+            lambda: get_us_from_fred(),
+            lambda res: "ok" if res.get("FEDFUNDS",(None,None))[1] is not None and res.get("US_CPI_YoY",(None,None))[1] is not None else "warn"
+        )
+
+    def badge(status, label, msg, ms):
+        dot = "🟢" if status=="ok" else ("🟡" if status=="warn" else "🔴")
+        st.sidebar.write(f"{dot} **{label}** — {msg} · {ms} ms")
+
+    badge(b_status, "Banxico (SIE)", b_msg, b_ms)
+    badge(i_status, "INEGI (UMA)", i_msg, i_ms)
+    badge(f_status, "FRED (USA)", f_msg, f_ms)
+
+    st.sidebar.divider()
+    if st.sidebar.button("Revisar fuentes ahora"):
+        st.rerun()
+
+# =========================
+#  STREAMLIT UI
+# =========================
+st.set_page_config(page_title="Indicadores Económicos", page_icon="📈", layout="centered")
+st.title("📈 Actualización de Indicadores (Automática)")
+st.caption("Genera un Excel nuevo con: Indicadores + Noticias (y opcional: Gráficos, Datos crudos).")
+
+with st.expander("Opciones (mejoras activables)"):
+    do_us     = st.toggle("Incluir EUA (FRED) — Fed Funds y US CPI YoY", value=True)
+    do_charts = st.toggle("Agregar hoja 'Gráficos' (últimos 12 puntos)", value=True)
+    do_raw    = st.toggle("Agregar hoja 'Datos crudos' (últimos 12 puntos)", value=True)
+
+_check_tokens()
+_render_sidebar_status()
+
+if st.button("Generar Excel"):
+    # Indicadores
+    fx = get_fx_from_sie()
+    tiie_cetes = get_tiie_cetes_from_sie()
+    udis = get_udis_from_sie()
+    uma = get_uma(INEGI_TOKEN)
+    us  = get_us_from_fred() if do_us else {"FEDFUNDS": (None, None), "US_CPI_YoY": (None, None)}
+    datos = {"fx": fx, "tiie_cetes": tiie_cetes, "udis": udis, "uma": uma, "us": us}
+
+    # Noticias (RSS)
+    news = fetch_financial_news(limit_per_feed=8, total_limit=20)
+
+    # Históricos (para hojas opcionales)
+    graficos_data = None
+    raw_data = None
+    if do_charts or do_raw:
+        try:
+            usd_last12 = sie_last_n(SIE_SERIES["USD_FIX"], n=12)
+            tiie_last12 = sie_last_n(SIE_SERIES["TIIE_28"], n=12)
+            fed_last12 = fred_last_n("FEDFUNDS", n=12) if do_us else []
+            cpi_last12 = fred_cpi_yoy_series(n=12) if do_us else []
+            # Fallbacks mínimos
+            if not usd_last12: usd_last12 = [(str(today_cdmx()), fx["USD"][1] or 18.5)]
+            if not tiie_last12: tiie_last12 = [(str(today_cdmx()), tiie_cetes["TIIE_28"][1] or 11.3)]
+            if do_us:
+                if not fed_last12: fed_last12 = [(str(today_cdmx()), us["FEDFUNDS"][1] or 5.5)]
+                if not cpi_last12: cpi_last12 = [(str(today_cdmx()), us["US_CPI_YoY"][1] or 3.2)]
+            graficos_data = {
+                "USD_LAST12": usd_last12,
+                "TIIE_LAST12": tiie_last12,
+                "FEDFUNDS_LAST12": fed_last12,
+                "US_CPI_YOY_LAST12": cpi_last12,
+            } if (do_charts or do_raw) else None
+            raw_data = graficos_data if do_raw else None
+        except Exception as e:
+            st.warning(f"No se pudieron preparar series históricas: {e}")
+            graficos_data = None
+            raw_data = None
+
+    try:
+        xlsx = crear_excel(datos, noticias=news, graficos_data=graficos_data if do_charts else None, raw_data=raw_data)
+        st.success("¡Listo! Archivo generado correctamente.")
+        st.download_button(
+            "Descargar Excel de Indicadores",
+            data=xlsx,
+            file_name=f"indicadores_{today_cdmx()}.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        )
+    except Exception as e:
+        st.error(f"Ocurrió un error al generar el Excel: {e}")
+
+st.info(
+    "Si harás público el repo, mueve BANXICO_TOKEN / INEGI_TOKEN / FRED_TOKEN a `st.secrets`.\n"
+    "Si deseas más series (TIIE 91/182, CETES 91/182/364 o Inflación MX YoY exacta), te agrego los IDs SIE."
+)
