@@ -60,7 +60,7 @@ def logo_base64(max_height_px=40):
     try:
         if Image:
             im = Image.open(p).convert("RGBA")
-            # reajuste suave si es muy alto
+            
             if im.height > max_height_px:
                 w = int(im.width * (max_height_px / im.height))
                 im = im.resize((w, max_height_px))
@@ -75,7 +75,7 @@ def logo_base64(max_height_px=40):
 
 BANXICO_TOKEN = "677aaedf11d11712aa2ccf73da4d77b6b785474eaeb2e092f6bad31b29de6609"
 INEGI_TOKEN   = "0146a9ed-b70f-4ea2-8781-744b900c19d1"
-FRED_TOKEN    = ""  # opcional para gráficos
+FRED_TOKEN    = ""  
 
 TZ_MX = pytz.timezone("America/Mexico_City")
 
@@ -450,7 +450,7 @@ def _render_sidebar_status():
 
 
 with st.expander("Opciones"):
-    movex_win = st.number_input("Ventana MOVEX (días hábiles)", min_value=5, max_value=60, value=20, step=1)
+    movex_win = st.number_input("Ventana MONEX (días hábiles)", min_value=5, max_value=60, value=20, step=1)
     margen_pct = st.number_input("Margen Compra/Venta sobre FIX (% por lado)", min_value=0.0, max_value=5.0, value=0.5, step=0.1)
     uma_manual = st.number_input("UMA diaria (manual, si INEGI falla)", min_value=0.0, value=0.0, step=0.01)
     do_charts = st.toggle("Agregar hoja 'Gráficos' (últimos 12)", value=True)
@@ -463,7 +463,7 @@ _render_sidebar_status()
 if st.button("Generar Excel"):
     def pad6(lst): return ([None]*(6-len(lst)))+lst if len(lst)<6 else lst
 
-    # --- Series 6 puntos + fechas reales de USD para B2..G2
+    
     usd6_pairs = sie_last_n(SIE_SERIES["USD_FIX"], n=6)
     fechas6_dt  = pad6([parse_any_date(f) for f,_ in usd6_pairs])
     fechas6_str = [fmt_date_str(d) for d in fechas6_dt]
@@ -515,9 +515,9 @@ if st.button("Generar Excel"):
     ws = wb.add_worksheet("Indicadores")
     ws.write("A2", "Fecha:", fmt_bold)
     for idx, s in enumerate(fechas6_str):
-        ws.write(1, 1+idx, s, fmt_date)  # fila 1 == A2 (0-based +1)
+        ws.write(1, 1+idx, s, fmt_date)  
 
-    # Etiquetas
+    
     labels = [
         (4, "TIPOS DE CAMBIO:", True),
         (6, "DÓLAR AMERICANO.", True),
@@ -569,7 +569,7 @@ if st.button("Generar Excel"):
     uma_anual6   = [uma["anual"]]*6
 
     write_row_values(7,  usd6)
-    write_row_values(8,  movex6)
+    write_row_values(8,  monex6)
     write_row_values(9,  compra6)
     write_row_values(10, venta6)
 
