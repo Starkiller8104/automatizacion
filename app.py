@@ -10,33 +10,34 @@ Original file is located at
 # app.py
 # ──────────────────────────────────────────────────────────────────────────────
 # Indicadores (6 puntos) + Noticias + (opc) Gráficos y Datos crudos
-# Exportación con XlsxWriter (sin reparaciones de Excel) y charts robustos.
-# Fechas reales en B2..G2, CETES conectados, UMA robusto + fallback manual.
-# Fix: se elimina "nonlocal r" y se reestructura la escritura de datos crudos.
+# Exportación con XlsxWriter y charts robustos. Fechas reales en B2..G2.
+# CETES conectados, UMA robusto + fallback manual.
+# Branding: logo favicon + encabezado sticky; menú y footer ocultos.
 # ──────────────────────────────────────────────────────────────────────────────
 
 import io
 import re
 import time
 import html
+import base64
 from datetime import datetime, timedelta
 from email.utils import parsedate_to_datetime
+from pathlib import Path
 
 import pytz
 import requests
 from requests.adapters import HTTPAdapter, Retry
 import streamlit as st
-
 import xlsxwriter  # Motor para Excel y gráficos
 
-from pathlib import Path
+# Logo (favicon / encabezado / sidebar)
 try:
-    from PIL import Image  # Asegúrate de tener Pillow en requirements.txt
-except ImportError:
+    from PIL import Image
+except Exception:
     Image = None
 
 def load_logo():
-    """Busca logo.png en el mismo directorio del app o en /assets."""
+    """Busca logo.png en ubicación estándar."""
     candidates = [
         Path(__file__).parent / "logo.png",
         Path("logo.png"),
@@ -44,8 +45,39 @@ def load_logo():
     ]
     for p in candidates:
         if p.exists():
-            return Image.open(p) if Image else str(p)
+            return p
     return None
+
+def logo_image_or_emoji():
+    """Devuelve objeto PIL.Image para favicon si es posible; si no, un emoji."""
+    p = load_logo()
+    if Image and p:
+        try:
+            return Image.open(p)
+        except Exception:
+            return "📈"
+    return "📈"
+
+def logo_base64(max_height_px=40):
+    """Devuelve el logo en base64 para incrustarlo en HTML sticky."""
+    p = load_logo()
+    if not p:
+        return None
+    try:
+        if Image:
+            im = Image.open(p).convert("RGBA")
+            # reajuste suave si es muy alto
+            if im.height > max_height_px:
+                w = int(im.width * (max_height_px / im.height))
+                im = im.resize((w, max_height_px))
+            bio = io.BytesIO()
+            im.save(bio, format="PNG")
+            data = bio.getvalue()
+        else:
+            data = Path(p).read_bytes()
+        return base64.b64encode(data).decode("ascii")
+    except Exception:
+        return None
 
 # =========================
 #  TOKENS
@@ -55,6 +87,59 @@ INEGI_TOKEN   = "0146a9ed-b70f-4ea2-8781-744b900c19d1"
 FRED_TOKEN    = ""  # opcional para gráficos
 
 TZ_MX = pytz.timezone("America/Mexico_City")
+
+# ── Page config (debe ir antes de cualquier otro st.*)
+st.set_page_config(
+    page_title="Indicadores Económicos",
+    page_icon=logo_image_or_emoji(),
+    layout="centered"
+)
+
+# CSS: ocultar menú y footer + estilos del header sticky
+st.markdown("""
+<style>
+#MainMenu {visibility: hidden;}      /* oculta hamburguesa */
+footer {visibility: hidden;}         /* oculta footer */
+
+.app-header {
+  position: sticky; top: 0; z-index: 999;
+  background: white; border-bottom: 1px solid #eee;
+  display: flex; align-items: center; gap: 16px;
+  padding: 8px 6px;
+}
+.app-header img.logo { height: 40px; }
+.app-header .titles h1 {
+  font-size: 1.35rem; line-height: 1.25; margin: 0;
+}
+.app-header .titles p {
+  margin: 0; color: #666;
+}
+</style>
+""", unsafe_allow_html=True)
+
+# Encabezado sticky con logo
+_logo_b64 = logo_base64()
+if _logo_b64:
+    st.markdown(
+        f"""
+        <div class="app-header">
+          <img class="logo" src="data:image/png;base64,{_logo_b64}" alt="logo"/>
+          <div class="titles">
+            <h1>Indicadores (últimos 6 días) + Noticias</h1>
+            <p>Excel con tu layout (B2..G2 fechas reales), noticias y gráficos con XlsxWriter.</p>
+          </div>
+        </div>
+        """,
+        unsafe_allow_html=True
+    )
+else:
+    # Fallback normal si no hay logo
+    st.title("📈 Indicadores (últimos 6 días) + Noticias")
+    st.caption("Excel con tu layout (B2..G2 fechas reales), noticias y gráficos con XlsxWriter.")
+
+# Logo también en el sidebar (si existe)
+if _logo_b64:
+    st.sidebar.image(f"data:image/png;base64,{_logo_b64}", use_column_width=True)
 
 # =========================
 #  SERIES SIE
@@ -170,8 +255,7 @@ def sie_last_n(series_id: str, n: int = 6):
     obs = sie_range(series_id, start.isoformat(), end.isoformat())
     vals = []
     for o in obs:
-        f = o.get("fecha")
-        v = try_float(o.get("dato"))
+        f = o.get("fecha"); v = try_float(o.get("dato"))
         if f and (v is not None):
             vals.append((f, v))
     if not vals:
@@ -390,10 +474,6 @@ def _render_sidebar_status():
 # =========================
 #  STREAMLIT UI
 # =========================
-st.set_page_config(page_title="Indicadores Económicos", page_icon="📈", layout="centered")
-st.title("📈 Indicadores (últimos 6 días) + Noticias")
-st.caption("Excel con tu layout, fechas reales en B2..G2; noticias; gráficos y datos crudos con XlsxWriter.")
-
 with st.expander("Opciones"):
     movex_win = st.number_input("Ventana MOVEX (días hábiles)", min_value=5, max_value=60, value=20, step=1)
     margen_pct = st.number_input("Margen Compra/Venta sobre FIX (% por lado)", min_value=0.0, max_value=5.0, value=0.5, step=0.1)
@@ -581,12 +661,12 @@ if st.button("Generar Excel"):
             sheet.write(r, start_col, fmt_date_str(dt), fmt_date)
             sheet.write_number(r, start_col+1, val)
             r += 1
-        # Rangos (XlsxWriter es 0-based e incluye extremos)
+        # Rangos
         first = start_row + 2; last = r - 1
         chart = workbook.add_chart({'type': 'line'})
         chart.set_title({'name': title})
         chart.add_series({
-            'categories': [sheet_name, first, start_col, last, start_col],
+            'categories': [sheet_name, first, start_col,   last, start_col],
             'values':     [sheet_name, first, start_col+1, last, start_col+1],
             'line':       {'width': 1.5},
         })
@@ -639,7 +719,7 @@ if st.button("Generar Excel"):
 
     # Cerrar y servir
     wb.close()
-    st.success("¡Listo! Archivo generado con XlsxWriter (gráficos incluidos y sin 'nonlocal').")
+    st.success("¡Listo! Archivo generado con branding (logo sticky) y gráficos.")
     st.download_button(
         "Descargar Excel",
         data=bio.getvalue(),
