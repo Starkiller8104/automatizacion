@@ -6,3 +6,4 @@ beautifulsoup4
 lxml
 openpyxl
 pytz
+XlsxWriter==3.2.0
