@@ -9,9 +9,8 @@ Original file is located at
 
 # app.py
 # ──────────────────────────────────────────────────────────────────────────────
-# Indicadores (últimos 6 días con tu layout) + Noticias + (opcional) Gráficos y Datos crudos.
-# Fechas "naive" (sin tz) para Excel, gráficos seguros y UMA robusto con diagnóstico.
-# Tokens incrustados: Banxico/INEGI.
+# Indicadores (últimos 6 puntos con tu layout) + Noticias + (opcional) Gráficos y Datos crudos.
+# Fechas "naive" para Excel, gráficos seguros, UMA robusto con fallback manual, y limpieza de cachés.
 # ──────────────────────────────────────────────────────────────────────────────
 
 import io
@@ -20,10 +19,12 @@ import time
 import html
 from datetime import datetime, timedelta
 from email.utils import parsedate_to_datetime
+
 import pytz
 import requests
 from requests.adapters import HTTPAdapter, Retry
 import streamlit as st
+
 from openpyxl import Workbook
 from openpyxl.styles import Alignment, Font
 from openpyxl.utils import get_column_letter
@@ -31,44 +32,50 @@ from openpyxl.chart import LineChart, Reference
 from openpyxl.chart.axis import DateAxis
 
 # =========================
-#  TOKENS
+#  TOKENS (según tus datos)
 # =========================
 BANXICO_TOKEN = "677aaedf11d11712aa2ccf73da4d77b6b785474eaeb2e092f6bad31b29de6609"
-INEGI_TOKEN   = "0146a9ed-b70f-4ea2-8781-744b900c19d1"   # (nuevo)
-FRED_TOKEN    = ""  # opcional
+INEGI_TOKEN   = "0146a9ed-b70f-4ea2-8781-744b900c19d1"
+FRED_TOKEN    = ""  # opcional (para gráficos)
 
 TZ_MX = pytz.timezone("America/Mexico_City")
 
 # =========================
-#  SERIES SIE
+#  SERIES SIE (IDs)
 # =========================
 SIE_SERIES = {
+    # Tipos de cambio (FIX)
     "USD_FIX":   "SF43718",
     "EUR_FIX":   "SF46410",
     "JPY_FIX":   "SF46406",
 
-    # TIIE / CETES (IDs seguros que ya veníamos usando)
-    "TIIE_OBJ":  "",          # pon el id real si lo tienes
-    "TIIE_28":   "SF60653",   # usamos este porque te ha funcionado
+    # TIIE (deja vacíos si no tienes el id definitivo)
+    "TIIE_OBJ":  "",          # id pendiente si quieres la tasa objetivo
+    "TIIE_28":   "SF60653",   # el que ya te venía funcionando
     "TIIE_91":   "",          # id pendiente
     "TIIE_182":  "",          # id pendiente
 
+    # CETES (subasta semanal – rendimiento % anual)
     "CETES_28":  "SF43936",
-    "CETES_91":  "",          # id pendiente
-    "CETES_182": "",          # id pendiente
-    "CETES_364": "",          # id pendiente
+    "CETES_91":  "SF43939",
+    "CETES_182": "SF43942",
+    "CETES_364": "SF43945",
 
+    # UDIS
     "UDIS":      "SP68257",
 }
 
 # =========================
-#  Utilidades
+#  Utilidades generales
 # =========================
 def http_session(timeout=15):
     s = requests.Session()
-    retries = Retry(total=3, backoff_factor=0.8,
-                    status_forcelist=[429, 500, 502, 503, 504],
-                    allowed_methods=frozenset(["GET", "POST"]))
+    retries = Retry(
+        total=3,
+        backoff_factor=0.8,
+        status_forcelist=[429, 500, 502, 503, 504],
+        allowed_methods=frozenset(["GET", "POST"])
+    )
     s.mount("https://", HTTPAdapter(max_retries=retries))
     s.request_timeout = timeout
     return s
@@ -86,7 +93,7 @@ def try_float(x):
         return None
 
 def parse_any_date(s: str):
-    """Devuelve datetime *naive* (sin tz) para Excel."""
+    """Convierte a datetime *naive* (sin tz) aceptado por Excel."""
     if not s:
         return None
     s = str(s)
@@ -118,7 +125,7 @@ def _check_tokens():
         st.stop()
 
 # =========================
-#  Banxico SIE
+#  Banxico SIE (último y rango)
 # =========================
 @st.cache_data(ttl=60*30)
 def sie_opportuno(series_id):
@@ -166,6 +173,7 @@ def sie_last_n(series_id: str, n: int = 6):
     return vals[-n:]
 
 def rolling_movex_for_last6(window:int=20):
+    """Promedio móvil simple para USD/MXN FIX, alineado con los últimos 6 puntos."""
     end = today_cdmx()
     start = end - timedelta(days=365)
     obs = sie_range(SIE_SERIES["USD_FIX"], start.isoformat(), end.isoformat())
@@ -180,7 +188,7 @@ def rolling_movex_for_last6(window:int=20):
     return out
 
 # =========================
-#  INEGI UMA – robusto (con diagnóstico)
+#  INEGI UMA – robusto (con fallback y diagnóstico)
 # =========================
 @st.cache_data(ttl=60*60)
 def get_uma(inegi_token: str, verbose: bool = False):
@@ -363,7 +371,7 @@ def crear_hoja_indicadores_layout(valores: dict, movex6, compra6, venta6, fechas
     ws = wb.active
     ws.title = "Indicadores"
 
-    # Cabecera con fechas reales
+    # Cabecera con FECHAS reales en B2..G2
     set_cell(ws, "A2", "Fecha:", bold=True)
     headers_cells = ["B2","C2","D2","E2","F2","G2"]
     for cell_ref, d in zip(headers_cells, fechas6_dt):
@@ -373,7 +381,7 @@ def crear_hoja_indicadores_layout(valores: dict, movex6, compra6, venta6, fechas
             ws[cell_ref] = d
             ws[cell_ref].number_format = "yyyy-mm-dd"
 
-    # Secciones / etiquetas
+    # Secciones / etiquetas (como tu layout)
     set_cell(ws, "A4", "TIPOS DE CAMBIO:", bold=True)
     set_cell(ws, "A6", "DÓLAR AMERICANO.", bold=True)
     set_cell(ws, "A7", "Dólar/Pesos:")
@@ -463,7 +471,7 @@ def add_news_sheet(wb, news_items):
         r += 1
     autosize(ws2, 1, 5)
 
-# Gráficos + Datos crudos
+# ── Gráficos + Datos crudos (seguros)
 def write_series_table(ws, start_row: int, start_col: int, title: str, series):
     series = [(f, v) for (f, v) in series if v is not None]
     r, c = start_row, start_col
@@ -479,7 +487,7 @@ def write_series_table(ws, start_row: int, start_col: int, title: str, series):
 
 def add_line_chart(ws, title: str, data_range, place_at=("H", 2)):
     (r0, c0, r1, c1) = data_range
-    if r1 <= r0:  # necesita >=2 filas
+    if r1 <= r0:  # necesita >= 2 filas reales
         return
     chart = LineChart()
     chart.title = title
@@ -509,7 +517,7 @@ def add_raw_sheet(wb, raw_data: dict):
     autosize(ws, 1, 4)
 
 # =========================
-#  Sidebar estado y diagnóstico UMA
+#  Sidebar: estado, diagnóstico y limpieza de caché
 # =========================
 def _probe(fn, ok_pred):
     t0 = time.perf_counter()
@@ -526,41 +534,51 @@ def _probe(fn, ok_pred):
 def _render_sidebar_status():
     st.sidebar.header("🔎 Estado de fuentes")
     st.sidebar.caption(f"Última verificación: {now_ts()}")
-    b_status, b_msg, b_ms = _probe(lambda: sie_latest(SIE_SERIES["USD_FIX"]),
-                                   lambda res: "ok" if isinstance(res, tuple) and res[0] and (res[1] is not None) else "err")
-    i_status, i_msg, i_ms = _probe(lambda: get_uma(INEGI_TOKEN),
-                                   lambda res: "ok" if isinstance(res, dict) and (res.get("diaria") is not None) else ("warn" if isinstance(res, dict) else "err"))
-    if not FRED_TOKEN.strip():
-        f_status, f_msg, f_ms = ("warn", "Sin token (fallback)", 0)
-    else:
-        f_status, f_msg, f_ms = ("ok", "OK", 0)
+
+    b_status, b_msg, b_ms = _probe(
+        lambda: sie_latest(SIE_SERIES["USD_FIX"]),
+        lambda res: "ok" if isinstance(res, tuple) and res[0] and (res[1] is not None) else "err"
+    )
+    i_status, i_msg, i_ms = _probe(
+        lambda: get_uma(INEGI_TOKEN),
+        lambda res: "ok" if isinstance(res, dict) and (res.get("diaria") is not None) else ("warn" if isinstance(res, dict) else "err")
+    )
+    f_status, f_msg, f_ms = ("warn", "Sin token (fallback)", 0) if not FRED_TOKEN.strip() else ("ok", "OK", 0)
+
     def badge(status, label, msg, ms):
         dot = "🟢" if status=="ok" else ("🟡" if status=="warn" else "🔴")
         st.sidebar.write(f"{dot} **{label}** — {msg} · {ms} ms")
+
     badge(b_status, "Banxico (SIE)", b_msg, b_ms)
-    badge(i_status, "INEGI (UMA)", i_msg, i_ms)
-    badge(f_status, "FRED (USA)", f_msg, f_ms)
+    badge(i_status, "INEGI (UMA)",  i_msg, i_ms)
+    badge(f_status, "FRED (USA)",   f_msg, f_ms)
+
     st.sidebar.divider()
+    with st.sidebar.expander("Herramientas"):
+        c1, c2 = st.columns(2)
+        if c1.button("Limpiar cachés Banxico"):
+            sie_opportuno.clear(); sie_range.clear()
+            st.success("Cachés SIE limpiadas.")
+        if c2.button("Limpiar caché UMA"):
+            get_uma.clear()
+            st.success("Caché UMA limpiada.")
     with st.sidebar.expander("Diagnóstico UMA"):
-        col1, col2 = st.columns(2)
-        if col1.button("Probar INEGI ahora"):
+        if st.button("Probar INEGI ahora"):
             res = get_uma(INEGI_TOKEN, verbose=True)
             st.write("Estado:", res.get("_status"), "— Fuente:", res.get("_source"))
             st.json(res)
-        if col2.button("Limpiar caché UMA"):
-            get_uma.clear()
-            st.success("Caché de UMA limpiada. Vuelve a generar el Excel.")
 
 # =========================
-#  UI
+#  STREAMLIT UI
 # =========================
 st.set_page_config(page_title="Indicadores Económicos", page_icon="📈", layout="centered")
 st.title("📈 Indicadores (últimos 6 días) + Noticias")
-st.caption("Excel con tu layout + hoja de Noticias; opcional Gráficos y Datos crudos.")
+st.caption("Excel con tu layout, fechas reales en B2..G2; noticias; opcional gráficos y datos crudos.")
 
 with st.expander("Opciones"):
     movex_win = st.number_input("Ventana MOVEX (días hábiles)", min_value=5, max_value=60, value=20, step=1)
     margen_pct = st.number_input("Margen Compra/Venta sobre FIX (% por lado)", min_value=0.0, max_value=5.0, value=0.5, step=0.1)
+    uma_manual = st.number_input("UMA diaria (manual, solo si INEGI falla)", min_value=0.0, value=0.0, step=0.01)
     do_charts = st.toggle("Agregar hoja 'Gráficos' (últimos 12)", value=True)
     do_raw    = st.toggle("Agregar hoja 'Datos crudos' (últimos 12)", value=True)
 
@@ -587,35 +605,44 @@ if st.button("Generar Excel"):
 
     tiie28_6  = pad6([v for _, v in sie_last_n(SIE_SERIES["TIIE_28"], n=6)])
     cetes28_6 = pad6([v for _, v in sie_last_n(SIE_SERIES["CETES_28"], n=6)])
+    cetes91_6 = pad6([v for _, v in sie_last_n(SIE_SERIES["CETES_91"], n=6)])
+    cetes182_6= pad6([v for _, v in sie_last_n(SIE_SERIES["CETES_182"], n=6)])
+    cetes364_6= pad6([v for _, v in sie_last_n(SIE_SERIES["CETES_364"], n=6)])
 
     none6 = [None]*6
-    tiie_obj6  = none6 if not SIE_SERIES["TIIE_OBJ"]  else pad6([v for _, v in sie_last_n(SIE_SERIES["TIIE_OBJ"],  n=6)])
-    tiie91_6   = none6 if not SIE_SERIES["TIIE_91"]   else pad6([v for _, v in sie_last_n(SIE_SERIES["TIIE_91"],   n=6)])
-    tiie182_6  = none6 if not SIE_SERIES["TIIE_182"]  else pad6([v for _, v in sie_last_n(SIE_SERIES["TIIE_182"],  n=6)])
-    cetes91_6  = none6 if not SIE_SERIES["CETES_91"]  else pad6([v for _, v in sie_last_n(SIE_SERIES["CETES_91"],  n=6)])
-    cetes182_6 = none6 if not SIE_SERIES["CETES_182"] else pad6([v for _, v in sie_last_n(SIE_SERIES["CETES_182"], n=6)])
-    cetes364_6 = none6 if not SIE_SERIES["CETES_364"] else pad6([v for _, v in sie_last_n(SIE_SERIES["CETES_364"], n=6)])
+    tiie_obj6  = none6 if not SIE_SERIES["TIIE_OBJ"] else pad6([v for _, v in sie_last_n(SIE_SERIES["TIIE_OBJ"], n=6)])
+    tiie91_6   = none6 if not SIE_SERIES["TIIE_91"]  else pad6([v for _, v in sie_last_n(SIE_SERIES["TIIE_91"],  n=6)])
+    tiie182_6  = none6 if not SIE_SERIES["TIIE_182"] else pad6([v for _, v in sie_last_n(SIE_SERIES["TIIE_182"], n=6)])
 
-    uma = get_uma(INEGI_TOKEN)  # se repite a lo largo de las 6 columnas
+    # 2) UMA (con fallback manual)
+    uma = get_uma(INEGI_TOKEN)
+    if uma.get("diaria") is None and uma_manual > 0:
+        uma["diaria"]  = uma_manual
+        uma["mensual"] = uma_manual * 30.4
+        uma["anual"]   = uma["mensual"] * 12
+        uma["_status"] = "MANUAL"
+
     valores = {
         "usd6": usd6, "eur6": eur6, "jpy6": jpy6,
         "eurusd6": eurusd6, "usdjpy6": usdjpy6,
         "udis6": udis6,
         "tiie_obj6": tiie_obj6, "tiie28_6": tiie28_6, "tiie91_6": tiie91_6, "tiie182_6": tiie182_6,
         "cetes28_6": cetes28_6, "cetes91_6": cetes91_6, "cetes182_6": cetes182_6, "cetes364_6": cetes364_6,
-        "uma_diaria6": [uma["diaria"]]*6, "uma_mensual6": [uma["mensual"]]*6, "uma_anual6": [uma["anual"]]*6,
+        "uma_diaria6": [uma["diaria"]]*6,
+        "uma_mensual6":[uma["mensual"]]*6,
+        "uma_anual6":  [uma["anual"]]*6,
     }
 
-    # 2) Noticias (con fallback)
+    # 3) Noticias (con fallback)
     news = fetch_financial_news(limit_per_feed=8, total_limit=20)
 
     try:
-        # Hoja Indicadores con fechas reales en B2..G2
+        # Hoja Indicadores con fechas reales
         wb = crear_hoja_indicadores_layout(valores, movex6, compra6, venta6, fechas6_dt)
         # Hoja Noticias
         add_news_sheet(wb, news)
 
-        # 3) Hojas opcionales (gráficos / datos crudos)
+        # 4) Hojas opcionales
         if do_charts or do_raw:
             usd_last12  = sie_last_n(SIE_SERIES["USD_FIX"], n=12)
             tiie_last12 = sie_last_n(SIE_SERIES["TIIE_28"], n=12)
@@ -637,14 +664,15 @@ if st.button("Generar Excel"):
             if do_raw:
                 raw = {
                     "USD/MXN (FIX)": usd_last12,
-                    "TIIE 28d (%)": tiie_last12,
+                    "TIIE 28d (%)":  tiie_last12,
                     "Fed Funds (%)": fed_last12,
                     "Inflación EUA YoY (%)": cpi_last12,
                 }
                 add_raw_sheet(wb, raw)
 
+        # 5) Descargar
         bio = io.BytesIO(); wb.save(bio)
-        st.success("¡Listo! Archivo generado con fechas reales en B2..G2.")
+        st.success("¡Listo! Archivo generado con CETES y UMA (con fallback si fue necesario).")
         st.download_button(
             "Descargar Excel",
             data=bio.getvalue(),
