@@ -7,5 +7,6 @@ lxml
 openpyxl
 pytz
 Pillow>=9.5.0
+XlsxWriter>=3.2.0
 
 
