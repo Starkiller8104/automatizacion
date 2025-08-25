@@ -562,7 +562,7 @@ if st.button("Generar Excel"):
     uma_anual6   = [uma["anual"]]*6
 
     write_row_values(7,  usd6)
-    write_row_values(8,  monex6)
+    write_row_values(8,  movex6)
     write_row_values(9,  compra6)
     write_row_values(10, venta6)
 
