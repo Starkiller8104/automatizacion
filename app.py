@@ -9,17 +9,17 @@ Original file is located at
 
 # app.py
 # ──────────────────────────────────────────────────────────────────────────────
-# Automatización económica con layout "Indicadores" (Día 1..Día actual) y "Noticias".
-# Tokens en código (Banxico/INEGI), reintentos+caché, UMA robusto, semáforos.
-# Opcional: Gráficos + Datos crudos (últimos 12).
+# Indicadores (últimos 6 días con tu layout) + Noticias + (opcional) Gráficos y Datos crudos.
+# Fixes: fechas naive (sin tz), charts seguros, noticias con fallback.
+# Tokens incluidos (Banxico/INEGI).
 # ──────────────────────────────────────────────────────────────────────────────
 
 import io
 import re
 import time
+import html
 from datetime import datetime, timedelta
 from email.utils import parsedate_to_datetime
-import html
 import pytz
 import requests
 from requests.adapters import HTTPAdapter, Retry
@@ -31,7 +31,7 @@ from openpyxl.chart import LineChart, Reference
 from openpyxl.chart.axis import DateAxis
 
 # =========================
-#  TOKENS (según tu nota)
+#  TOKENS
 # =========================
 BANXICO_TOKEN = "677aaedf11d11712aa2ccf73da4d77b6b785474eaeb2e092f6bad31b29de6609"
 INEGI_TOKEN   = "9886fe68-e51f-c345-0b8f-adb99da1a1fd"
@@ -40,41 +40,31 @@ FRED_TOKEN    = ""  # opcional
 TZ_MX = pytz.timezone("America/Mexico_City")
 
 # =========================
-#  SERIES SIE DE BANXICO
+#  SERIES SIE
 # =========================
 SIE_SERIES = {
-    # Tipos de cambio (FIX)
     "USD_FIX":   "SF43718",
     "EUR_FIX":   "SF46410",
     "JPY_FIX":   "SF46406",
-
-    # TIIE (tenemos segura 28d)
-    "TIIE_OBJ":  "",        # ID real pendiente
+    "TIIE_OBJ":  "",         # si me das el ID real lo conecto
     "TIIE_28":   "SF60653",
-    "TIIE_91":   "",        # ID real pendiente
-    "TIIE_182":  "",        # ID real pendiente
-
-    # CETES
+    "TIIE_91":   "",         # id real pendiente
+    "TIIE_182":  "",         # id real pendiente
     "CETES_28":  "SF43936",
-    "CETES_91":  "",        # ID real pendiente
-    "CETES_182": "",        # ID real pendiente
-    "CETES_364": "",        # ID real pendiente
-
-    # UDIS
+    "CETES_91":  "",         # id real pendiente
+    "CETES_182": "",         # id real pendiente
+    "CETES_364": "",         # id real pendiente
     "UDIS":      "SP68257",
 }
 
 # =========================
-#  HTTP con reintentos
+#  Utilidades
 # =========================
 def http_session(timeout=15):
     s = requests.Session()
-    retries = Retry(
-        total=3,
-        backoff_factor=0.8,
-        status_forcelist=[429, 500, 502, 503, 504],
-        allowed_methods=frozenset(["GET", "POST"])
-    )
+    retries = Retry(total=3, backoff_factor=0.8,
+                    status_forcelist=[429, 500, 502, 503, 504],
+                    allowed_methods=frozenset(["GET", "POST"]))
     s.mount("https://", HTTPAdapter(max_retries=retries))
     s.request_timeout = timeout
     return s
@@ -92,18 +82,31 @@ def try_float(x):
         return None
 
 def parse_any_date(s: str):
+    """Devuelve datetime *naive* (sin tz) para Excel."""
     if not s:
         return None
     s = str(s)
+    # fechas tipo 'YYYY-MM-DD' o 'DD/MM/YYYY'
     for fmt in ("%Y-%m-%d", "%d/%m/%Y"):
         try:
-            return datetime.strptime(s, fmt)
+            dt = datetime.strptime(s, fmt)
+            return dt  # naive
         except:
             pass
+    # pubDate RSS u otros con tz -> convertir a CDMX y quitar tz
     try:
-        return parsedate_to_datetime(s)
+        dt = parsedate_to_datetime(s)
+        if dt.tzinfo is not None:
+            dt = dt.astimezone(TZ_MX).replace(tzinfo=None)
+        return dt
     except:
         return None
+
+def ensure_naive(dt: datetime | None):
+    if dt is None: return None
+    if dt.tzinfo is not None:
+        return dt.astimezone(TZ_MX).replace(tzinfo=None)
+    return dt
 
 def _check_tokens():
     missing = []
@@ -114,20 +117,19 @@ def _check_tokens():
         st.stop()
 
 # =========================
-#  BANXICO SIE (último / rango)
+#  Banxico SIE
 # =========================
 @st.cache_data(ttl=60*30)
-def sie_opportuno(series_id, banxico_token):
+def sie_opportuno(series_id):
     url = f"https://www.banxico.org.mx/SieAPIRest/service/v1/series/{series_id}/datos/oportuno"
-    headers = {"Bmx-Token": banxico_token}
-    s = http_session()
-    r = s.get(url, headers=headers, timeout=s.request_timeout)
+    headers = {"Bmx-Token": BANXICO_TOKEN}
+    r = http_session().get(url, headers=headers, timeout=15)
     r.raise_for_status()
     return r.json()
 
 def sie_latest(series_id):
     try:
-        data = sie_opportuno(series_id, BANXICO_TOKEN)
+        data = sie_opportuno(series_id)
         serie = data["bmx"]["series"][0]["datos"]
         if not serie: return None, None
         last = serie[-1]
@@ -139,8 +141,7 @@ def sie_latest(series_id):
 def sie_range(series_id: str, start_iso: str, end_iso: str):
     url = f"https://www.banxico.org.mx/SieAPIRest/service/v1/series/{series_id}/datos/{start_iso}/{end_iso}"
     headers = {"Bmx-Token": BANXICO_TOKEN}
-    s = http_session(timeout=20)
-    r = s.get(url, headers=headers, timeout=s.request_timeout)
+    r = http_session(20).get(url, headers=headers, timeout=20)
     r.raise_for_status()
     j = r.json()
     series = j.get("bmx", {}).get("series", [])
@@ -150,7 +151,7 @@ def sie_range(series_id: str, start_iso: str, end_iso: str):
 
 def sie_last_n(series_id: str, n: int = 6):
     end = today_cdmx()
-    start = end - timedelta(days=365*2)
+    start = end - timedelta(days=2*365)
     obs = sie_range(series_id, start.isoformat(), end.isoformat())
     vals = []
     for o in obs:
@@ -160,12 +161,10 @@ def sie_last_n(series_id: str, n: int = 6):
             vals.append((f, v))
     if not vals:
         return []
-    # ordenar por fecha ascendente y tomar los últimos n
     vals.sort(key=lambda x: parse_any_date(x[0]) or datetime.utcnow())
     return vals[-n:]
 
 def rolling_movex_for_last6(window:int=20):
-    """SMA(window) para USD/MXN FIX, alineado con los últimos 6 datos."""
     end = today_cdmx()
     start = end - timedelta(days=365)
     obs = sie_range(SIE_SERIES["USD_FIX"], start.isoformat(), end.isoformat())
@@ -173,25 +172,23 @@ def rolling_movex_for_last6(window:int=20):
     if not series:
         return [None]*6
     out = []
-    # calcular SMA por cada uno de los últimos 6 puntos
     for k in range(6, 0, -1):
-        idx = len(series) - k  # índice del punto que corresponde a Día 1.. actual
+        idx = len(series) - k
         sub = series[max(0, idx-window+1): idx+1]
         out.append(sum(sub)/len(sub) if sub else None)
     return out
 
 # =========================
-#  INEGI (UMA) – robusto
+#  INEGI UMA
 # =========================
 @st.cache_data(ttl=60*60)
 def get_uma(inegi_token: str):
     base = "https://www.inegi.org.mx/app/api/indicadores/desarrolladores/jsonxml/INDICATOR"
     ids = "620706,620707,620708"
     url = f"{base}/{ids}/es/00/true/BISE/2.0/{inegi_token}?type=json"
-    s = http_session(timeout=20)
     try:
-        r = s.get(url, timeout=s.request_timeout)
-        if r.status_code in (401, 403) or r.status_code != 200:
+        r = http_session(20).get(url, timeout=20)
+        if r.status_code in (401,403) or r.status_code != 200:
             return {"fecha": str(today_cdmx()), "diaria": None, "mensual": None, "anual": None}
         data = r.json()
         series = data.get("Series", [])
@@ -212,18 +209,16 @@ def get_uma(inegi_token: str):
         return {"fecha": str(today_cdmx()), "diaria": None, "mensual": None, "anual": None}
 
 # =========================
-#  FRED (opcional)
+#  FRED (opc)
 # =========================
 @st.cache_data(ttl=60*30)
 def fred_observations(series_id: str, start_date: str = None, end_date: str = None):
     base = "https://api.stlouisfed.org/fred/series/observations"
     params = {"series_id": series_id, "file_type": "json"}
-    if FRED_TOKEN.strip():
-        params["api_key"] = FRED_TOKEN.strip()
+    if FRED_TOKEN.strip(): params["api_key"] = FRED_TOKEN.strip()
     if start_date: params["observation_start"] = start_date
     if end_date:   params["observation_end"]   = end_date
-    s = http_session(timeout=20)
-    r = s.get(base, params=params, timeout=s.request_timeout)
+    r = http_session(20).get(base, params=params, timeout=20)
     r.raise_for_status()
     return r.json().get("observations", [])
 
@@ -255,7 +250,7 @@ def fred_cpi_yoy_series(n: int = 12):
         return []
 
 # =========================
-#  Noticias financieras (RSS)
+#  Noticias (RSS)
 # =========================
 RSS_FEEDS = [
     "https://feeds.reuters.com/reuters/businessNews",
@@ -273,7 +268,7 @@ def _strip_html(s: str) -> str:
 @st.cache_data(ttl=60*15)
 def fetch_financial_news(limit_per_feed=8, total_limit=20):
     items = []
-    s = http_session(timeout=15)
+    s = http_session(15)
     for url in RSS_FEEDS:
         try:
             r = s.get(url, timeout=s.request_timeout)
@@ -281,11 +276,12 @@ def fetch_financial_news(limit_per_feed=8, total_limit=20):
             from xml.etree import ElementTree as ET
             root = ET.fromstring(r.content)
             for item in root.findall(".//item")[:limit_per_feed]:
-                title = _strip_html((item.findtext("title") or "")).strip()
+                title = _strip_html(item.findtext("title") or "")
                 link  = (item.findtext("link") or "").strip()
                 desc  = _strip_html(item.findtext("description") or "")
                 pub   = item.findtext("pubDate") or ""
                 dt    = parse_any_date(pub) or datetime.utcnow()
+                dt    = ensure_naive(dt)
                 source = re.sub(r"^https?://(www\.)?([^/]+)/?.*$", r"\2", link) if link else "rss"
                 items.append({"dt": dt, "title": title, "link": link, "summary": desc, "source": source})
         except Exception:
@@ -296,14 +292,12 @@ def fetch_financial_news(limit_per_feed=8, total_limit=20):
         key = it["title"][:120]
         if key in seen: 
             continue
-        seen.add(key)
-        out.append(it)
-        if len(out) >= total_limit:
-            break
+        seen.add(key); out.append(it)
+        if len(out) >= total_limit: break
     return out
 
 # =========================
-#  Helpers de Excel (layout Ariel)
+#  Excel helpers
 # =========================
 def set_cell(ws, cell, value, bold=False):
     ws[cell].value = value
@@ -314,64 +308,61 @@ def autosize(ws, min_col=1, max_col=8):
         letter = get_column_letter(col)
         max_len = 0
         for cell in ws[letter]:
-            if cell.value is None: 
-                continue
+            if cell.value is None: continue
             max_len = max(max_len, len(str(cell.value)))
         ws.column_dimensions[letter].width = min(max_len + 2, 60)
 
 def write_row_values(ws, row_idx: int, values6):
-    """Escribe valores en columnas B..G (Día 1..Día actual)."""
-    for j, v in enumerate(values6, start=2):
+    for j, v in enumerate(values6, start=2):  # columnas B..G
         ws.cell(row=row_idx, column=j, value=v)
 
-def crear_hoja_indicadores_layout(valores: dict, movex6, compra6, venta6, fechas6):
-    """
-    `valores` contiene listas de 6 valores para cada serie clave:
-      usd6, eur6, jpy6, udis6, tiie28_6, cetes28_6, usdjpy6, eurusd6,
-      uma_diaria6, uma_mensual6, uma_anual6, ...
-    """
+# ── Hoja Indicadores (layout)
+def crear_hoja_indicadores_layout(valores: dict, movex6, compra6, venta6):
     wb = Workbook()
     ws = wb.active
     ws.title = "Indicadores"
 
-    # Cabecera (según layout)
     set_cell(ws, "A2", "Fecha:", bold=True)
     ws["B2"], ws["C2"], ws["D2"], ws["E2"], ws["F2"], ws["G2"] = "Día 1", "Día 2", "Día 3", "Día 4", "Día 5", "Día actual"
 
-    # Secciones / etiquetas (filas según layout adjunto)
     set_cell(ws, "A4", "TIPOS DE CAMBIO:", bold=True)
     set_cell(ws, "A6", "DÓLAR AMERICANO.", bold=True)
     set_cell(ws, "A7", "Dólar/Pesos:")
     set_cell(ws, "A8", "MOVEX:")
     set_cell(ws, "A9", "Compra:")
-    set_cell(ws, "A10", "Venta:")
-    set_cell(ws, "A12", "YEN JAPONÉS.", bold=True)
-    set_cell(ws, "A13", "Yen Japonés/Peso:")
-    set_cell(ws, "A14", "Dólar/Yen Japonés:")
-    set_cell(ws, "A16", "EURO.", bold=True)
-    set_cell(ws, "A17", "Euro/Peso:")
-    set_cell(ws, "A18", "Euro/Dólar:")
-    set_cell(ws, "A20", "UDIS:", bold=True)
-    set_cell(ws, "A22", "UDIS: ")
-    set_cell(ws, "A24", "TASAS TIIE:", bold=True)
-    set_cell(ws, "A26", "TIIE objetivo:")
-    set_cell(ws, "A27", "TIIE 28 Días:")
-    set_cell(ws, "A28", "TIIE 91 Días:")
-    set_cell(ws, "A29", "TIIE 182 Días:")
-    set_cell(ws, "A31", "CETES:", bold=True)
-    set_cell(ws, "A33", "CETES 28 Días:")
-    set_cell(ws, "A34", "CETES 91 Días:")
-    set_cell(ws, "A35", "Cetes 182 Días:")
-    set_cell(ws, "A36", "Cetes 364 Días:")
-    set_cell(ws, "A38", "UMA:", bold=True)
-    set_cell(ws, "A40", "Diario:")
-    set_cell(ws, "A41", "Mensual:")
-    set_cell(ws, "A42", "Anual:")
+    set_cell(ws, "A10","Venta:")
 
-    # Escribir valores (B..G)
-    write_row_values(ws, 7, valores["usd6"])
-    write_row_values(ws, 8, movex6)
-    write_row_values(ws, 9, compra6)
+    set_cell(ws, "A12","YEN JAPONÉS.", bold=True)
+    set_cell(ws, "A13","Yen Japonés/Peso:")
+    set_cell(ws, "A14","Dólar/Yen Japonés:")
+
+    set_cell(ws, "A16","EURO.", bold=True)
+    set_cell(ws, "A17","Euro/Peso:")
+    set_cell(ws, "A18","Euro/Dólar:")
+
+    set_cell(ws, "A20","UDIS:", bold=True)
+    set_cell(ws, "A22","UDIS: ")
+
+    set_cell(ws, "A24","TASAS TIIE:", bold=True)
+    set_cell(ws, "A26","TIIE objetivo:")
+    set_cell(ws, "A27","TIIE 28 Días:")
+    set_cell(ws, "A28","TIIE 91 Días:")
+    set_cell(ws, "A29","TIIE 182 Días:")
+
+    set_cell(ws, "A31","CETES:", bold=True)
+    set_cell(ws, "A33","CETES 28 Días:")
+    set_cell(ws, "A34","CETES 91 Días:")
+    set_cell(ws, "A35","Cetes 182 Días:")
+    set_cell(ws, "A36","Cetes 364 Días:")
+
+    set_cell(ws, "A38","UMA:", bold=True)
+    set_cell(ws, "A40","Diario:")
+    set_cell(ws, "A41","Mensual:")
+    set_cell(ws, "A42","Anual:")
+
+    write_row_values(ws, 7,  valores["usd6"])
+    write_row_values(ws, 8,  movex6)
+    write_row_values(ws, 9,  compra6)
     write_row_values(ws, 10, venta6)
 
     write_row_values(ws, 13, valores["jpy6"])
@@ -399,9 +390,7 @@ def crear_hoja_indicadores_layout(valores: dict, movex6, compra6, venta6, fechas
     autosize(ws, 1, 7)
     return wb
 
-# -------------------------
-# Hoja "Noticias"
-# -------------------------
+# ── Hoja Noticias
 def add_news_sheet(wb, news_items):
     ws2 = wb.create_sheet("Noticias")
     set_cell(ws2, "A1", "Resumen de noticias financieras", bold=True)
@@ -410,8 +399,11 @@ def add_news_sheet(wb, news_items):
     for col, h in enumerate(headers, start=1):
         c = ws2.cell(row=4, column=col, value=h); c.font = Font(bold=True)
     r = 5
+    if not news_items:
+        ws2.cell(row=r, column=1, value="Sin datos"); ws2.cell(row=r, column=3, value="No se pudieron descargar noticias (ver conexión/red).")
+        autosize(ws2, 1, 5); return
     for it in news_items:
-        dt = it["dt"]
+        dt = ensure_naive(it["dt"]) or datetime.now()  # siempre naive
         ws2.cell(row=r, column=1, value=dt); ws2.cell(row=r, column=1).number_format = "yyyy-mm-dd hh:mm"
         ws2.cell(row=r, column=2, value=it["source"])
         ws2.cell(row=r, column=3, value=it["title"])
@@ -421,10 +413,10 @@ def add_news_sheet(wb, news_items):
         r += 1
     autosize(ws2, 1, 5)
 
-# -------------------------
-# Hoja "Gráficos" + "Datos crudos" (opcionales)
-# -------------------------
+# ── Gráficos + Datos crudos
 def write_series_table(ws, start_row: int, start_col: int, title: str, series):
+    # filtrar filas sin valor
+    series = [(f, v) for (f, v) in series if v is not None]
     r, c = start_row, start_col
     ws.cell(row=r, column=c, value=title).font = Font(bold=True); r += 1
     ws.cell(row=r, column=c,   value="Fecha").font = Font(bold=True)
@@ -438,13 +430,17 @@ def write_series_table(ws, start_row: int, start_col: int, title: str, series):
 
 def add_line_chart(ws, title: str, data_range, place_at=("H", 2)):
     (r0, c0, r1, c1) = data_range
-    if r1 <= r0: return
-    chart = LineChart(); chart.title = title; chart.style = 2
+    if r1 <= r0:  # necesita al menos 2 filas de datos
+        return
+    chart = LineChart()
+    chart.title = title
+    chart.style = 2
     chart.y_axis.title = "Valor"
     chart.x_axis = DateAxis(); chart.x_axis.number_format = "yyyy-mm-dd"; chart.x_axis.title = "Fecha"
     data = Reference(ws, min_col=c1, min_row=r0, max_col=c1, max_row=r1)
     cats = Reference(ws, min_col=c0, min_row=r0, max_row=r1)
-    chart.add_data(data, titles_from_data=False); chart.set_categories(cats)
+    chart.add_data(data, titles_from_data=False)
+    chart.set_categories(cats)
     ws.add_chart(chart, f"{place_at[0]}{place_at[1]}")
 
 def add_raw_sheet(wb, raw_data: dict):
@@ -455,15 +451,16 @@ def add_raw_sheet(wb, raw_data: dict):
     r = 2
     for name, serie in raw_data.items():
         for (f, v) in serie:
-            ws.cell(row=r, column=1, value=name)
+            if v is None: continue
             dt = parse_any_date(f) or datetime.utcnow()
+            ws.cell(row=r, column=1, value=name)
             ws.cell(row=r, column=2, value=dt); ws.cell(row=r, column=2).number_format="yyyy-mm-dd"
             ws.cell(row=r, column=3, value=v)
             r += 1
     autosize(ws, 1, 4)
 
 # =========================
-#  Sidebar "Semáforos"
+#  Sidebar estado
 # =========================
 def _probe(fn, ok_pred):
     t0 = time.perf_counter()
@@ -480,122 +477,92 @@ def _probe(fn, ok_pred):
 def _render_sidebar_status():
     st.sidebar.header("🔎 Estado de fuentes")
     st.sidebar.caption(f"Última verificación: {now_ts()}")
-
-    b_status, b_msg, b_ms = _probe(
-        lambda: sie_latest(SIE_SERIES["USD_FIX"]),
-        lambda res: "ok" if isinstance(res, tuple) and res[0] and (res[1] is not None) else "err"
-    )
-    i_status, i_msg, i_ms = _probe(
-        lambda: get_uma(INEGI_TOKEN),
-        lambda res: "ok" if isinstance(res, dict) and (res.get("diaria") is not None) else ("warn" if isinstance(res, dict) else "err")
-    )
+    b_status, b_msg, b_ms = _probe(lambda: sie_latest(SIE_SERIES["USD_FIX"]),
+                                   lambda res: "ok" if isinstance(res, tuple) and res[0] and (res[1] is not None) else "err")
+    i_status, i_msg, i_ms = _probe(lambda: get_uma(INEGI_TOKEN),
+                                   lambda res: "ok" if isinstance(res, dict) and (res.get("diaria") is not None) else ("warn" if isinstance(res, dict) else "err"))
     if not FRED_TOKEN.strip():
         f_status, f_msg, f_ms = ("warn", "Sin token (fallback)", 0)
     else:
-        f_status, f_msg, f_ms = _probe(
-            lambda: fred_cpi_yoy_series(n=1),
-            lambda res: "ok" if isinstance(res, list) else "warn"
-        )
-
+        f_status, f_msg, f_ms = _probe(lambda: fred_cpi_yoy_series(n=1),
+                                       lambda res: "ok" if isinstance(res, list) else "warn")
     def badge(status, label, msg, ms):
         dot = "🟢" if status=="ok" else ("🟡" if status=="warn" else "🔴")
         st.sidebar.write(f"{dot} **{label}** — {msg} · {ms} ms")
-
     badge(b_status, "Banxico (SIE)", b_msg, b_ms)
     badge(i_status, "INEGI (UMA)", i_msg, i_ms)
     badge(f_status, "FRED (USA)", f_msg, f_ms)
-
     st.sidebar.divider()
     if st.sidebar.button("Revisar fuentes ahora"):
         st.rerun()
 
 # =========================
-#  STREAMLIT UI
+#  UI
 # =========================
 st.set_page_config(page_title="Indicadores Económicos", page_icon="📈", layout="centered")
-st.title("📈 Actualización de Indicadores (Layout multi-día)")
-st.caption("Genera un Excel con tu layout (Día 1…Día 5 y Día actual) + Noticias.")
+st.title("📈 Indicadores (últimos 6 días) + Noticias")
+st.caption("Excel con tu layout + hoja de Noticias; opcional Gráficos y Datos crudos.")
 
 with st.expander("Opciones"):
     movex_win = st.number_input("Ventana MOVEX (días hábiles)", min_value=5, max_value=60, value=20, step=1)
     margen_pct = st.number_input("Margen Compra/Venta sobre FIX (% por lado)", min_value=0.0, max_value=5.0, value=0.5, step=0.1)
-    do_charts = st.toggle("Agregar hoja 'Gráficos' (últimos 12)", value=False)
-    do_raw    = st.toggle("Agregar hoja 'Datos crudos' (últimos 12)", value=False)
+    do_charts = st.toggle("Agregar hoja 'Gráficos' (últimos 12)", value=True)
+    do_raw    = st.toggle("Agregar hoja 'Datos crudos' (últimos 12)", value=True)
 
 _check_tokens()
 _render_sidebar_status()
 
 if st.button("Generar Excel"):
-    # 1) Traer series (últimos 6)
-    usd6  = [v for _, v in sie_last_n(SIE_SERIES["USD_FIX"], n=6)]
-    eur6  = [v for _, v in sie_last_n(SIE_SERIES["EUR_FIX"], n=6)]
-    jpy6  = [v for _, v in sie_last_n(SIE_SERIES["JPY_FIX"], n=6)]
-    udis6 = [v for _, v in sie_last_n(SIE_SERIES["UDIS"], n=6)]
+    # ── 1) Series últimos 6
+    def pad6(lst): return ([None]*(6-len(lst)))+lst if len(lst)<6 else lst
 
-    # si faltan datos, completar con None al inicio
-    def pad6(lst):
-        return ([None]*(6-len(lst)))+lst if len(lst)<6 else lst
-    usd6, eur6, jpy6, udis6 = map(pad6, (usd6, eur6, jpy6, udis6))
+    usd6  = pad6([v for _, v in sie_last_n(SIE_SERIES["USD_FIX"], n=6)])
+    eur6  = pad6([v for _, v in sie_last_n(SIE_SERIES["EUR_FIX"], n=6)])
+    jpy6  = pad6([v for _, v in sie_last_n(SIE_SERIES["JPY_FIX"], n=6)])
+    udis6 = pad6([v for _, v in sie_last_n(SIE_SERIES["UDIS"],    n=6)])
 
-    # 2) Derivados por día
-    movex6 = rolling_movex_for_last6(window=int(movex_win))
+    movex6  = rolling_movex_for_last6(window=int(movex_win))
     compra6 = [x*(1 - margen_pct/100.0) if x is not None else None for x in usd6]
     venta6  = [x*(1 + margen_pct/100.0) if x is not None else None for x in usd6]
-    eurusd6 = [(e/u if (e is not None and u and u!=0) else None) for e,u in zip(eur6, usd6)]
-    usdjpy6 = [(u/j if (u is not None and j and j!=0) else None) for u,j in zip(usd6, jpy6)]
+    eurusd6 = [(e/u if (e is not None and u) else None) for e,u in zip(eur6, usd6)]
+    usdjpy6 = [(u/j if (u is not None and j) else None) for u,j in zip(usd6, jpy6)]
 
-    # 3) Tasas (TIIE/CETES) que sí tenemos
-    tiie28_6   = [v for _, v in sie_last_n(SIE_SERIES["TIIE_28"], n=6)]
-    cetes28_6  = [v for _, v in sie_last_n(SIE_SERIES["CETES_28"], n=6)]
-    tiie28_6, cetes28_6 = map(pad6, (tiie28_6, cetes28_6))
+    tiie28_6  = pad6([v for _, v in sie_last_n(SIE_SERIES["TIIE_28"], n=6)])
+    cetes28_6 = pad6([v for _, v in sie_last_n(SIE_SERIES["CETES_28"], n=6)])
 
-    # Las que no tenemos ID todavía => None
     none6 = [None]*6
-    tiie_obj6  = none6 if not SIE_SERIES["TIIE_OBJ"]  else [v for _, v in sie_last_n(SIE_SERIES["TIIE_OBJ"], n=6)]
-    tiie91_6   = none6 if not SIE_SERIES["TIIE_91"]   else [v for _, v in sie_last_n(SIE_SERIES["TIIE_91"], n=6)]
-    tiie182_6  = none6 if not SIE_SERIES["TIIE_182"]  else [v for _, v in sie_last_n(SIE_SERIES["TIIE_182"], n=6)]
-    cetes91_6  = none6 if not SIE_SERIES["CETES_91"]  else [v for _, v in sie_last_n(SIE_SERIES["CETES_91"], n=6)]
-    cetes182_6 = none6 if not SIE_SERIES["CETES_182"] else [v for _, v in sie_last_n(SIE_SERIES["CETES_182"], n=6)]
-    cetes364_6 = none6 if not SIE_SERIES["CETES_364"] else [v for _, v in sie_last_n(SIE_SERIES["CETES_364"], n=6)]
+    tiie_obj6  = none6 if not SIE_SERIES["TIIE_OBJ"]  else pad6([v for _, v in sie_last_n(SIE_SERIES["TIIE_OBJ"],  n=6)])
+    tiie91_6   = none6 if not SIE_SERIES["TIIE_91"]   else pad6([v for _, v in sie_last_n(SIE_SERIES["TIIE_91"],   n=6)])
+    tiie182_6  = none6 if not SIE_SERIES["TIIE_182"]  else pad6([v for _, v in sie_last_n(SIE_SERIES["TIIE_182"],  n=6)])
+    cetes91_6  = none6 if not SIE_SERIES["CETES_91"]  else pad6([v for _, v in sie_last_n(SIE_SERIES["CETES_91"],  n=6)])
+    cetes182_6 = none6 if not SIE_SERIES["CETES_182"] else pad6([v for _, v in sie_last_n(SIE_SERIES["CETES_182"], n=6)])
+    cetes364_6 = none6 if not SIE_SERIES["CETES_364"] else pad6([v for _, v in sie_last_n(SIE_SERIES["CETES_364"], n=6)])
 
-    # 4) UMA (repetimos el valor vigente en las 6 columnas, por su naturaleza)
     uma = get_uma(INEGI_TOKEN)
-    uma_diaria6  = [uma["diaria"]]*6
-    uma_mensual6 = [uma["mensual"]]*6
-    uma_anual6   = [uma["anual"]]*6
-
-    # Guardar valores para escribir al layout
     valores = {
         "usd6": usd6, "eur6": eur6, "jpy6": jpy6,
         "eurusd6": eurusd6, "usdjpy6": usdjpy6,
         "udis6": udis6,
-        "tiie_obj6": pad6(tiie_obj6), "tiie28_6": tiie28_6, "tiie91_6": pad6(tiie91_6), "tiie182_6": pad6(tiie182_6),
-        "cetes28_6": cetes28_6, "cetes91_6": pad6(cetes91_6), "cetes182_6": pad6(cetes182_6), "cetes364_6": pad6(cetes364_6),
-        "uma_diaria6": uma_diaria6, "uma_mensual6": uma_mensual6, "uma_anual6": uma_anual6,
+        "tiie_obj6": tiie_obj6, "tiie28_6": tiie28_6, "tiie91_6": tiie91_6, "tiie182_6": tiie182_6,
+        "cetes28_6": cetes28_6, "cetes91_6": cetes91_6, "cetes182_6": cetes182_6, "cetes364_6": cetes364_6,
+        "uma_diaria6": [uma["diaria"]]*6, "uma_mensual6": [uma["mensual"]]*6, "uma_anual6": [uma["anual"]]*6,
     }
 
-    # Fechas reales de los 6 datos de USD (pueden servir de referencia)
-    fechas6 = [f for f,_ in sie_last_n(SIE_SERIES["USD_FIX"], n=6)]
-    fechas6 = pad6(fechas6)
-
-    # 5) Noticias
+    # ── 2) Noticias (con fallback)
     news = fetch_financial_news(limit_per_feed=8, total_limit=20)
 
     try:
-        # Crear libro con tu layout
-        wb = crear_hoja_indicadores_layout(valores, movex6, compra6, venta6, fechas6)
-
-        # Agregar "Noticias"
+        # Hoja Indicadores con tu layout
+        wb = crear_hoja_indicadores_layout(valores, movex6, compra6, venta6)
+        # Hoja Noticias
         add_news_sheet(wb, news)
 
-        # (Opcional) Hojas extra
+        # ── 3) Hojas opcionales
         if do_charts or do_raw:
-            # preparar series largas
-            usd_last12   = sie_last_n(SIE_SERIES["USD_FIX"], n=12)
-            tiie_last12  = sie_last_n(SIE_SERIES["TIIE_28"], n=12)
-            # FRED opcional para complementar gráficos
-            fed_last12   = fred_last_n("FEDFUNDS", n=12)
-            cpi_last12   = fred_cpi_yoy_series(n=12)
+            usd_last12  = sie_last_n(SIE_SERIES["USD_FIX"], n=12)
+            tiie_last12 = sie_last_n(SIE_SERIES["TIIE_28"], n=12)
+            fed_last12  = fred_last_n("FEDFUNDS", n=12)
+            cpi_last12  = fred_cpi_yoy_series(n=12)
 
             if do_charts:
                 ws3 = wb.create_sheet("Gráficos")
@@ -618,9 +585,8 @@ if st.button("Generar Excel"):
                 }
                 add_raw_sheet(wb, raw)
 
-        # Entregar archivo
         bio = io.BytesIO(); wb.save(bio)
-        st.success("¡Listo! Archivo generado con el layout multi-día y noticias.")
+        st.success("¡Listo! Archivo generado sin reparaciones de Excel.")
         st.download_button(
             "Descargar Excel",
             data=bio.getvalue(),
