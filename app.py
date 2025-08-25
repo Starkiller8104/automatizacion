@@ -29,6 +29,24 @@ import streamlit as st
 
 import xlsxwriter  # Motor para Excel y gráficos
 
+from pathlib import Path
+try:
+    from PIL import Image  # Asegúrate de tener Pillow en requirements.txt
+except ImportError:
+    Image = None
+
+def load_logo():
+    """Busca logo.png en el mismo directorio del app o en /assets."""
+    candidates = [
+        Path(__file__).parent / "logo.png",
+        Path("logo.png"),
+        Path(__file__).parent / "assets" / "logo.png",
+    ]
+    for p in candidates:
+        if p.exists():
+            return Image.open(p) if Image else str(p)
+    return None
+
 # =========================
 #  TOKENS
 # =========================
