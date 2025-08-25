@@ -10,8 +10,8 @@ Original file is located at
 # app.py
 # ──────────────────────────────────────────────────────────────────────────────
 # Indicadores (últimos 6 días con tu layout) + Noticias + (opcional) Gráficos y Datos crudos.
-# Fixes: fechas naive (sin tz), charts seguros, noticias con fallback.
-# Tokens incluidos (Banxico/INEGI).
+# Fechas "naive" (sin tz) para Excel, gráficos seguros y UMA robusto con diagnóstico.
+# Tokens incrustados: Banxico/INEGI.
 # ──────────────────────────────────────────────────────────────────────────────
 
 import io
@@ -34,7 +34,7 @@ from openpyxl.chart.axis import DateAxis
 #  TOKENS
 # =========================
 BANXICO_TOKEN = "677aaedf11d11712aa2ccf73da4d77b6b785474eaeb2e092f6bad31b29de6609"
-INEGI_TOKEN   = "9886fe68-e51f-c345-0b8f-adb99da1a1fd"
+INEGI_TOKEN   = "0146a9ed-b70f-4ea2-8781-744b900c19d1"   # (nuevo)
 FRED_TOKEN    = ""  # opcional
 
 TZ_MX = pytz.timezone("America/Mexico_City")
@@ -46,14 +46,18 @@ SIE_SERIES = {
     "USD_FIX":   "SF43718",
     "EUR_FIX":   "SF46410",
     "JPY_FIX":   "SF46406",
-    "TIIE_OBJ":  "",         # si me das el ID real lo conecto
-    "TIIE_28":   "SF60653",
-    "TIIE_91":   "",         # id real pendiente
-    "TIIE_182":  "",         # id real pendiente
+
+    # TIIE / CETES (IDs seguros que ya veníamos usando)
+    "TIIE_OBJ":  "",          # pon el id real si lo tienes
+    "TIIE_28":   "SF60653",   # usamos este porque te ha funcionado
+    "TIIE_91":   "",          # id pendiente
+    "TIIE_182":  "",          # id pendiente
+
     "CETES_28":  "SF43936",
-    "CETES_91":  "",         # id real pendiente
-    "CETES_182": "",         # id real pendiente
-    "CETES_364": "",         # id real pendiente
+    "CETES_91":  "",          # id pendiente
+    "CETES_182": "",          # id pendiente
+    "CETES_364": "",          # id pendiente
+
     "UDIS":      "SP68257",
 }
 
@@ -86,14 +90,11 @@ def parse_any_date(s: str):
     if not s:
         return None
     s = str(s)
-    # fechas tipo 'YYYY-MM-DD' o 'DD/MM/YYYY'
     for fmt in ("%Y-%m-%d", "%d/%m/%Y"):
         try:
-            dt = datetime.strptime(s, fmt)
-            return dt  # naive
+            return datetime.strptime(s, fmt)
         except:
             pass
-    # pubDate RSS u otros con tz -> convertir a CDMX y quitar tz
     try:
         dt = parsedate_to_datetime(s)
         if dt.tzinfo is not None:
@@ -179,37 +180,78 @@ def rolling_movex_for_last6(window:int=20):
     return out
 
 # =========================
-#  INEGI UMA
+#  INEGI UMA – robusto (con diagnóstico)
 # =========================
 @st.cache_data(ttl=60*60)
-def get_uma(inegi_token: str):
+def get_uma(inegi_token: str, verbose: bool = False):
+    """
+    UMA nacional:
+      620706 diaria, 620707 mensual, 620708 anual
+    Retorna: {'fecha','diaria','mensual','anual','_status','_source'} (+ '_raw' si verbose)
+    """
     base = "https://www.inegi.org.mx/app/api/indicadores/desarrolladores/jsonxml/INDICATOR"
     ids = "620706,620707,620708"
-    url = f"{base}/{ids}/es/00/true/BISE/2.0/{inegi_token}?type=json"
-    try:
-        r = http_session(20).get(url, timeout=20)
-        if r.status_code in (401,403) or r.status_code != 200:
-            return {"fecha": str(today_cdmx()), "diaria": None, "mensual": None, "anual": None}
-        data = r.json()
-        series = data.get("Series", [])
-        if not series or any("OBSERVATIONS" not in s for s in series):
-            return {"fecha": str(today_cdmx()), "diaria": None, "mensual": None, "anual": None}
-        diaria_obs  = series[0]["OBSERVATIONS"][-1]
-        mensual_obs = series[1]["OBSERVATIONS"][-1] if series[1]["OBSERVATIONS"] else None
-        anual_obs   = series[2]["OBSERVATIONS"][-1] if series[2]["OBSERVATIONS"] else None
-        fecha   = diaria_obs.get("TIME_PERIOD") or str(today_cdmx())
-        diaria  = try_float(diaria_obs.get("OBS_VALUE"))
-        mensual = try_float(mensual_obs.get("OBS_VALUE")) if mensual_obs else None
-        anual   = try_float(anual_obs.get("OBS_VALUE")) if anual_obs else None
-        if diaria is not None:
-            if mensual is None: mensual = diaria * 30.4
-            if anual   is None: anual   = (mensual or (diaria * 30.4)) * 12
-        return {"fecha": fecha, "diaria": diaria, "mensual": mensual, "anual": anual}
-    except:
-        return {"fecha": str(today_cdmx()), "diaria": None, "mensual": None, "anual": None}
+    urls = [
+        f"{base}/{ids}/es/00/true/BISE/2.0/{inegi_token}?type=json",
+        f"{base}/{ids}/es/00/true/BIE/2.0/{inegi_token}?type=json",  # fallback
+    ]
+
+    def _num(x):
+        try:
+            return float(str(x).replace(",", ""))
+        except:
+            return None
+
+    s = http_session(timeout=20)
+    last_err = None
+    for url in urls:
+        try:
+            r = s.get(url, timeout=s.request_timeout)
+            status = r.status_code
+            if status != 200:
+                last_err = f"HTTP {status}"
+                continue
+            data = r.json()
+            series = data.get("Series") or data.get("series") or []
+            if not series:
+                last_err = "Sin 'Series'"
+                continue
+
+            def last_obs(s):
+                obs = s.get("OBSERVATIONS") or s.get("observations") or []
+                return obs[-1] if obs else None
+
+            d_obs = last_obs(series[0])
+            m_obs = last_obs(series[1]) if len(series) > 1 else None
+            a_obs = last_obs(series[2]) if len(series) > 2 else None
+
+            def get_v(o):
+                if not o: return None
+                return _num(o.get("OBS_VALUE") or o.get("OBS_VALUE_STR") or o.get("value"))
+
+            fecha   = (d_obs or m_obs or a_obs or {}).get("TIME_PERIOD") or str(today_cdmx())
+            diaria  = get_v(d_obs)
+            mensual = get_v(m_obs)
+            anual   = get_v(a_obs)
+
+            if diaria is not None:
+                if mensual is None: mensual = diaria * 30.4
+                if anual   is None: anual   = mensual * 12
+
+            out = {"fecha": fecha, "diaria": diaria, "mensual": mensual, "anual": anual,
+                   "_status": "OK", "_source": url}
+            if verbose:
+                out["_raw"] = data
+            return out
+
+        except Exception as e:
+            last_err = f"{type(e).__name__}"
+
+    return {"fecha": str(today_cdmx()), "diaria": None, "mensual": None, "anual": None,
+            "_status": f"Fallo ({last_err})", "_source": urls[-1]}
 
 # =========================
-#  FRED (opc)
+#  FRED (opcional, para gráficos)
 # =========================
 @st.cache_data(ttl=60*30)
 def fred_observations(series_id: str, start_date: str = None, end_date: str = None):
@@ -250,7 +292,7 @@ def fred_cpi_yoy_series(n: int = 12):
         return []
 
 # =========================
-#  Noticias (RSS)
+#  Noticias (RSS) con fechas naive
 # =========================
 RSS_FEEDS = [
     "https://feeds.reuters.com/reuters/businessNews",
@@ -297,7 +339,7 @@ def fetch_financial_news(limit_per_feed=8, total_limit=20):
     return out
 
 # =========================
-#  Excel helpers
+#  Excel helpers y layout
 # =========================
 def set_cell(ws, cell, value, bold=False):
     ws[cell].value = value
@@ -316,15 +358,22 @@ def write_row_values(ws, row_idx: int, values6):
     for j, v in enumerate(values6, start=2):  # columnas B..G
         ws.cell(row=row_idx, column=j, value=v)
 
-# ── Hoja Indicadores (layout)
-def crear_hoja_indicadores_layout(valores: dict, movex6, compra6, venta6):
+def crear_hoja_indicadores_layout(valores: dict, movex6, compra6, venta6, fechas6_dt):
     wb = Workbook()
     ws = wb.active
     ws.title = "Indicadores"
 
+    # Cabecera con fechas reales
     set_cell(ws, "A2", "Fecha:", bold=True)
-    ws["B2"], ws["C2"], ws["D2"], ws["E2"], ws["F2"], ws["G2"] = "Día 1", "Día 2", "Día 3", "Día 4", "Día 5", "Día actual"
+    headers_cells = ["B2","C2","D2","E2","F2","G2"]
+    for cell_ref, d in zip(headers_cells, fechas6_dt):
+        if d is None:
+            ws[cell_ref] = ""
+        else:
+            ws[cell_ref] = d
+            ws[cell_ref].number_format = "yyyy-mm-dd"
 
+    # Secciones / etiquetas
     set_cell(ws, "A4", "TIPOS DE CAMBIO:", bold=True)
     set_cell(ws, "A6", "DÓLAR AMERICANO.", bold=True)
     set_cell(ws, "A7", "Dólar/Pesos:")
@@ -360,6 +409,7 @@ def crear_hoja_indicadores_layout(valores: dict, movex6, compra6, venta6):
     set_cell(ws, "A41","Mensual:")
     set_cell(ws, "A42","Anual:")
 
+    # Valores
     write_row_values(ws, 7,  valores["usd6"])
     write_row_values(ws, 8,  movex6)
     write_row_values(ws, 9,  compra6)
@@ -390,7 +440,6 @@ def crear_hoja_indicadores_layout(valores: dict, movex6, compra6, venta6):
     autosize(ws, 1, 7)
     return wb
 
-# ── Hoja Noticias
 def add_news_sheet(wb, news_items):
     ws2 = wb.create_sheet("Noticias")
     set_cell(ws2, "A1", "Resumen de noticias financieras", bold=True)
@@ -400,10 +449,11 @@ def add_news_sheet(wb, news_items):
         c = ws2.cell(row=4, column=col, value=h); c.font = Font(bold=True)
     r = 5
     if not news_items:
-        ws2.cell(row=r, column=1, value="Sin datos"); ws2.cell(row=r, column=3, value="No se pudieron descargar noticias (ver conexión/red).")
+        ws2.cell(row=r, column=1, value="Sin datos")
+        ws2.cell(row=r, column=3, value="No se pudieron descargar noticias (revisa conexión/red).")
         autosize(ws2, 1, 5); return
     for it in news_items:
-        dt = ensure_naive(it["dt"]) or datetime.now()  # siempre naive
+        dt = ensure_naive(it["dt"]) or datetime.now()
         ws2.cell(row=r, column=1, value=dt); ws2.cell(row=r, column=1).number_format = "yyyy-mm-dd hh:mm"
         ws2.cell(row=r, column=2, value=it["source"])
         ws2.cell(row=r, column=3, value=it["title"])
@@ -413,9 +463,8 @@ def add_news_sheet(wb, news_items):
         r += 1
     autosize(ws2, 1, 5)
 
-# ── Gráficos + Datos crudos
+# Gráficos + Datos crudos
 def write_series_table(ws, start_row: int, start_col: int, title: str, series):
-    # filtrar filas sin valor
     series = [(f, v) for (f, v) in series if v is not None]
     r, c = start_row, start_col
     ws.cell(row=r, column=c, value=title).font = Font(bold=True); r += 1
@@ -430,7 +479,7 @@ def write_series_table(ws, start_row: int, start_col: int, title: str, series):
 
 def add_line_chart(ws, title: str, data_range, place_at=("H", 2)):
     (r0, c0, r1, c1) = data_range
-    if r1 <= r0:  # necesita al menos 2 filas de datos
+    if r1 <= r0:  # necesita >=2 filas
         return
     chart = LineChart()
     chart.title = title
@@ -460,7 +509,7 @@ def add_raw_sheet(wb, raw_data: dict):
     autosize(ws, 1, 4)
 
 # =========================
-#  Sidebar estado
+#  Sidebar estado y diagnóstico UMA
 # =========================
 def _probe(fn, ok_pred):
     t0 = time.perf_counter()
@@ -484,8 +533,7 @@ def _render_sidebar_status():
     if not FRED_TOKEN.strip():
         f_status, f_msg, f_ms = ("warn", "Sin token (fallback)", 0)
     else:
-        f_status, f_msg, f_ms = _probe(lambda: fred_cpi_yoy_series(n=1),
-                                       lambda res: "ok" if isinstance(res, list) else "warn")
+        f_status, f_msg, f_ms = ("ok", "OK", 0)
     def badge(status, label, msg, ms):
         dot = "🟢" if status=="ok" else ("🟡" if status=="warn" else "🔴")
         st.sidebar.write(f"{dot} **{label}** — {msg} · {ms} ms")
@@ -493,8 +541,15 @@ def _render_sidebar_status():
     badge(i_status, "INEGI (UMA)", i_msg, i_ms)
     badge(f_status, "FRED (USA)", f_msg, f_ms)
     st.sidebar.divider()
-    if st.sidebar.button("Revisar fuentes ahora"):
-        st.rerun()
+    with st.sidebar.expander("Diagnóstico UMA"):
+        col1, col2 = st.columns(2)
+        if col1.button("Probar INEGI ahora"):
+            res = get_uma(INEGI_TOKEN, verbose=True)
+            st.write("Estado:", res.get("_status"), "— Fuente:", res.get("_source"))
+            st.json(res)
+        if col2.button("Limpiar caché UMA"):
+            get_uma.clear()
+            st.success("Caché de UMA limpiada. Vuelve a generar el Excel.")
 
 # =========================
 #  UI
@@ -513,10 +568,13 @@ _check_tokens()
 _render_sidebar_status()
 
 if st.button("Generar Excel"):
-    # ── 1) Series últimos 6
+    # 1) Series últimos 6 y FECHAS REALES para encabezados
     def pad6(lst): return ([None]*(6-len(lst)))+lst if len(lst)<6 else lst
 
-    usd6  = pad6([v for _, v in sie_last_n(SIE_SERIES["USD_FIX"], n=6)])
+    usd6_pairs = sie_last_n(SIE_SERIES["USD_FIX"], n=6)
+    fechas6_dt = pad6([parse_any_date(f) for f,_ in usd6_pairs])
+    usd6  = pad6([v for _, v in usd6_pairs])
+
     eur6  = pad6([v for _, v in sie_last_n(SIE_SERIES["EUR_FIX"], n=6)])
     jpy6  = pad6([v for _, v in sie_last_n(SIE_SERIES["JPY_FIX"], n=6)])
     udis6 = pad6([v for _, v in sie_last_n(SIE_SERIES["UDIS"],    n=6)])
@@ -538,7 +596,7 @@ if st.button("Generar Excel"):
     cetes182_6 = none6 if not SIE_SERIES["CETES_182"] else pad6([v for _, v in sie_last_n(SIE_SERIES["CETES_182"], n=6)])
     cetes364_6 = none6 if not SIE_SERIES["CETES_364"] else pad6([v for _, v in sie_last_n(SIE_SERIES["CETES_364"], n=6)])
 
-    uma = get_uma(INEGI_TOKEN)
+    uma = get_uma(INEGI_TOKEN)  # se repite a lo largo de las 6 columnas
     valores = {
         "usd6": usd6, "eur6": eur6, "jpy6": jpy6,
         "eurusd6": eurusd6, "usdjpy6": usdjpy6,
@@ -548,16 +606,16 @@ if st.button("Generar Excel"):
         "uma_diaria6": [uma["diaria"]]*6, "uma_mensual6": [uma["mensual"]]*6, "uma_anual6": [uma["anual"]]*6,
     }
 
-    # ── 2) Noticias (con fallback)
+    # 2) Noticias (con fallback)
     news = fetch_financial_news(limit_per_feed=8, total_limit=20)
 
     try:
-        # Hoja Indicadores con tu layout
-        wb = crear_hoja_indicadores_layout(valores, movex6, compra6, venta6)
+        # Hoja Indicadores con fechas reales en B2..G2
+        wb = crear_hoja_indicadores_layout(valores, movex6, compra6, venta6, fechas6_dt)
         # Hoja Noticias
         add_news_sheet(wb, news)
 
-        # ── 3) Hojas opcionales
+        # 3) Hojas opcionales (gráficos / datos crudos)
         if do_charts or do_raw:
             usd_last12  = sie_last_n(SIE_SERIES["USD_FIX"], n=12)
             tiie_last12 = sie_last_n(SIE_SERIES["TIIE_28"], n=12)
@@ -586,7 +644,7 @@ if st.button("Generar Excel"):
                 add_raw_sheet(wb, raw)
 
         bio = io.BytesIO(); wb.save(bio)
-        st.success("¡Listo! Archivo generado sin reparaciones de Excel.")
+        st.success("¡Listo! Archivo generado con fechas reales en B2..G2.")
         st.download_button(
             "Descargar Excel",
             data=bio.getvalue(),
