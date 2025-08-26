@@ -1,3 +1,4 @@
+
 # -*- coding: utf-8 -*-
 """
 Indicadores Económicos IMEMSA
@@ -243,7 +244,7 @@ def build_news_bullets(max_items=12):
     return "\n".join(bullets) if bullets else "Sin novedades (verifica conexión y RSS)."
 
 # =========================
-#  Sidebar (logo + tokens + estado simple)
+#  Sidebar (tokens)
 # =========================
 st.sidebar.header("IMEMSA")
 st.sidebar.caption(f"Última verificación: {now_ts()}")
@@ -295,7 +296,6 @@ if st.button("Generar Excel"):
         st.stop()
 
     # --- MOVEX sobre FIX
-    # Construimos serie larga para calcular PM
     end = today_cdmx()
     start = end - timedelta(days=2*365)
     obs_fix_long = sie_range(SIE["USD_FIX"], start.isoformat(), end.isoformat(), BANXICO_TOKEN)
@@ -349,17 +349,16 @@ if st.button("Generar Excel"):
     ws = wb.add_worksheet("Indicadores")
     ws.write(0, 0, "Indicadores (últimos 6 días)", fmt_title)
     ws.write(1, 0, "Fecha", fmt_hdr)
-    # Fechas en B2..G2 (fila 1 indexado 0 => 1)
+    # Fechas en B2..G2
     for i, d in enumerate(date_labels):
         ws.write(1, 1+i, d, fmt_hdr)
 
-    start_row = 2  # fila 3 1-based
+    start_row = 2  # fila 3 (1-based)
     for r, (label, values) in enumerate(rowset):
         ws.write(start_row+r, 0, label, fmt_row_lbl)
         for c, val in enumerate(values):
-            # formato según magnitud (CETES en % vs tipo de cambio)
             if "CETES" in label:
-                ws.write(start_row+r, 1+c, val/100 if (val is not None) else None, fmt_pct2)
+                ws.write(start_row+r, 1+c, (val/100 if val is not None else None), fmt_pct2)
             elif label == "UDIS":
                 ws.write(start_row+r, 1+c, val, fmt_num6)
             else:
@@ -387,21 +386,24 @@ if st.button("Generar Excel"):
         ws3 = wb.add_worksheet("Datos crudos")
         ws3.write(0,0,"Serie", fmt_hdr); ws3.write(0,1,"Fecha", fmt_hdr); ws3.write(0,2,"Valor", fmt_hdr)
         row = 1
-        def dump_raw(tag, lst):
-            nonlocal row
-            for f,v in lst:
-                ws3.write(row, 0, tag)
-                ws3.write(row, 1, format_ddmmyyyy(f), fmt_date)
-                ws3.write(row, 2, v, fmt_num6)
-                row += 1
-        dump_raw("USD/MXN (FIX)", last6_fix)
-        dump_raw("EUR/MXN", last6_eur)
-        dump_raw("JPY/MXN", last6_jpy)
-        dump_raw("CETES 28d (%)", last6_c28)
-        dump_raw("CETES 91d (%)", last6_c91)
-        dump_raw("CETES 182d (%)", last6_c182)
-        dump_raw("CETES 364d (%)", last6_c364)
-        dump_raw("UDIS", last6_udis)
+
+        def dump_raw(tag, lst, row_idx):
+            """Escribe (serie, fecha, valor) y devuelve siguiente fila."""
+            for f, v in lst:
+                ws3.write(row_idx, 0, tag)
+                ws3.write(row_idx, 1, format_ddmmyyyy(f), fmt_date)
+                ws3.write(row_idx, 2, v, fmt_num6)
+                row_idx += 1
+            return row_idx
+
+        row = dump_raw("USD/MXN (FIX)", last6_fix, row)
+        row = dump_raw("EUR/MXN",       last6_eur, row)
+        row = dump_raw("JPY/MXN",       last6_jpy, row)
+        row = dump_raw("CETES 28d (%)", last6_c28, row)
+        row = dump_raw("CETES 91d (%)", last6_c91, row)
+        row = dump_raw("CETES 182d (%)",last6_c182, row)
+        row = dump_raw("CETES 364d (%)",last6_c364, row)
+        row = dump_raw("UDIS",          last6_udis, row)
         ws3.set_column(0, 0, 18); ws3.set_column(1, 1, 12); ws3.set_column(2, 2, 14)
 
     # ---------- Hoja Gráficos (opcional) ----------
@@ -409,8 +411,7 @@ if st.button("Generar Excel"):
         ws4 = wb.add_worksheet("Gráficos")
         # Gráfico 1: USD/MXN FIX
         chart1 = wb.add_chart({'type': 'line'})
-        # rango: hoja Indicadores, fila de USD/MXN = start_row + 0
-        usd_row = start_row + 0
+        usd_row = start_row + 0  # USD/MXN (FIX) es la 1ra fila de datos
         chart1.add_series({
             'name':       "=Indicadores!$A$%d" % (usd_row+1),
             'categories': "=Indicadores!$B$2:$G$2",
@@ -423,9 +424,9 @@ if st.button("Generar Excel"):
 
         # Gráfico 2: CETES (4 líneas)
         chart2 = wb.add_chart({'type': 'line'})
-        labels = [("CETES 28d (%)", 4), ("CETES 91d (%)", 5), ("CETES 182d (%)", 6), ("CETES 364d (%)", 7)]
-        for lbl, offset in labels:
-            r = start_row + offset
+        cetes_offsets = [4, 5, 6, 7]  # en rowset: 4..7 son cetes
+        for off in cetes_offsets:
+            r = start_row + off
             chart2.add_series({
                 'name':       "=Indicadores!$A$%d" % (r+1),
                 'categories': "=Indicadores!$B$2:$G$2",
