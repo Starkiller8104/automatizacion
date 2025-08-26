@@ -1,6 +1,5 @@
 # -*- coding: utf-8 -*-
 
-
 # -*- coding: utf-8 -*-
 """
 App Streamlit: Automatización de Indicadores (IMEMSA)
