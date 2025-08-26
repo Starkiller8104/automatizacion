@@ -20,6 +20,8 @@ import xlsxwriter
 from requests.adapters import HTTPAdapter, Retry
 
 import streamlit as st
+import warnings
+warnings.filterwarnings("ignore", category=DeprecationWarning)
 
 # ==== LOGIN (agregado) ====
 import os, pytz as _pytz_for_login  # _pytz_for_login sólo para asegurar import si no existía
