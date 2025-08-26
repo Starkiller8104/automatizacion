@@ -1,4 +1,5 @@
 # -*- coding: utf-8 -*-
+# -*- coding: utf-8 -*-
 
 # -*- coding: utf-8 -*-
 """
@@ -19,7 +20,7 @@ st.set_page_config(page_title="Automatización Indicadores", page_icon="📊", l
 TZ_MX = pytz.timezone("America/Mexico_City")
 
 # --------------------------
-# Autenticación
+# Autenticación (login)
 # --------------------------
 def _get_app_password() -> str:
     try:
@@ -43,7 +44,7 @@ def _check_password() -> bool:
         return True
 
     st.title("🔒 Acceso restringido")
-    st.text_input("Contraseña", type="password", key="password_input", on_change=_try_login)
+    st.text_input("Contraseña", type="password", key="password_input", on_change=_try_login, placeholder="Escribe tu contraseña…")
     if not st.session_state.auth_ok and st.session_state.get("password_input","") == "":
         st.caption("Introduce la contraseña para continuar.")
     elif not st.session_state.auth_ok:
@@ -53,12 +54,6 @@ def _check_password() -> bool:
 
 if not _check_password():
     st.stop()
-
-# --------------------------
-# Logo en sidebar (sin leyenda)
-# --------------------------
-st.sidebar.image("logo.png", use_column_width=True)
-st.sidebar.markdown("**Automatización de Indicadores**")
 
 # --------------------------
 # Utilidades
@@ -144,67 +139,123 @@ def build_news_bullets(max_items=10):
                     rows.append((e.get("published",""), title, link))
         except Exception:
             pass
-    rows.sort(reverse=True, key=lambda x: x[0])
-    return "\n".join(f"• {t} — {l}" for _,t,l in rows[:max_items]) or "Sin noticias."
+    try:
+        rows.sort(reverse=True, key=lambda x: x[0])
+    except Exception:
+        pass
+    bullets = [f"• {t} — {l}" for _,t,l in rows[:max_items]]
+    return "\n".join(bullets) if bullets else "Sin noticias."
 
 # --------------------------
 # UI
 # --------------------------
 st.title("📊 Automatización de Indicadores IMEMSA")
+st.write("Sube tu archivo Excel y generaré el actualizado listo para descargar.")
 
+# Uploader + tokens editables
 uploaded = st.file_uploader("Selecciona tu archivo .xlsx", type=["xlsx"])
 with st.sidebar.expander("🔑 Tokens de APIs"):
     st.caption("Se guardarán en la hoja **Token** del Excel resultante.")
-    token_banxico_input = st.text_input("BANXICO_TOKEN", value="", type="password")
-    token_inegi_input = st.text_input("INEGI_TOKEN", value="", type="password")
+    token_banxico_input = st.text_input("BANXICO_TOKEN", value="", type="password", help="Si lo dejas vacío, se usa el del Excel original.")
+    token_inegi_input = st.text_input("INEGI_TOKEN", value="", type="password", help="Si lo dejas vacío, se usa el del Excel original.")
 
-run_news = st.checkbox("📰 Incluir noticias financieras en la hoja 'Noticias'", value=True)
+# Noticias
+run_news = st.checkbox("📰 Incluir noticias financieras en la hoja \"Noticias\"", value=True)
 do_process = st.button("Procesar y generar archivo")
 
+# Vista previa de noticias
 if run_news:
-    st.markdown("### Vista previa noticias")
-    st.markdown(build_news_bullets(8).replace("•","-"))
+    st.markdown("### 📰 Noticias financieras (previa)")
+    try:
+        st.markdown(build_news_bullets(max_items=8).replace("•","-"))
+    except Exception:
+        st.caption("No se pudieron cargar las noticias en la vista previa.")
 
+# --------------------------
+# Procesamiento
+# --------------------------
 if do_process:
     if not uploaded:
         st.error("Primero selecciona un archivo.")
         st.stop()
+
     raw = uploaded.getvalue()
-    wb = load_workbook(io.BytesIO(raw), data_only=True)
+    try:
+        wb = load_workbook(io.BytesIO(raw), data_only=True)
+    except Exception as e:
+        st.error(f"No pude abrir el Excel: {e}")
+        st.stop()
+
     for hoja in ("Token","Indicadores","Noticias"):
         if hoja not in wb.sheetnames:
             st.error(f"Falta hoja {hoja}.")
             st.stop()
+
     ws_tok, ws_ind, ws_new = wb["Token"], wb["Indicadores"], wb["Noticias"]
 
-    BANXICO_TOKEN = token_banxico_input.strip() or str(ws_tok["A2"].value or "").strip()
-    INEGI_TOKEN   = token_inegi_input.strip()   or str(ws_tok["C2"].value or "").strip()
+    # Lee tokens del Excel y sobrescribe con barra lateral si capturaste algo
+    BANXICO_TOKEN = (token_banxico_input.strip() if token_banxico_input.strip() else str(ws_tok["A2"].value or "").strip())
+    INEGI_TOKEN   = (token_inegi_input.strip()   if token_inegi_input.strip()   else str(ws_tok["C2"].value or "").strip())
     if not BANXICO_TOKEN:
-        st.error("Falta BANXICO_TOKEN.")
+        st.error("Falta BANXICO_TOKEN (barra lateral o Token!A2).")
         st.stop()
-    if token_banxico_input.strip(): ws_tok["A2"] = token_banxico_input.strip()
-    if token_inegi_input.strip():   ws_tok["C2"] = token_inegi_input.strip()
+
+    # Si usuario metió tokens nuevos, guárdalos en la hoja Token
+    if token_banxico_input.strip():
+        ws_tok["A2"] = token_banxico_input.strip()
+    if token_inegi_input.strip():
+        ws_tok["C2"] = token_inegi_input.strip()
 
     FECHA_HOY = datetime.now(TZ_MX).strftime("%d/%m/%Y")
+
+    # Tipos de cambio (SIE): USD/MXN, JPY/MXN, EUR/MXN
     fx = sie_opportuno(["SF43718","SF46406","SF46410"], BANXICO_TOKEN)
     usd_mxn, jpy_mxn, eur_mxn = fx.get("SF43718"), fx.get("SF46406"), fx.get("SF46410")
+    usd_jpy = (usd_mxn / jpy_mxn) if (usd_mxn and jpy_mxn) else None
+    eur_usd = (eur_mxn / usd_mxn) if (eur_mxn and usd_mxn) else None
 
+    # TIIE (DOF), CETES, UDIS, UMA
+    tiie = fetch_tiie_from_dof()
     cetes = cetes_sie(BANXICO_TOKEN)
     udis = sie_opportuno(["SP68257"], BANXICO_TOKEN).get("SP68257")
     uma_diaria, uma_mensual, uma_anual = fetch_uma_values()
-    tiie = fetch_tiie_from_dof()
 
+    # Noticias -> hoja "Noticias"
     if run_news:
-        ws_new["A2"] = build_news_bullets(12)
+        ws_new["A2"] = build_news_bullets(max_items=12)
 
-    ws_ind["F7"], ws_ind["L7"], ws_ind["F32"], ws_ind["K32"] = FECHA_HOY, FECHA_HOY, FECHA_HOY, FECHA_HOY
-    ws_ind["F10"] = safe_round(usd_mxn,4)
-    ws_ind["L9"], ws_ind["L10"], ws_ind["L11"] = tiie["tiie_28"], tiie["tiie_91"], tiie["tiie_182"]
-    ws_ind["L15"], ws_ind["L16"], ws_ind["L17"], ws_ind["L18"] = cetes.values()
-    ws_ind["F33"] = safe_round(udis,6)
-    ws_ind["K33"], ws_ind["K34"], ws_ind["K35"] = uma_diaria, uma_mensual, uma_anual
+    # Escribir en Indicadores (ajusta si tus celdas difieren)
+    ws_ind["F7"]  = FECHA_HOY
+    ws_ind["L7"]  = FECHA_HOY
+    ws_ind["F32"] = FECHA_HOY
+    ws_ind["K32"] = FECHA_HOY
 
+    ws_ind["F10"] = safe_round(usd_mxn, 4)
+    ws_ind["F16"] = safe_round(jpy_mxn, 6)
+    ws_ind["F17"] = safe_round(usd_jpy, 6)
+    ws_ind["F21"] = safe_round(eur_mxn, 6)
+    ws_ind["F22"] = safe_round(eur_usd, 6)
+
+    ws_ind["L9"]  = safe_round(tiie.get("tiie_28"), 4)
+    ws_ind["L10"] = safe_round(tiie.get("tiie_91"), 4)
+    ws_ind["L11"] = safe_round(tiie.get("tiie_182"), 4)
+
+    ws_ind["L15"] = safe_round(cetes.get("28"), 4)
+    ws_ind["L16"] = safe_round(cetes.get("91"), 4)
+    ws_ind["L17"] = safe_round(cetes.get("182"), 4)
+    ws_ind["L18"] = safe_round(cetes.get("364"), 4)
+
+    ws_ind["F33"] = safe_round(udis, 6)
+    ws_ind["K33"] = safe_round(uma_diaria, 2)
+    ws_ind["K34"] = safe_round(uma_mensual, 2)
+    ws_ind["K35"] = safe_round(uma_anual, 2)
+
+    # Exportar
     out = io.BytesIO(); wb.save(out); out.seek(0)
-    st.download_button("⬇️ Descargar Excel actualizado", data=out,
-                       file_name="Indicadores_actualizado.xlsx",
-                       mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+    st.success("¡Listo! Archivo actualizado.")
+    st.download_button(
+        label="⬇️ Descargar Excel actualizado",
+        data=out,
+        file_name="Indicadores_actualizado.xlsx",
+        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    )
