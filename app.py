@@ -397,6 +397,11 @@ with st.expander("Opciones"):
     )
     movex_win = 5  # <— se usa en todos los cálculos internos
 
+
+    margen_pct = st.number_input("Margen Compra/Venta sobre FIX ...% por lado)", min_value=0.0, max_value=5.0, value=0.5, step=0.1)
+    uma_manual = st.number_input("UMA diaria (manual, si INEGI falla)", min_value=0.0, value=0.0, step=0.01)
+    do_charts = st.toggle("Agregar hoja 'Gráficos' (últimos 12)", value=True)
+    do_raw    = st.toggle("Agregar hoja 'Datos crudos' (últimos 12)", value=True)
     # (deja intacto lo demás)
     # margen_pct = ...
     # uma_manual = ...
