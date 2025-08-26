@@ -2,18 +2,18 @@
 # -*- coding: utf-8 -*-
 """
 IMEMSA – Indicadores + Excel con layout fijo
-- Mantiene login (contraseña por defecto: imemsa79; override por st.secrets["APP_PASSWORD"] o env APP_PASSWORD)
-- Mantiene captura manual de tokens en el sidebar (BANXICO_TOKEN, INEGI_TOKEN)
+- Login (contraseña por defecto: imemsa79; override por st.secrets["APP_PASSWORD"] o env APP_PASSWORD)
+- Captura manual de tokens en el sidebar (BANXICO_TOKEN, INEGI_TOKEN)
 - Excel respeta el layout del archivo de referencia:
   Hoja "Indicadores":
     A2="Fecha:", B2..G2 = fechas (YYYY-MM-DD)
     Secciones:
-      "TIPOS DE CAMBIO"
+      TIPOS DE CAMBIO
       DÓLAR AMERICANO:  B7..G7 USD/MXN (FIX), B8..G8 MONEX, B9..G9 Compra, B10..G10 Venta
       YEN JAPONÉS:      B13..G13 JPY/MXN, B14..G14 USD/JPY
       EURO:             B17..G17 EUR/MXN, B18..G18 EUR/USD
       UDIS:             B22..G22 UDIS
-      TIIE:             B27..G27 TIIE 28, B28..G28 TIIE 91, B29..G29 TIIE 182  (repetidas a 6 columnas con el último valor disponible)
+      TIIE:             B27..G27 28d, B28..G28 91d, B29..G29 182d  (repite último valor)
       CETES:            B33..G33 28d, B34..G34 91d, B35..G35 182d, B36..G36 364d
       UMA:              B40 Diario, B41 Mensual, B42 Anual
   Hojas "Noticias", "Datos crudos" y "Gráficos" opcionales
@@ -22,7 +22,6 @@ IMEMSA – Indicadores + Excel con layout fijo
 import io
 import os
 from datetime import datetime, timedelta
-from pathlib import Path
 
 import requests
 from requests.adapters import HTTPAdapter, Retry
@@ -31,7 +30,7 @@ import pytz
 import streamlit as st
 import xlsxwriter
 
-# ============= Configuración básica + Login =================
+# -------------------- Configuración + Login --------------------
 st.set_page_config(page_title="Indicadores Económicos", page_icon="📊", layout="centered")
 CDMX = pytz.timezone("America/Mexico_City")
 
@@ -54,16 +53,17 @@ def _check_password():
     if st.session_state.auth_ok:
         return True
     st.title("🔒 Acceso restringido")
-    st.text_input("Contraseña", type="password", key="password_input", on_change=_try_login, placeholder="Escribe tu contraseña…")
+    st.text_input("Contraseña", type="password", key="password_input",
+                  on_change=_try_login, placeholder="Escribe tu contraseña…")
     st.stop()
 
 _check_password()
 
-# ============= Tokens (valores por defecto, sobre-escribibles en sidebar) ============
-BANXICO_TOKEN = ""   # si no se captura, no consulta
-INEGI_TOKEN   = ""   # si no se captura, UMA intentará fallback
+# -------------------- Tokens (se pueden teclear en el sidebar) --------------------
+BANXICO_TOKEN = ""
+INEGI_TOKEN   = ""
 
-# ============= Utilidades HTTP y helpers =================
+# -------------------- Utilidades --------------------
 def http_session(timeout=15):
     s = requests.Session()
     retries = Retry(total=3, backoff_factor=0.7,
@@ -82,10 +82,12 @@ def today_cdmx():
     return datetime.now(CDMX).date()
 
 def try_float(x):
-    try: return float(str(x).replace(",", "").strip())
-    except: return None
+    try:
+        return float(str(x).replace(",", "").strip())
+    except Exception:
+        return None
 
-# ================= BANXICO (SIE) =================
+# -------------------- Banxico (SIE) --------------------
 SIE_SERIES = {
     "USD_FIX":   "SF43718",
     "EUR_MXN":   "SF46410",
@@ -109,7 +111,6 @@ def sie_range(series_id: str, start_iso: str, end_iso: str, token: str):
     return series[0].get("datos", []) or []
 
 def sie_last_n(series_id: str, n: int, token: str):
-    """Devuelve últimos n (fecha ISO, valor float)."""
     end = today_cdmx()
     start = end - timedelta(days=2*365)
     obs = sie_range(series_id, start.isoformat(), end.isoformat(), token)
@@ -122,7 +123,6 @@ def sie_last_n(series_id: str, n: int, token: str):
     return vals[-n:]
 
 def rolling_movex_for_last6(window:int, token:str):
-    """Promedio móvil (window) sobre FIX; devuelve últimos 6 valores de la serie movex."""
     end = today_cdmx()
     start = end - timedelta(days=2*365)
     obs = sie_range(SIE_SERIES["USD_FIX"], start.isoformat(), end.isoformat(), token)
@@ -135,13 +135,12 @@ def rolling_movex_for_last6(window:int, token:str):
         movex.append(sum(sub)/len(sub))
     return movex[-6:] if len(movex) >= 6 else [None]*6
 
-# ================= INEGI (UMA) =================
+# -------------------- INEGI (UMA) --------------------
 @st.cache_data(ttl=60*60, show_spinner=False)
 def get_uma(inegi_token: str):
-    """Regresa {'fecha','diaria','mensual','anual'} o None si falla."""
     base = "https://www.inegi.org.mx/app/api/indicadores/desarrolladores/jsonxml/INDICATOR"
     ids = "620706,620707,620708"  # diaria, mensual, anual
-    for catalog in ("BISE", "BIE"):  # intenta 2 catálogos
+    for catalog in ("BISE", "BIE"):
         try:
             url = f"{base}/{ids}/es/00/true/{catalog}/2.0/{inegi_token}?type=json"
             r = http_session(20).get(url)
@@ -162,27 +161,21 @@ def get_uma(inegi_token: str):
             continue
     return {"fecha": None, "diaria": None, "mensual": None, "anual": None}
 
-# ================= TIIE (último valor) =================
-def fetch_tiie_dof():
-    """Intenta obtener TIIE 28/91/182 del DOF/Banxico. Si falla, regresa None."""
+# -------------------- TIIE (último valor) --------------------
+def fetch_tiie_last():
     try:
-        # Simple: tomamos oportuno de SIE si existen estas series (si no, usa DOF scrape; aquí mantenemos simple).
-        # Series SIE oficiales: SF43783 (TIIE 28), SF43784 (TIIE 91), SF43785 (TIIE 182) – en %.
         ids = {"tiie28":"SF43783", "tiie91":"SF43784", "tiie182":"SF43785"}
         end = today_cdmx(); start = end - timedelta(days=400)
         out = {}
         for k, sid in ids.items():
             data = sie_range(sid, start.isoformat(), end.isoformat(), BANXICO_TOKEN)
             if data:
-                v = try_float(data[-1].get("dato"))
-                out[k] = v
-        if out:
-            return out
+                out[k] = try_float(data[-1].get("dato"))
+        return out
     except Exception:
-        pass
-    return {"tiie28": None, "tiie91": None, "tiie182": None}
+        return {"tiie28": None, "tiie91": None, "tiie182": None}
 
-# ================= Noticias (para hoja "Noticias") =================
+# -------------------- Noticias --------------------
 def build_news_bullets(n=12):
     feeds = [
         "https://www.reuters.com/markets/americas/mexico/feed/?rpc=401&",
@@ -199,22 +192,22 @@ def build_news_bullets(n=12):
                 title = (e.get("title","") or "").strip()
                 summary = (e.get("summary","") or "")
                 link = (e.get("link","") or "").strip()
-                text = (title + " " + summary).lower()
-                if any(k.lower() in text for k in keys):
+                txt = (title + " " + summary).lower()
+                if any(k.lower() in txt for k in keys):
                     rows.append((e.get("published",""), f"• {title} — {link}"))
         except Exception:
             pass
     rows.sort(reverse=True, key=lambda x: x[0])
     return "\n".join([t for _, t in rows[:n]]) or "Sin novedades."
 
-# ================= Sidebar: captura manual de tokens =================
+# -------------------- Sidebar: captura manual de tokens --------------------
 st.sidebar.header("🔑 Tokens de APIs")
 ban_t = st.sidebar.text_input("BANXICO_TOKEN", value="", type="password", help="Se usará en esta sesión.")
 ine_t = st.sidebar.text_input("INEGI_TOKEN", value="", type="password", help="Se usará en esta sesión.")
 if ban_t.strip(): BANXICO_TOKEN = ban_t.strip()
 if ine_t.strip(): INEGI_TOKEN   = ine_t.strip()
 
-# ================= Panel de opciones (igual que antes) =================
+# -------------------- Panel de opciones (igual que antes) --------------------
 with st.expander("Opciones"):
     movex_win   = st.number_input("Ventana MONEX (días hábiles)", min_value=5, max_value=60, value=20, step=1)
     margen_pct  = st.number_input("Margen en Compra/Venta sobre FIX (% por lado)", min_value=0.0, max_value=5.0, value=0.50, step=0.10)
@@ -224,13 +217,13 @@ with st.expander("Opciones"):
 
 st.title("Indicadores Económicos.  📰 + Excel (layout IMEMSA).")
 
-# ================= Generador de Excel (solo se cambia esta parte) =================
+# -------------------- Generación del Excel --------------------
 if st.button("Generar Excel"):
     if not BANXICO_TOKEN.strip():
         st.error("Falta BANXICO_TOKEN (ingrésalo en la barra lateral)."); st.stop()
 
-    # --- Series base
-    fix6  = sie_last_n(SIE_SERIES["USD_FIX"], 6, BANXICO_TOKEN)    # [(fechaISO, valor)]
+    # Series base (últimos 6 por fecha)
+    fix6  = sie_last_n(SIE_SERIES["USD_FIX"], 6, BANXICO_TOKEN)
     eur6  = sie_last_n(SIE_SERIES["EUR_MXN"], 6, BANXICO_TOKEN)
     jpy6  = sie_last_n(SIE_SERIES["JPY_MXN"], 6, BANXICO_TOKEN)
     udis6 = sie_last_n(SIE_SERIES["UDIS"],    6, BANXICO_TOKEN)
@@ -239,7 +232,7 @@ if st.button("Generar Excel"):
     c182_6= sie_last_n(SIE_SERIES["CETES_182"],6, BANXICO_TOKEN)
     c364_6= sie_last_n(SIE_SERIES["CETES_364"],6, BANXICO_TOKEN)
 
-    # Fechas encabezado: de FIX
+    # Encabezado de fechas (del FIX)
     header_dates = [d for d,_ in fix6]
     if len(header_dates) < 6:
         header_dates = ([""]*(6-len(header_dates))) + header_dates
@@ -249,9 +242,8 @@ if st.button("Generar Excel"):
     m_fix, m_eur, m_jpy, m_udis = as_map(fix6), as_map(eur6), as_map(jpy6), as_map(udis6)
     m_c28, m_c91, m_c182, m_c364 = as_map(c28_6), as_map(c91_6), as_map(c182_6), as_map(c364_6)
 
-    # MONEX (promedio móvil)
+    # MONEX (promedio móvil) y Compra/Venta con margen
     movex6 = rolling_movex_for_last6(window=movex_win, token=BANXICO_TOKEN)
-    # Compra/Venta con margen
     compra = [(x*(1 - margen_pct/100) if x is not None else None) for x in movex6]
     venta  = [(x*(1 + margen_pct/100) if x is not None else None) for x in movex6]
 
@@ -270,22 +262,20 @@ if st.button("Generar Excel"):
         uma["mensual"] = uma_manual * 30.4
         uma["anual"] = (uma["mensual"] or 0) * 12
 
-    # TIIE (último valor repetido 6 veces; si no hay, deja en blanco)
-    tiie = fetch_tiie_dof()
-    tiie28 = [tiie.get("tiie28")] * 6
-    tiie91 = [tiie.get("tiie91")] * 6
-    tiie182= [tiie.get("tiie182")] * 6
+    # TIIE (último valor, repetido)
+    tiie_last = fetch_tiie_last()
+    tiie28 = [tiie_last.get("tiie28")] * 6
+    tiie91 = [tiie_last.get("tiie91")] * 6
+    tiie182= [tiie_last.get("tiie182")] * 6
 
-    # ================= Armado del Excel con EL MISMO LAYOUT =================
+    # ---------- Armado del Excel con el MISMO layout ----------
     bio = io.BytesIO()
     wb = xlsxwriter.Workbook(bio, {'in_memory': True})
 
-    # formatos simples
     fmt_bold  = wb.add_format({'bold': True})
     fmt_hdr   = wb.add_format({'bold': True, 'bg_color': '#F2F2F2', 'align':'center'})
     fmt_num4  = wb.add_format({'num_format': '0.0000'})
     fmt_num6  = wb.add_format({'num_format': '0.000000'})
-    fmt_pct2  = wb.add_format({'num_format': '0.00%'})
     fmt_wrap  = wb.add_format({'text_wrap': True})
 
     ws = wb.add_worksheet("Indicadores")
@@ -295,7 +285,7 @@ if st.button("Generar Excel"):
     for i, d in enumerate(header_dates):
         ws.write(1, 1+i, d)
 
-    # ---- TIPO DE CAMBIO (misma estructura del layout que adjuntaste) ----
+    # TIPOS DE CAMBIO
     ws.write(3, 0, "TIPOS DE CAMBIO:", fmt_bold)
     ws.write(5, 0, "DÓLAR AMERICANO.", fmt_bold)
 
@@ -304,20 +294,20 @@ if st.button("Generar Excel"):
     for i, d in enumerate(header_dates):
         ws.write(6, 1+i, m_fix.get(d), fmt_num4)
 
-    # Fila 8: MONEX (promedio móvil)
+    # Fila 8: MONEX (PM)
     ws.write(7, 0, "MONEX:")
-    for i, val in enumerate(movex6):
-        ws.write(7, 1+i, val, fmt_num6)
+    for i, v in enumerate(movex6):
+        ws.write(7, 1+i, v, fmt_num6)
 
-    # Fila 9-10: Compra/Venta con margen
+    # Fila 9-10: Compra/Venta
     ws.write(8, 0, "Compra:")
-    for i, val in enumerate(compra):
-        ws.write(8, 1+i, val, fmt_num6)
+    for i, v in enumerate(compra):
+        ws.write(8, 1+i, v, fmt_num6)
     ws.write(9, 0, "Venta:")
-    for i, val in enumerate(venta):
-        ws.write(9, 1+i, val, fmt_num6)
+    for i, v in enumerate(venta):
+        ws.write(9, 1+i, v, fmt_num6)
 
-    # ---- YEN ----
+    # YEN
     ws.write(11, 0, "YEN JAPONÉS.", fmt_bold)
     ws.write(12, 0, "Yen Japonés/Peso:")
     for i, d in enumerate(header_dates):
@@ -326,7 +316,7 @@ if st.button("Generar Excel"):
     for i, v in enumerate(usd_jpy):
         ws.write(13, 1+i, v, fmt_num6)
 
-    # ---- EURO ----
+    # EURO
     ws.write(15, 0, "EURO.", fmt_bold)
     ws.write(16, 0, "Euro/Peso:")
     for i, d in enumerate(header_dates):
@@ -335,73 +325,76 @@ if st.button("Generar Excel"):
     for i, v in enumerate(eur_usd):
         ws.write(17, 1+i, v, fmt_num6)
 
-    # ---- UDIS ----
+    # UDIS
     ws.write(19, 0, "UDIS:", fmt_bold)
     ws.write(21, 0, "UDIS: ")
     for i, d in enumerate(header_dates):
         ws.write(21, 1+i, m_udis.get(d), fmt_num6)
 
-    # ---- TIIE ----
+    # TIIE
     ws.write(23, 0, "TASAS TIIE:", fmt_bold)
-    ws.write(25, 0, "TIIE objetivo:")  # (si quieres, aquí puedes escribir el objetivo más adelante)
+    ws.write(25, 0, "TIIE objetivo:")
     ws.write(26, 0, "TIIE 28 Días:")
     ws.write(27, 0, "TIIE 91 Días:")
     ws.write(28, 0, "TIIE 182 Días:")
     for i in range(6):
-        ws.write(26, 1+i, tiie28[i] if tiie28[i] is not None else None)
-        ws.write(27, 1+i, tiie91[i] if tiie91[i] is not None else None)
-        ws.write(28, 1+i, tiie182[i] if tiie182[i] is not None else None)
+        ws.write(26, 1+i, tiie28[i])
+        ws.write(27, 1+i, tiie91[i])
+        ws.write(28, 1+i, tiie182[i])
 
-    # ---- CETES (en % como en tu layout, no en fracción) ----
+    # CETES (valores en %)
     ws.write(30, 0, "CETES:", fmt_bold)
     ws.write(32, 0, "CETES 28 Días:")
     ws.write(33, 0, "CETES 91 Días:")
     ws.write(34, 0, "Cetes 182 Días:")
     ws.write(35, 0, "Cetes 364 Días:")
     for i, d in enumerate(header_dates):
-        ws.write(32, 1+i, m_c28.get(d))   # valores como 7.65 (no 0.0765)
+        ws.write(32, 1+i, m_c28.get(d))
         ws.write(33, 1+i, m_c91.get(d))
         ws.write(34, 1+i, m_c182.get(d))
         ws.write(35, 1+i, m_c364.get(d))
 
-    # ---- UMA (valores en B40..B42) ----
+    # UMA
     ws.write(37, 0, "UMA:", fmt_bold)
     ws.write(39, 0, "Diario:");  ws.write(39, 1, uma.get("diaria"))
     ws.write(40, 0, "Mensual:"); ws.write(40, 1, uma.get("mensual"))
     ws.write(41, 0, "Anual:");   ws.write(41, 1, uma.get("anual"))
 
-    # ---------- Hoja Noticias ----------
+    # Hoja Noticias
     wsN = wb.add_worksheet("Noticias")
     wsN.write(0, 0, "Noticias financieras recientes", fmt_bold)
     wsN.write(1, 0, build_news_bullets(12), fmt_wrap)
     wsN.set_column(0, 0, 120)
 
-    # ---------- Hoja Datos crudos (opcional) ----------
+    # Hoja Datos crudos (opcional) — SIN nonlocal
     if do_raw:
         wsR = wb.add_worksheet("Datos crudos")
         wsR.write(0,0,"Serie", fmt_hdr); wsR.write(0,1,"Fecha", fmt_hdr); wsR.write(0,2,"Valor", fmt_hdr)
-        row = 1
-        def dump_raw(tag, pairs):
-            nonlocal row
+
+        def dump_raw(ws_sheet, start_row, tag, pairs):
+            r = start_row
             for d, v in pairs:
-                wsR.write(row, 0, tag)
-                wsR.write(row, 1, d)
-                wsR.write(row, 2, v)
-                row += 1
-        dump_raw("USD/MXN (FIX)", fix6)
-        dump_raw("EUR/MXN",       eur6)
-        dump_raw("JPY/MXN",       jpy6)
-        dump_raw("UDIS",          udis6)
-        dump_raw("CETES 28d (%)", c28_6)
-        dump_raw("CETES 91d (%)", c91_6)
-        dump_raw("CETES 182d (%)",c182_6)
-        dump_raw("CETES 364d (%)",c364_6)
+                ws_sheet.write(r, 0, tag)
+                ws_sheet.write(r, 1, d)
+                ws_sheet.write(r, 2, v)
+                r += 1
+            return r
+
+        row = 1
+        row = dump_raw(wsR, row, "USD/MXN (FIX)", fix6)
+        row = dump_raw(wsR, row, "EUR/MXN",       eur6)
+        row = dump_raw(wsR, row, "JPY/MXN",       jpy6)
+        row = dump_raw(wsR, row, "UDIS",          udis6)
+        row = dump_raw(wsR, row, "CETES 28d (%)", c28_6)
+        row = dump_raw(wsR, row, "CETES 91d (%)", c91_6)
+        row = dump_raw(wsR, row, "CETES 182d (%)",c182_6)
+        row = dump_raw(wsR, row, "CETES 364d (%)",c364_6)
         wsR.set_column(0, 0, 18); wsR.set_column(1, 1, 12); wsR.set_column(2, 2, 14)
 
-    # ---------- Hoja Gráficos (opcional, simple) ----------
+    # Hoja Gráficos (opcional)
     if do_charts:
         wsG = wb.add_worksheet("Gráficos")
-        # Línea USD/MXN
+        # Línea USD/MXN (FIX) — fila 7 (1-based), columnas B..G
         chart1 = wb.add_chart({'type': 'line'})
         chart1.add_series({
             'name':       "USD/MXN (FIX)",
@@ -411,18 +404,17 @@ if st.button("Generar Excel"):
         chart1.set_title({'name': 'USD/MXN (FIX)'})
         wsG.insert_chart('B2', chart1, {'x_scale': 1.3, 'y_scale': 1.2})
 
-        # Línea CETES
+        # CETES — filas 33..36 (1-based) en la hoja
         chart2 = wb.add_chart({'type': 'line'})
-        for row in (33,34,35,36):  # filas 1-based en tu layout (CETES)
+        for r in (33, 34, 35, 36):
             chart2.add_series({
-                'name':       f"=Indicadores!$A${row+1}",
+                'name':       f"=Indicadores!$A${r}",
                 'categories': "=Indicadores!$B$2:$G$2",
-                'values':     f"=Indicadores!$B${row+1}:$G${row+1}",
+                'values':     f"=Indicadores!$B${r}:$G${r}",
             })
         chart2.set_title({'name': 'CETES (%)'})
         wsG.insert_chart('B18', chart2, {'x_scale': 1.3, 'y_scale': 1.2})
 
-    # Cerrar y servir
     wb.close()
     bio.seek(0)
     st.success("¡Listo! Excel generado con el layout IMEMSA.")
