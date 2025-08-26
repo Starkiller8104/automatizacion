@@ -20,8 +20,11 @@ import xlsxwriter
 from requests.adapters import HTTPAdapter, Retry
 
 import streamlit as st
+
+#tres lineas agregadas
 import warnings
 warnings.filterwarnings("ignore", category=DeprecationWarning)
+st.image("logo.png", use_container_width=True)
 
 # ==== LOGIN (agregado) ====
 import os, pytz as _pytz_for_login  # _pytz_for_login sólo para asegurar import si no existía
