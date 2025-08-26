@@ -386,14 +386,23 @@ with st.sidebar.expander("🔑 Tokens de APIs", expanded=False):
             st.write("Diaria:", res.get("diaria"), "Mensual:", res.get("mensual"), "Anual:", res.get("anual"))
 
 # =========================
-#  STREAMLIT UI
+#  Modifique este punto
 # =========================
 with st.expander("Opciones"):
-    movex_win = st.number_input("Ventana MOVEX (días hábiles)", min_value=5, max_value=60, value=20, step=1)
-    margen_pct = st.number_input("Margen Compra/Venta sobre FIX ...% por lado)", min_value=0.0, max_value=5.0, value=0.5, step=0.1)
-    uma_manual = st.number_input("UMA diaria (manual, si INEGI falla)", min_value=0.0, value=0.0, step=0.01)
-    do_charts = st.toggle("Agregar hoja 'Gráficos' (últimos 12)", value=True)
-    do_raw    = st.toggle("Agregar hoja 'Datos crudos' (últimos 12)", value=True)
+    # Mostrar el control solo como informativo y dejarlo fijo en 5
+    st.number_input(
+        "Venta MOVEX (días hábiles)", 
+        min_value=5, max_value=5, value=5, step=1,
+        key="movex_win_fixed", disabled=True, help="Fijo a 5 días hábiles"
+    )
+    movex_win = 5  # <— se usa en todos los cálculos internos
+
+    # (deja intacto lo demás)
+    # margen_pct = ...
+    # uma_manual = ...
+    # do_charts = ...
+    # do_raw = ...
+
 
 _check_tokens()
 _render_sidebar_status()
