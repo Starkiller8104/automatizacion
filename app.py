@@ -241,7 +241,7 @@ def sie_last_n(series_id: str, n: int = 6):
 def rolling_movex_for_last6(window:int=20):
     end = today_cdmx()
     start = end - timedelta(days=2*365)
-    obs = sie_range(SIE_SERIES["USD_FIX"], start.isoformat(), end.isoformat())
+    obs = sie_range("SF43718", start.isoformat(), end.isoformat())  # USD_FIX
     vals = []
     for o in obs:
         f = o.get("fecha"); v = try_float(o.get("dato"))
@@ -368,30 +368,20 @@ def _render_sidebar_status():
     badge(f_status, "FRED (USA)",   f_msg, f_ms)
 
     st.sidebar.divider()
-# ==== Tokens editables (agregado) ====
-with st.sidebar.expander("🔑 Tokens de APIs", expanded=False):
-    st.caption("Si ingresas un token aquí, la app lo usará en lugar del definido en el código.")
-    token_banxico_input = st.text_input("BANXICO_TOKEN", value="", type="password")
-    token_inegi_input   = st.text_input("INEGI_TOKEN",   value="", type="password")
-    # Asignación en caliente
-    if token_banxico_input.strip():
-        BANXICO_TOKEN = token_banxico_input.strip()
-    if token_inegi_input.strip():
-        INEGI_TOKEN = token_inegi_input.strip()
-# ==== /Tokens editables ====
-    with st.sidebar.expander("Herramientas"):
-        c1, c2 = st.columns(2)
-        if c1.button("Limpiar cachés Banxico"):
-            sie_opportuno.clear(); sie_range.clear()
-            st.success("Cachés SIE limpiadas.")
-        if c2.button("Limpiar caché UMA"):
-            get_uma.clear()
-            st.success("Caché UMA limpiada.")
-    with st.sidebar.expander("Diagnóstico UMA"):
-        if st.button("Probar INEGI ahora"):
-            res = get_uma(INEGI_TOKEN)
-            st.write("Estado:", res.get("_status"), "— Fuente:", res.get("_source"))
-            st.write("Diaria:", res.get("diaria"), "Mensual:", res.get("mensual"), "Anual:", res.get("anual"))
+
+with st.sidebar.expander("Herramientas"):
+    c1, c2 = st.columns(2)
+    if c1.button("Limpiar cachés Banxico"):
+        sie_opportuno.clear(); sie_range.clear()
+        st.success("Cachés SIE limpiadas.")
+    if c2.button("Limpiar caché UMA"):
+        get_uma.clear()
+        st.success("Caché UMA limpiada.")
+with st.sidebar.expander("Diagnóstico UMA"):
+    if st.button("Probar INEGI ahora"):
+        res = get_uma(INEGI_TOKEN)
+        st.write("Estado:", res.get("_status"), "— Fuente:", res.get("_source"))
+        st.write("Diaria:", res.get("diaria"), "Mensual:", res.get("mensual"), "Anual:", res.get("anual"))
 
 # =========================
 #  STREAMLIT UI
@@ -436,27 +426,149 @@ if st.button("Generar Excel"):
         uma["mensual"] = uma_manual * 30.4
         uma["anual"]   = uma["mensual"] * 12
 
-    # (resto de tu generación de Excel con XlsxWriter: hojas, formatos, gráficos, etc.)
-    # ...
-    # ... (todo tu código original permanece igual aquí abajo)
-    #  (El bloque continúa con la construcción del workbook, hojas, estilos y gráficos)
-
-    # === A partir de aquí se mantiene íntegra tu lógica original de exportación ===
-    # (Código existente que escribe tablas, gráficos y crea el archivo para descargar)
+    # ===== Excel completo (reemplazado) =====
     bio = io.BytesIO()
     wb = xlsxwriter.Workbook(bio, {'in_memory': True})
 
-    # --------- (Tu código original de armado de hojas sigue aquí sin cambios) ---------
-    # Por brevedad no se repite; el archivo que pegas conserva TODO lo que ya tenías,
-    # únicamente con el login y los campos de tokens añadidos arriba.
-    # ----------------------------------------------------------------------------------
+    # ---- Preparar datos a escribir ----
+    _fix_pairs = sie_last_n(SIE_SERIES["USD_FIX"], n=6)
+    header_dates = [d for d,_ in _fix_pairs]
+    if len(header_dates) < 6:
+        header_dates = ([""]*(6-len(header_dates))) + header_dates
+
+    def last6_map(key):
+        pairs = sie_last_n(SIE_SERIES[key], n=6)
+        return {d:v for d,v in pairs}
+
+    m_fix   = last6_map("USD_FIX")
+    m_eur   = last6_map("EUR_MXN")
+    m_jpy   = last6_map("JPY_MXN")
+    m_c28   = last6_map("CETES_28")
+    m_c91   = last6_map("CETES_91")
+    m_c182  = last6_map("CETES_182")
+    m_c364  = last6_map("CETES_364")
+    m_udis  = last6_map("UDIS")
+
+    try:
+        movex6  # maybe exists
+    except NameError:
+        _movex_series = rolling_movex_for_last6(window=movex_win)
+        movex6 = _movex_series[-6:] if _movex_series else [None]*6
+
+    def aligned_values(mdict):
+        return [mdict.get(d) for d in header_dates]
+
+    rowset = [
+        ("USD/MXN (FIX)", aligned_values(m_fix)),
+        (f"MOVEX {movex_win}", movex6),
+        ("EUR/MXN", aligned_values(m_eur)),
+        ("JPY/MXN", aligned_values(m_jpy)),
+        ("CETES 28d (%)", aligned_values(m_c28)),
+        ("CETES 91d (%)", aligned_values(m_c91)),
+        ("CETES 182d (%)", aligned_values(m_c182)),
+        ("CETES 364d (%)", aligned_values(m_c364)),
+        ("UDIS", aligned_values(m_udis)),
+    ]
+
+    fmt_title   = wb.add_format({'bold': True, 'font_size': 14})
+    fmt_hdr     = wb.add_format({'bold': True, 'align': 'center', 'bg_color': '#F2F2F2', 'border':1})
+    fmt_row_lbl = wb.add_format({'bold': True, 'align': 'left'})
+    fmt_num4    = wb.add_format({'num_format': '0.0000'})
+    fmt_num6    = wb.add_format({'num_format': '0.000000'})
+    fmt_pct2    = wb.add_format({'num_format': '0.00%'})
+    fmt_wrap    = wb.add_format({'text_wrap': True})
+    fmt_center  = wb.add_format({'align': 'center'})
+
+    ws = wb.add_worksheet("Indicadores")
+    ws.write(0, 0, "Indicadores (últimos 6 días)", fmt_title)
+    ws.write(1, 0, "Fecha", fmt_hdr)
+    for i, d in enumerate(header_dates):
+        ws.write(1, 1+i, d, fmt_hdr)
+
+    start_row = 2
+    for r, (label, values) in enumerate(rowset):
+        ws.write(start_row+r, 0, label, fmt_row_lbl)
+        for c, val in enumerate(values):
+            if "CETES" in label:
+                ws.write(start_row+r, 1+c, (val/100 if val is not None else None), fmt_pct2)
+            elif label == "UDIS":
+                ws.write(start_row+r, 1+c, val, fmt_num6)
+            else:
+                ws.write(start_row+r, 1+c, val, fmt_num4)
+
+    # UMA
+    ws.write(1, 9, "UMA", fmt_hdr)
+    ws.write(2, 9, "Fecha", fmt_row_lbl);  ws.write(2,10, uma.get("fecha"))
+    ws.write(3, 9, "Diaria", fmt_row_lbl); ws.write(3,10, uma.get("diaria"))
+    ws.write(4, 9, "Mensual", fmt_row_lbl);ws.write(4,10, uma.get("mensual"))
+    ws.write(5, 9, "Anual", fmt_row_lbl);  ws.write(5,10, uma.get("anual"))
+    ws.set_column(0, 0, 22); ws.set_column(1, 6, 14); ws.set_column(9, 10, 14)
+
+    # Datos crudos (opcional)
+    try:
+        do_raw
+    except NameError:
+        do_raw = True
+    if do_raw:
+        ws3 = wb.add_worksheet("Datos crudos")
+        ws3.write(0,0,"Serie", fmt_hdr); ws3.write(0,1,"Fecha", fmt_hdr); ws3.write(0,2,"Valor", fmt_hdr)
+        row = 1
+        def dump_raw(tag, mdict, row_idx):
+            for d in header_dates:
+                v = mdict.get(d)
+                ws3.write(row_idx, 0, tag)
+                ws3.write(row_idx, 1, d, fmt_center)
+                ws3.write(row_idx, 2, v, fmt_num6)
+                row_idx += 1
+            return row_idx
+        row = dump_raw("USD/MXN (FIX)", m_fix, row)
+        row = dump_raw("EUR/MXN",       m_eur, row)
+        row = dump_raw("JPY/MXN",       m_jpy, row)
+        row = dump_raw("CETES 28d (%)", m_c28, row)
+        row = dump_raw("CETES 91d (%)", m_c91, row)
+        row = dump_raw("CETES 182d (%)",m_c182, row)
+        row = dump_raw("CETES 364d (%)",m_c364, row)
+        row = dump_raw("UDIS",          m_udis, row)
+        ws3.set_column(0, 0, 18); ws3.set_column(1, 1, 12); ws3.set_column(2, 2, 16)
+
+    # Gráficos (opcional)
+    try:
+        do_charts
+    except NameError:
+        do_charts = True
+    if do_charts:
+        ws4 = wb.add_worksheet("Gráficos")
+        chart1 = wb.add_chart({'type': 'line'})
+        usd_row = start_row + 0
+        chart1.add_series({
+            'name':       "=Indicadores!$A$%d" % (usd_row+1),
+            'categories': "=Indicadores!$B$2:$G$2",
+            'values':     "=Indicadores!$B$%d:$G$%d" % (usd_row+1, usd_row+1),
+        })
+        chart1.set_title({'name': 'USD/MXN (FIX)'})
+        chart1.set_x_axis({'name': 'Fecha'})
+        chart1.set_y_axis({'name': 'Tipo de cambio'})
+        ws4.insert_chart('B2', chart1, {'x_scale': 1.3, 'y_scale': 1.2})
+
+        chart2 = wb.add_chart({'type': 'line'})
+        for off in [4,5,6,7]:
+            r = start_row + off
+            chart2.add_series({
+                'name':       "=Indicadores!$A$%d" % (r+1),
+                'categories': "=Indicadores!$B$2:$G$2",
+                'values':     "=Indicadores!$B$%d:$G$%d" % (r+1, r+1),
+            })
+        chart2.set_title({'name': 'CETES (%)'})
+        chart2.set_x_axis({'name': 'Fecha'})
+        chart2.set_y_axis({'num_format': '0.00%'})
+        ws4.insert_chart('B18', chart2, {'x_scale': 1.3, 'y_scale': 1.2})
 
     # Cerrar y servir
     wb.close()
-    st.success("¡Listo! Archivo generado con branding (logo sticky) y gráficos.")
+    st.success("¡Listo! Archivo generado con datos y hojas completas.")
     st.download_button(
-        "Descargar Excel",
+        "⬇️ Descargar Excel",
         data=bio.getvalue(),
         file_name=f"indicadores_{today_cdmx()}.xlsx",
-        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
     )
