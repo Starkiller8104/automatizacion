@@ -13,36 +13,6 @@ import pytz
 import re
 import requests
 import feedparser
-
-# --- Noticias: escribir hoja solo si hay elementos ---
-def news_write_sheet_v2(wb, news_list, sheet_name='Noticias_RSS'):
-    if not news_list:
-        return None
-    try:
-        ws = wb.add_worksheet(sheet_name)
-    except Exception:
-        ws = wb.add_worksheet(f"{sheet_name}_1")
-    fmt_bold = wb.add_format({'bold': True})
-    fmt_link = wb.add_format({'font_color': 'blue', 'underline': 1})
-    fmt_date = wb.add_format({'num_format': 'yyyy-mm-dd hh:mm'})
-    ws.write_row(0, 0, ['Título', 'Link', 'Fecha', 'Fuente'], fmt_bold)
-    for i, n in enumerate(news_list, start=1):
-        ws.write_string(i, 0, n.get('title',''))
-        link = n.get('link','')
-        if link:
-            ws.write_url(i, 1, link, fmt_link, string='Abrir')
-        dt = n.get('published_dt')
-        if dt:
-            try:
-                ws.write_datetime(i, 2, dt, fmt_date)
-            except Exception:
-                ws.write_string(i, 2, str(dt))
-        ws.write_string(i, 3, n.get('source',''))
-    ws.set_column(0, 0, 80)
-    ws.set_column(1, 1, 12)
-    ws.set_column(2, 2, 20)
-    ws.set_column(3, 3, 18)
-    return ws
 from PIL import Image
 from urllib.parse import urlparse
 from openpyxl import Workbook
@@ -685,51 +655,8 @@ if st.button("Generar Excel"):
     ws.write(39, 0, "Diario:");  ws.write(39, 1, uma.get("diaria"))
     ws.write(40, 0, "Mensual:"); ws.write(40, 1, uma.get("mensual"))
     ws.write(41, 0, "Anual:");   ws.write(41, 1, uma.get("anual"))
+# [Noticias deshabilitada por solicitud]
 
-    
-    ws2 = wb.add_worksheet('Noticias_RSS_tmp') if False else None
-    ws2.write(0, 0, "Noticias financieras recientes", fmt_bold)
-    try:
-        news_text = build_news_bullets(12)
-    except Exception:
-        news_text = "Noticias no disponibles."
-    ws2.write(1, 0, news_text, fmt_wrap)
-    ws2.set_column(0, 0, 120)
-
-    
-    try:
-        do_raw
-    except NameError:
-        do_raw = True
-    if do_raw:
-        ws3 = wb.add_worksheet("Datos crudos")
-        ws3.write(0,0,"Serie", fmt_hdr); ws3.write(0,1,"Fecha", fmt_hdr); ws3.write(0,2,"Valor", fmt_hdr)
-        def _dump(ws_sheet, start_row, tag, pairs):
-            r = start_row
-            for d, v in pairs:
-                ws_sheet.write(r, 0, tag)
-                ws_sheet.write(r, 1, d)
-                ws_sheet.write(r, 2, v)
-                r += 1
-            return r
-        r = 1
-        r = _dump(ws3, r, "USD/MXN (FIX)", sie_last_n(SIE_SERIES["USD_FIX"], 6))
-        r = _dump(ws3, r, "EUR/MXN",       sie_last_n(SIE_SERIES["EUR_MXN"], 6))
-        r = _dump(ws3, r, "JPY/MXN",       sie_last_n(SIE_SERIES["JPY_MXN"], 6))
-        r = _dump(ws3, r, "UDIS",          sie_last_n(SIE_SERIES["UDIS"],    6))
-        r = _dump(ws3, r, "CETES 28d (%)", sie_last_n(SIE_SERIES["CETES_28"],6))
-        r = _dump(ws3, r, "CETES 91d (%)", sie_last_n(SIE_SERIES["CETES_91"],6))
-        r = _dump(ws3, r, "CETES 182d (%)",sie_last_n(SIE_SERIES["CETES_182"],6))
-        r = _dump(ws3, r, "CETES 364d (%)",sie_last_n(SIE_SERIES["CETES_364"],6))
-        ws3.set_column(0, 0, 18); ws3.set_column(1, 1, 12); ws3.set_column(2, 2, 16)
-
-    
-    try:
-        do_charts
-    except NameError:
-        do_charts = True
-    if do_charts:
-        ws4 = wb.add_worksheet("Gráficos")
         chart1 = wb.add_chart({'type': 'line'})
         chart1.add_series({
             'name':       "USD/MXN (FIX)",
