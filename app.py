@@ -179,6 +179,9 @@ def news_write_sheet_v2(wb, news_list, sheet_name="Noticias_RSS"):
 
 
 import streamlit as st
+
+# Mostrar titulares en pantalla? (False = solo al Excel)
+SHOW_NEWS_ON_SCREEN = False
 import warnings
 warnings.filterwarnings("ignore", category=DeprecationWarning)
 
@@ -946,6 +949,20 @@ if st.button("Generar Excel"):
 
 
 
+
+# --- Guardar bytes para descarga (session_state) ---
+try:
+    if 'wb' in globals():
+        try:
+            wb.close()
+        except Exception:
+            pass
+        try:
+            st.session_state['xlsx_bytes'] = bio.getvalue()
+        except Exception:
+            pass
+except Exception:
+    pass
 # ==== [PATCH v2] FRED & Noticias (ejecución) ====
 try:
     # --- FRED ---
@@ -987,14 +1004,16 @@ try:
     except Exception:
         top_news_v2 = []
     if top_news_v2:
-        # Mostrar encabezados en la app
-        try:
-            st.subheader("📰 Noticias financieras de México (encabezados)")
-            for n in top_news_v2:
-                dt_txt = n["published_dt"].strftime("%Y-%m-%d %H:%M") if n["published_dt"] else ""
-                st.markdown(f"- **{n['title']}** — *{n['source']}*  {('· ' + dt_txt) if dt_txt else ''}  \n  {n['link']}")
-        except Exception:
-            pass
+        # Mostrar encabezados en la app (opcional)
+        if SHOW_NEWS_ON_SCREEN:
+            try:
+                st.subheader("📰 Noticias financieras de México (encabezados)")
+                for n in top_news_v2:
+                    dt_txt = n["published_dt"].strftime("%Y-%m-%d %H:%M") if n["published_dt"] else ""
+                    st.markdown(f"- **{n['title']}** — *{n['source']}*  {('· ' + dt_txt) if dt_txt else ''}  
+  {n['link']}")
+            except Exception:
+                pass
         # Escribir al Excel
         (
             news_write_sheet_v2(wb, top_news_v2, sheet_name="Noticias_RSS")
@@ -1011,14 +1030,20 @@ except Exception as _patch_e:
     except Exception:
         pass
 # ==== [FIN PATCH v2 ejecución] ====
-
-
-
-
-    wb.close()
-    st.download_button(
-    "Descargar Excel",
-        data=bio.getvalue(),
+# -- Descarga robusta desde session_state --
+try:
+    xbytes = st.session_state.get('xlsx_bytes')
+    if xbytes:
+        st.download_button(
+            'Descargar Excel',
+            data=xbytes,
+            file_name=f"indicadores_{today_cdmx()}.xlsx",
+            mime='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+            use_container_width=True
+        )
+except Exception as _dl_e:
+    st.error(f'No se pudo preparar la descarga: {_dl_e}')
+,
         file_name=f"indicadores_{today_cdmx()}.xlsx",
         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         )
