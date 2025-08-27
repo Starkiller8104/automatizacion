@@ -1,6 +1,5 @@
 
 
-
 import io
 import re
 import time
@@ -666,9 +665,9 @@ if st.button("Generar Excel"):
     ws.write(6, 0, "Dólar/Pesos:")
     for i, d in enumerate(header_dates):
         ws.write(6, 1+i, m_fix.get(d), fmt_num4)
-    ws.write(7, 0, "MONEX:")
-    for i, v in enumerate(movex6):
-        ws.write(7, 1+i, v, fmt_num6)
+    #ws.write(7, 0, "MONEX:")
+    #for i, v in enumerate(movex6):
+        #ws.write(7, 1+i, v, fmt_num6)
     ws.write(8, 0, "Compra:")
     for i, v in enumerate(compra):
         ws.write(8, 1+i, v, fmt_num6)
