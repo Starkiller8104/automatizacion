@@ -218,12 +218,14 @@ if _logo_b64:
     )
 else:
     # Fallback normal si no hay logo
-    st.title("📈 Indicadores (últimos 6 días) + Noticias")
-    st.caption("Excel con tu layout (B2..G2 fechas reales), noticias y gráficos con XlsxWriter.")
+    st.title("📈 Indicadores (últimos 5 días) + Noticias")
+    st.caption("Excel con tipos de cambio, noticias y gráficos.")
 
 # Logo también en el sidebar (si existe)
 if _logo_b64:
-    st.sidebar.image(f"data:image/png;base64,{_logo_b64}", use_column_width=True)
+   # st.sidebar.image(f"data:image/png;base64,{_logo_b64}", use_column_width=True)
+  #para quitar la leyenda verde debajo del logo
+    st.sidebar.image(f"data:image/png;base64,{_logo_b64}", use_container_width=True)
 
 # =========================
 #  Helpers generales
@@ -468,7 +470,7 @@ with st.sidebar.expander("🔑 Tokens de APIs", expanded=False):
 with st.expander("Opciones"):
     # Mostrar el control solo como informativo y dejarlo fijo en 5
     st.number_input(
-        "Venta MOVEX (días hábiles)", 
+        "Venta MONEX (historial días hábiles)", 
         min_value=5, max_value=5, value=5, step=1,
         key="movex_win_fixed", disabled=True, help="Fijo a 5 días hábiles"
     )
