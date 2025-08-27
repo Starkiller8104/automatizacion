@@ -717,12 +717,12 @@ if do_charts:
     ws4.insert_chart('B18', chart2, {'x_scale': 1.3, 'y_scale': 1.2})
 
 # Cerrar y descargar
-wb.close()
+    wb.close()
     st.success("¡Listo! Archivo generado con datos y hojas completas.")
     st.download_button(
         "Descargar Excel",
         data=bio.getvalue(),
         file_name=f"indicadores_{today_cdmx()}.xlsx",
         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-)
+    )
 
