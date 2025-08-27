@@ -576,8 +576,9 @@ if st.button("Generar Excel"):
                     fred_rows = tmp
         except Exception:
             fred_rows = []
-def pad6(lst): return ([None]*(6-len(lst)))+lst if len(lst) < 6 else lst[-6:]
-        none6 = [None]*6
+def pad6(lst):
+    none6 = [None] * 6
+    return (none6[:6-len(lst)] + lst) if len(lst) < 6 else lst[-6:]
 
     # --- FIX USD/MXN (últimos 6)
     fix6 = pad6([v for _, v in sie_last_n(SIE_SERIES["USD_FIX"], n=6)])
