@@ -943,10 +943,16 @@ try:
 except Exception:
     pass
 # ==== Fin inserción ====
-
-
-
+try:
     wb.close()
+    try:
+        st.session_state['xlsx_bytes'] = bio.getvalue()
+    except Exception:
+        pass
+except NameError:
+    pass
+except Exception:
+    pass
     st.download_button(
     "Descargar Excel",
         data=bio.getvalue(),
@@ -954,3 +960,18 @@ except Exception:
         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         )
     
+
+
+# ---- Botón de descarga robusto ----
+try:
+    xbytes = st.session_state.get('xlsx_bytes')
+    if xbytes:
+        st.download_button(
+            'Descargar Excel',
+            data=xbytes,
+            file_name=f"indicadores_{today_cdmx()}.xlsx",
+            mime='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+            use_container_width=True
+        )
+except Exception:
+    pass
