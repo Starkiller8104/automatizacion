@@ -1,6 +1,7 @@
 
 
 
+
 import io
 import re
 import time
@@ -54,6 +55,9 @@ if not DEBUG:
 
 # 1) Config de página
 st.set_page_config(page_title="IMEMSA - Indicadores", layout="wide")
+if 'xlsx_bytes' not in st.session_state:
+    st.session_state['xlsx_bytes'] = None
+
 
 # 2) Inyectar CSS (antes de dibujar el encabezado)
 st.markdown("""
@@ -576,9 +580,6 @@ if st.button("Generar Excel"):
                     fred_rows = tmp
         except Exception:
             fred_rows = []
-def pad6(lst):
-    none6 = [None] * 6
-    return (none6[:6-len(lst)] + lst) if len(lst) < 6 else lst[-6:]
 
     # --- FIX USD/MXN (últimos 6)
     fix6 = pad6([v for _, v in sie_last_n(SIE_SERIES["USD_FIX"], n=6)])
@@ -880,10 +881,14 @@ def pad6(lst):
 
         wb.close()
 
+        # Guardar bytes en session_state
+        bio.seek(0)
+        st.session_state['xlsx_bytes'] = bio.getvalue()
+if st.session_state.get('xlsx_bytes'):
     st.download_button(
-    "Descargar Excel",
-        data=bio.getvalue(),
+        'Descargar Excel',
+        data=st.session_state['xlsx_bytes'],
         file_name=f"indicadores_{today_cdmx()}.xlsx",
-        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        )
-    
+        mime='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        type='primary'
+    )
