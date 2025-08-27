@@ -94,9 +94,9 @@ st.markdown(
 
 #borrar en caso de error
 #tres lineas agregadas
-import warnings
-warnings.filterwarnings("ignore", category=DeprecationWarning)
-st.image("logo.png", width=150)
+#import warnings
+#warnings.filterwarnings("ignore", category=DeprecationWarning)
+#st.image("logo.png", width=150)
 
 # ==== LOGIN (agregado) ====
 import os, pytz as _pytz_for_login  # _pytz_for_login sólo para asegurar import si no existía
