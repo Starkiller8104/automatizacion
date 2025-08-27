@@ -1,10 +1,11 @@
 
+
 import io
 import re
 import time
 import html
 import base64
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, date
 from email.utils import parsedate_to_datetime
 from pathlib import Path
 
@@ -194,6 +195,39 @@ def logo_base64(max_height_px: int = 40):
 BANXICO_TOKEN = "677aaedf11d11712aa2ccf73da4d77b6b785474eaeb2e092f6bad31b29de6609"
 INEGI_TOKEN   = "0146a9ed-b70f-4ea2-8781-744b900c19d1"
 FRED_TOKEN    = "b4f11681f441da78103a3706d0dab1cf"  # opcional para gráficos
+# ------------------ FRED helper ------------------
+def fred_fetch_series(series_id: str, start: str | None = None, end: str | None = None, units: str = "lin"):
+    """
+    Consulta FRED para 'series_id' y retorna lista de dicts con 'date' y 'value' (float; None si inválido).
+    Usa FRED_TOKEN si está configurado; si falta o hay error, devuelve lista vacía.
+    """
+    try:
+        token = FRED_TOKEN.strip()
+    except Exception:
+        token = ""
+    if not token:
+        return []
+    params = {"series_id": series_id, "api_key": token, "file_type": "json", "units": units}
+    if start: params["observation_start"] = start
+    if end:   params["observation_end"]   = end
+    try:
+        r = requests.get("https://api.stlouisfed.org/fred/series/observations", params=params, timeout=20)
+        if r.status_code != 200:
+            return []
+        data = r.json().get("observations", [])
+        out = []
+        for row in data:
+            d = row.get("date")
+            v = row.get("value")
+            try:
+                v = float(v)
+            except Exception:
+                v = None
+            out.append({"date": d, "value": v})
+        return out
+    except Exception:
+        return []
+
 
 TZ_MX = pytz.timezone("America/Mexico_City")
 
@@ -550,6 +584,19 @@ if st.button("Generar Excel"):
 
     # === A partir de aquí se mantiene íntegra tu lógica original de exportación ===
     # (Código existente que escribe tablas, gráficos y crea el archivo para descargar)
+
+    # --- FRED opcional: bajar datos si se solicitó y hay token
+    fred_rows = None
+    try:
+        if add_fred and fred_id.strip() and isinstance(fred_start, (datetime, date)) and isinstance(fred_end, (datetime, date)):
+            fred_rows = fred_fetch_series(
+                series_id=fred_id.strip(),
+                start=fred_start.isoformat(),
+                end=fred_end.isoformat(),
+                units=fred_units
+            )
+    except NameError:
+        fred_rows = None  # si no existe UI FRED, no agrega
 bio = io.BytesIO()
 wb = xlsxwriter.Workbook(bio, {'in_memory': True})
 
@@ -739,7 +786,53 @@ if do_charts:
     ws4.insert_chart('B18', chart2, {'x_scale': 1.3, 'y_scale': 1.2})
 
 # Cerrar y descargar
-    wb.close()
+    
+    # ===== Hoja FRED (opcional) =====
+    try:
+        if fred_rows:
+            wsname = f"FRED_{fred_id[:25]}"
+            wsfred = wb.add_worksheet(wsname)
+            fmt_bold = wb.add_format({"bold": True})
+            fmt_num  = wb.add_format({"num_format": "#,##0.0000"})
+            fmt_date = wb.add_format({"num_format": "yyyy-mm-dd"})
+
+            wsfred.write(0, 0, f"FRED – {fred_id}", fmt_bold)
+            wsfred.write(1, 0, f"Generado: {today_cdmx('%Y-%m-%d %H:%M')} (CDMX)")
+            wsfred.write_row(3, 0, ["date", fred_id], fmt_bold)
+
+            r = 4
+            valid_count = 0
+            for row in fred_rows:
+                d = row.get("date"); v = row.get("value")
+                # fecha
+                try:
+                    dt = pd.to_datetime(d).to_pydatetime()
+                    wsfred.write_datetime(r, 0, dt, fmt_date)
+                except Exception:
+                    wsfred.write(r, 0, str(d))
+                # valor
+                if v is None:
+                    wsfred.write_blank(r, 1, None)
+                else:
+                    wsfred.write_number(r, 1, float(v), fmt_num); valid_count += 1
+                r += 1
+
+            wsfred.set_column(0, 0, 12)
+            wsfred.set_column(1, 1, 16)
+
+            if valid_count >= 2:
+                ch = wb.add_chart({"type": "line"})
+                ch.add_series({
+                    "name": fred_id,
+                    "categories": f"={wsname}!$A$5:$A${r}",
+                    "values":     f"={wsname}!$B$5:$B${r}",
+                })
+                ch.set_title({"name": f"{fred_id} (FRED)"})
+                ch.set_y_axis({"num_format": "#,##0.0000"})
+                wsfred.insert_chart("D4", ch, {"x_scale": 1.2, "y_scale": 1.2})
+    except Exception as _e:
+        pass
+wb.close()
     st.download_button(
     "Descargar Excel",
         data=bio.getvalue(),
