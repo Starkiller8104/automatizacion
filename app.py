@@ -41,7 +41,7 @@ st.markdown("""
 
 /* Logo: limita tamaño para que no se coma la fila */
 .imemsa-logo img {
-  max-height: 15px;        /* ajusta alto del logo aquí */
+  max-height: 5px;        /* ajusta alto del logo aquí */
   width: auto;
   border-radius: 10px;
 }
@@ -454,15 +454,11 @@ with st.sidebar.expander("🔑 Tokens de APIs", expanded=False):
         c1, c2 = st.columns(2)
         if c1.button("Limpiar cachés Banxico"):
             sie_opportuno.clear(); sie_range.clear()
-            st.success("Cachés SIE limpiadas.")
         if c2.button("Limpiar caché UMA"):
             get_uma.clear()
-            st.success("Caché UMA limpiada.")
     with st.sidebar.expander("Diagnóstico UMA"):
         if st.button("Probar INEGI ahora"):
             res = get_uma(INEGI_TOKEN)
-            st.write("Estado:", res.get("_status"), "— Fuente:", res.get("_source"))
-            st.write("Diaria:", res.get("diaria"), "Mensual:", res.get("mensual"), "Anual:", res.get("anual"))
 
 # =========================
 #  Modifique este punto
@@ -718,11 +714,10 @@ if do_charts:
 
 # Cerrar y descargar
     wb.close()
-    st.success("¡Listo! Archivo generado con datos y hojas completas.")
     st.download_button(
-        "Descargar Excel",
+    "Descargar Excel",
         data=bio.getvalue(),
         file_name=f"indicadores_{today_cdmx()}.xlsx",
         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-    )
-
+        )
+    
