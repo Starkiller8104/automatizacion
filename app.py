@@ -41,7 +41,7 @@ st.markdown("""
 
 /* Logo: limita tamaño para que no se coma la fila */
 .imemsa-logo img {
-  max-height: 5px;        /* ajusta alto del logo aquí */
+  max-height: 15px;        /* ajusta alto del logo aquí */
   width: auto;
   border-radius: 10px;
 }
@@ -718,11 +718,11 @@ if do_charts:
 
 # Cerrar y descargar
 wb.close()
-st.success("¡Listo! Archivo generado con datos y hojas completas.")
-st.download_button(
-    "Descargar Excel",
-    data=bio.getvalue(),
-    file_name=f"indicadores_{today_cdmx()}.xlsx",
-    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-)
+    st.success("¡Listo! Archivo generado con datos y hojas completas.")
+    st.download_button(
+        "Descargar Excel",
+        data=bio.getvalue(),
+        file_name=f"indicadores_{today_cdmx()}.xlsx",
+        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+  )
 
