@@ -724,5 +724,5 @@ wb.close()
         data=bio.getvalue(),
         file_name=f"indicadores_{today_cdmx()}.xlsx",
         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-  )
+)
 
