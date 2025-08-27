@@ -111,11 +111,16 @@ def news_parse_rfc_dt_v2(dt_str):
         return None
 
 def news_get_financial_v2(max_items=12):
+    # Feeds centrados en México (Google News RSS para alta compatibilidad)
     feeds = [
-        ("Reuters Markets", "https://feeds.reuters.com/reuters/marketsNews"),
-        ("WSJ Markets", "https://feeds.a.dj.com/rss/RSSMarketsMain.xml"),
-        ("CNBC Top News", "https://www.cnbc.com/id/100003114/device/rss/rss.html"),
-        ("FT Markets", "https://www.ft.com/markets?format=rss"),
+        ("Google News MX – Economía",
+         "https://news.google.com/rss/headlines/section/topic/BUSINESS?hl=es-419&gl=MX&ceid=MX:es-419"),
+        ("Google News MX – Bolsa Mexicana",
+         "https://news.google.com/rss/search?q=Bolsa%20Mexicana%20de%20Valores&hl=es-419&gl=MX&ceid=MX:es-419"),
+        ("Google News MX – Banxico",
+         "https://news.google.com/rss/search?q=Banxico&hl=es-419&gl=MX&ceid=MX:es-419"),
+        ("Google News MX – Inflación (INEGI)",
+         "https://news.google.com/rss/search?q=inflaci%C3%B3n%20M%C3%A9xico%20INEGI&hl=es-419&gl=MX&ceid=MX:es-419"),
     ]
     items = []
     s = _fred_news_requests_session_v2()
@@ -940,24 +945,6 @@ if st.button("Generar Excel"):
 
 
 
-# ---- Fallback para asegurar `wb` y `bio` antes de usar el patch ----
-try:
-    wb  # noqa: F821
-    bio  # noqa: F821
-except NameError:
-    try:
-        bio = io.BytesIO()
-        wb = xlsxwriter.Workbook(bio, {'in_memory': True})
-        try:
-            st.warning("Workbook no existía: se creó uno vacío para FRED/Noticias.")
-        except Exception:
-            pass
-    except Exception as _wb_init_e:
-        try:
-            st.error(f"No se pudo inicializar workbook antes del patch FRED/Noticias: {_wb_init_e}")
-        except Exception:
-            pass
-# --------------------------------------------------------------------
 
 # ==== [PATCH v2] FRED & Noticias (ejecución) ====
 try:
@@ -966,7 +953,7 @@ try:
         FRED_API_KEY = st.secrets.get("FRED_API_KEY", "").strip()
     except Exception:
         FRED_API_KEY = ""
-    if FRED_API_KEY:
+    if FRED_API_KEY and 'wb' in globals():
         end_dt = datetime.now()
         start_dt = end_dt - timedelta(days=180)
         start_str = start_dt.strftime("%Y-%m-%d")
@@ -1002,14 +989,17 @@ try:
     if top_news_v2:
         # Mostrar encabezados en la app
         try:
-            st.subheader("📰 Noticias financieras (encabezados)")
+            st.subheader("📰 Noticias financieras de México (encabezados)")
             for n in top_news_v2:
                 dt_txt = n["published_dt"].strftime("%Y-%m-%d %H:%M") if n["published_dt"] else ""
                 st.markdown(f"- **{n['title']}** — *{n['source']}*  {('· ' + dt_txt) if dt_txt else ''}  \n  {n['link']}")
         except Exception:
             pass
         # Escribir al Excel
-        news_write_sheet_v2(wb, top_news_v2, sheet_name="Noticias_RSS")
+        (
+            news_write_sheet_v2(wb, top_news_v2, sheet_name="Noticias_RSS")
+            if 'wb' in globals() else None
+        )
     else:
         try:
             st.info("No se pudieron obtener noticias en este momento.")
