@@ -1,5 +1,6 @@
 
 
+
 import io
 import re
 import time
@@ -852,7 +853,7 @@ if st.button("Generar Excel"):
     except Exception as _e:
         pass
 
-            pass
+
     wb.close()
     st.download_button(
     "Descargar Excel",
