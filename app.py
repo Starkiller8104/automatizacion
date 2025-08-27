@@ -41,7 +41,7 @@ st.markdown("""
 
 /* Logo: limita tamaño para que no se coma la fila */
 .imemsa-logo img {
-  max-height: 35px;        /* ajusta alto del logo aquí */
+  max-height: 20px;        /* ajusta alto del logo aquí */
   width: auto;
   border-radius: 10px;
 }
@@ -83,8 +83,8 @@ st.markdown(
         <img src="logo.png" alt="IMEMSA logo">
       </div>
       <div class="imemsa-title">
-        <h1>IMEMSA – Indicadores</h1>
-        <h3>Excel con tu layout (B2..G2 fechas reales), noticias y gráficos con XlsxWriter.</h3>
+        <h1>Indicadores de Tipo de Cambio</h1>
+        <h3>       </h3>
       </div>
     </div>
     <div class="imemsa-divider"></div>
