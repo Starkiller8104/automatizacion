@@ -53,11 +53,11 @@ st.markdown("""
 .imemsa-title h1 {
   margin: 0 0 0.25rem 0; 
   font-size: clamp(1.6rem, 2.4vw, 2.2rem);
-  font-weight: 800;
+  font-weight: 500;
 }
 .imemsa-title h3 {
   margin: 0; 
-  font-weight: 500; 
+  font-weight: 800; 
   opacity: 0.95;
 }
 
