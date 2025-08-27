@@ -1061,8 +1061,4 @@ try:
         )
 except Exception as _dl_e:
     st.error(f'No se pudo preparar la descarga: {_dl_e}')
-,
-        file_name=f"indicadores_{today_cdmx()}.xlsx",
-        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        )
     
