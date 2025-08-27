@@ -173,7 +173,7 @@ TZ_MX = pytz.timezone("America/Mexico_City")
 
 # ── Page config (debe ir antes de cualquier otro st.*)
 st.set_page_config(
-    page_title="Indicadores Económicos",
+    page_title="Indicadores Tipos de Cambio",
     page_icon=logo_image_or_emoji(),
     layout="centered"
 )
@@ -209,8 +209,8 @@ if _logo_b64:
         <div class="app-header">
           <img class="logo" src="data:image/png;base64,{_logo_b64}" alt="logo"/>
           <div class="titles">
-            <h1>Indicadores (últimos 6 días) + Noticias</h1>
-            <p>Excel con tu layout (B2..G2 fechas reales), noticias y gráficos con XlsxWriter.</p>
+            <h1>Indicadores (últimos 5 días) + Noticias</h1>
+            <p> </p>
           </div>
         </div>
         """,
