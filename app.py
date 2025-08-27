@@ -20,6 +20,130 @@ from openpyxl.styles import Alignment, Font, PatternFill
 import xlsxwriter
 from requests.adapters import HTTPAdapter, Retry
 import streamlit as st
+
+# ==== Helpers FRED + Noticias MX ====
+def _fred_req_v1():
+    s = requests.Session()
+    try:
+        from requests.adapters import HTTPAdapter, Retry
+        rty = Retry(total=3, backoff_factor=0.5, status_forcelist=[429, 500, 502, 503, 504])
+        s.mount("https://", HTTPAdapter(max_retries=rty))
+    except Exception:
+        pass
+    return s
+
+def _fred_fetch_v1(series_id: str, start: str, end: str, api_key: str):
+    url = "https://api.stlouisfed.org/fred/series/observations"
+    params = {"series_id": series_id, "api_key": api_key, "file_type": "json",
+              "observation_start": start, "observation_end": end}
+    r = _fred_req_v1().get(url, params=params, timeout=30)
+    r.raise_for_status()
+    out = []
+    try:
+        observations = r.json().get("observations", [])
+    except Exception:
+        observations = []
+    for o in observations:
+        v = o.get("value")
+        if v not in (None, ".", ""):
+            try:
+                out.append((o["date"], float(v)))
+            except Exception:
+                pass
+    return out
+
+def _fred_write_v1(wb, series_dict, sheet_name="FRED_v2"):
+    ws = wb.add_worksheet(sheet_name)
+    fmt_bold = wb.add_format({"bold": True, "align": "center"})
+    fmt_date = wb.add_format({"num_format": "yyyy-mm-dd"})
+    fmt_num  = wb.add_format({"num_format": "#,##0.0000"})
+    headers = ["Fecha"] + list(series_dict.keys())
+    ws.write_row(0, 0, headers, fmt_bold)
+    fechas = sorted({d for vals in series_dict.values() for d, _ in vals})
+    lookup = {name: {d: v for d, v in vals} for name, vals in series_dict.items()}
+    for i, d in enumerate(fechas, start=1):
+        try:
+            ws.write_datetime(i, 0, datetime.fromisoformat(d), fmt_date)
+        except Exception:
+            ws.write_string(i, 0, d)
+        for j, name in enumerate(series_dict.keys(), start=1):
+            v = lookup[name].get(d)
+            if v is not None:
+                ws.write_number(i, j, v, fmt_num)
+    last_row = 1 + len(fechas)
+    cats = f"='{sheet_name}'!$A$2:$A${last_row}"
+    for j, name in enumerate(series_dict.keys(), start=1):
+        ch = wb.add_chart({"type": "line"})
+        col_letter = chr(64 + j + 0)  # B, C, ...
+        ch.add_series({
+            "name":       f"='{sheet_name}'!${col_letter}$1",
+            "categories": cats,
+            "values":     f"='{sheet_name}'!${col_letter}$2:${col_letter}${last_row}",
+        })
+        ch.set_title({"name": name})
+        ch.set_y_axis({"num_format": "#,##0.0000"})
+        ws.insert_chart(3 + (j-1)*16, 4, ch, {"x_scale": 1.2, "y_scale": 1.1})
+    ws.set_column(0, 0, 12)
+    ws.set_column(1, len(series_dict), 16)
+    return ws
+
+def _mx_news_get_v1(max_items=12):
+    feeds = [
+        ("Google News MX – Economía",
+         "https://news.google.com/rss/headlines/section/topic/BUSINESS?hl=es-419&gl=MX&ceid=MX:es-419"),
+        ("Google News MX – BMV",
+         "https://news.google.com/rss/search?q=Bolsa%20Mexicana%20de%20Valores&hl=es-419&gl=MX&ceid=MX:es-419"),
+        ("Google News MX – Banxico",
+         "https://news.google.com/rss/search?q=Banxico&hl=es-419&gl=MX&ceid=MX:es-419"),
+        ("Google News MX – Inflación INEGI",
+         "https://news.google.com/rss/search?q=inflaci%C3%B3n%20M%C3%A9xico%20INEGI&hl=es-419&gl=MX&ceid=MX:es-419"),
+    ]
+    items = []
+    try:
+        import feedparser as _fp
+    except Exception:
+        return items
+    for source, url in feeds:
+        try:
+            fp = _fp.parse(url)
+            for e in fp.get("entries", []):
+                title = (e.get("title") or "").strip()
+                link  = (e.get("link") or "").strip()
+                pub   = e.get("published") or e.get("updated") or ""
+                try:
+                    dt = parsedate_to_datetime(pub) if pub else None
+                except Exception:
+                    dt = None
+                items.append({"title": title, "link": link, "published_dt": dt, "source": source})
+        except Exception:
+            continue
+    items.sort(key=lambda x: x["published_dt"] or datetime(1970,1,1), reverse=True)
+    return items[:max_items]
+
+def _mx_news_write_v1(wb, news_list, sheet_name="Noticias_RSS"):
+    if not news_list:
+        return None
+    ws = wb.add_worksheet(sheet_name)
+    fmt_bold = wb.add_format({"bold": True})
+    fmt_link = wb.add_format({"font_color": "blue", "underline": 1})
+    fmt_date = wb.add_format({"num_format": "yyyy-mm-dd hh:mm"})
+    ws.write_row(0, 0, ["Título", "Link", "Fecha", "Fuente"], fmt_bold)
+    for i, n in enumerate(news_list, start=1):
+        ws.write_string(i, 0, n.get("title",""))
+        link = n.get("link","")
+        if link:
+            ws.write_url(i, 1, link, fmt_link, string="Abrir")
+        dt = n.get("published_dt")
+        if dt:
+            try:
+                ws.write_datetime(i, 2, dt, fmt_date)
+            except Exception:
+                ws.write_string(i, 2, str(dt))
+        ws.write_string(i, 3, n.get("source",""))
+    ws.set_column(0, 0, 80); ws.set_column(1, 1, 12)
+    ws.set_column(2, 2, 20); ws.set_column(3, 3, 18)
+    return ws
+# ==== Fin helpers ====
 import warnings
 warnings.filterwarnings("ignore", category=DeprecationWarning)
 
@@ -658,7 +782,7 @@ if st.button("Generar Excel"):
 
     
     # [Hoja 'Noticias' eliminada por solicitud]
-    try:
+try:
         do_raw
     except NameError:
         do_raw = True
@@ -774,6 +898,46 @@ if st.button("Generar Excel"):
                 wsfred.insert_chart("D4", ch, {"x_scale": 1.2, "y_scale": 1.2})
     except Exception as _e:
         pass
+# ==== Inserción: crear FRED_v2 y Noticias_RSS en el Excel ====
+try:
+    fred_key = ""
+    try:
+        fred_key = st.secrets.get("FRED_API_KEY", "").strip()
+    except Exception:
+        pass
+    if fred_key:
+        end_dt = datetime.now()
+        start_dt = end_dt - timedelta(days=180)
+        fred_series = {
+            "US 10Y (DGS10)": "DGS10",
+            "Fed Funds (DFF)": "DFF",
+            "MXN/USD (DEXMXUS)": "DEXMXUS",
+        }
+        fred_data = {}
+        for label, sid in fred_series.items():
+            try:
+                fred_data[label] = _fred_fetch_v1(
+                    sid,
+                    start_dt.strftime("%Y-%m-%d"),
+                    end_dt.strftime("%Y-%m-%d"),
+                    fred_key
+                )
+            except Exception:
+                fred_data[label] = []
+        if any(len(v) > 0 for v in fred_data.values()):
+            _fred_write_v1(wb, fred_data, sheet_name="FRED_v2")
+
+    _news = []
+    try:
+        _news = _mx_news_get_v1(max_items=12)
+    except Exception:
+        _news = []
+    if _news:
+        _mx_news_write_v1(wb, _news, sheet_name="Noticias_RSS")
+except Exception:
+    pass
+# ==== Fin inserción ====
+
 
 
     wb.close()
