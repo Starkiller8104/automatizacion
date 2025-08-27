@@ -41,7 +41,7 @@ st.markdown("""
 
 /* Logo: limita tamaño para que no se coma la fila */
 .imemsa-logo img {
-  max-height: 84px;        /* ajusta alto del logo aquí */
+  max-height: 150px;        /* ajusta alto del logo aquí */
   width: auto;
   border-radius: 10px;
 }
@@ -92,10 +92,12 @@ st.markdown(
     """,
     unsafe_allow_html=True
 )
+
+#borrar en caso de error
 #tres lineas agregadas
-#import warnings
-#warnings.filterwarnings("ignore", category=DeprecationWarning)
-#st.image("logo.png", use_container_width=True)
+import warnings
+warnings.filterwarnings("ignore", category=DeprecationWarning)
+st.image("logo.png", use_container_width=True)
 
 # ==== LOGIN (agregado) ====
 import os, pytz as _pytz_for_login  # _pytz_for_login sólo para asegurar import si no existía
