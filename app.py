@@ -41,7 +41,7 @@ st.markdown("""
 
 /* Logo: limita tamaño para que no se coma la fila */
 .imemsa-logo img {
-  max-height: 100px;        /* ajusta alto del logo aquí */
+  max-height: 80px;        /* ajusta alto del logo aquí */
   width: auto;
   border-radius: 10px;
 }
