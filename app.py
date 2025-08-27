@@ -57,7 +57,7 @@ st.markdown("""
 }
 .imemsa-title h3 {
   margin: 0; 
-  font-weight: 800; 
+  font-weight: 500; 
   opacity: 0.95;
 }
 
@@ -71,7 +71,7 @@ st.markdown("""
 }
 
 /* Espaciado inferior tras el header */
-.imemsa-spacer { height: 12px; }
+.imemsa-spacer { height: 8px; }
 </style>
 """, unsafe_allow_html=True)
 
