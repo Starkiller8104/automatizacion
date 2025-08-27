@@ -1,6 +1,4 @@
 
-
-
 import io
 import re
 import time
@@ -20,42 +18,33 @@ from openpyxl import Workbook
 from openpyxl.styles import Alignment, Font, PatternFill
 import xlsxwriter
 from requests.adapters import HTTPAdapter, Retry
-
 import streamlit as st
-
-# ==== Parche de silencio para no mostrar leyendas/depuración ====
 import warnings
 warnings.filterwarnings("ignore", category=DeprecationWarning)
 
-DEBUG = False  # pon True si quieres volver a ver st.write/st.json
+DEBUG = False  
 
 def _noop(*args, **kwargs):
     """Función vacía para suprimir salidas visibles."""
     return None
 
-# Silenciar funciones de salida comunes cuando DEBUG=False
 if not DEBUG:
-    # suprime prints de consola
+    
     import builtins as _b
     _b.print = _noop
 
-    # suprime leyendas y depuración en Streamlit
+   
     try:
-        st.write   = _noop   # suprime listas, True, etc.
-        st.json    = _noop   # suprime dicts/JSON (ej. {"_status": "err: HTTP 401"})
-        st.success = _noop   # suprime la leyenda verde de "¡Listo!..."
-        # (si usaste st.caption para depurar, también puedes silenciarlo):
-        # st.caption = _noop
+        st.write   = _noop   
+        st.json    = _noop   
+        st.success = _noop   
+        
     except Exception:
         pass
-# =======================Borrar
 
 
-
-# 1) Config de página
 st.set_page_config(page_title="IMEMSA - Indicadores", layout="wide")
 
-# 2) Inyectar CSS (antes de dibujar el encabezado)
 st.markdown("""
 <style>
 /* ---------- Layout general ---------- */
@@ -103,7 +92,6 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-# 3) Encabezado (logo + título + subtítulo)
 st.markdown(
     """
     <div class="imemsa-header">
@@ -120,14 +108,7 @@ st.markdown(
     unsafe_allow_html=True
 )
 
-#borrar en caso de error
-#tres lineas agregadas
-#import warnings
-#warnings.filterwarnings("ignore", category=DeprecationWarning)
-#st.image("logo.png", width=150)
-
-# ==== LOGIN (agregado) ====
-import os, pytz as _pytz_for_login  # _pytz_for_login sólo para asegurar import si no existía
+import os, pytz as _pytz_for_login  
 
 def _get_app_password() -> str:
     try:
@@ -136,7 +117,7 @@ def _get_app_password() -> str:
         pass
     if os.getenv("APP_PASSWORD"):
         return os.getenv("APP_PASSWORD")
-    return "imemsa79"  # por defecto
+    return "imemsa79"  
 
 def _check_password() -> bool:
     if "auth_ok" not in st.session_state:
@@ -150,12 +131,7 @@ def _check_password() -> bool:
     st.title("🔒 Acceso restringido")
     st.text_input("Contraseña", type="password", key="password_input", on_change=_try_login, placeholder="Escribe tu contraseña…")
     st.stop()
-# ==== /LOGIN ====
 
-
-# =========================
-#  Utilidades de tiempo/zonas
-# =========================
 CDMX = pytz.timezone("America/Mexico_City")
 
 def today_cdmx():
@@ -190,13 +166,11 @@ def logo_base64(max_height_px: int = 40):
     except Exception:
         return None
 
-# =========================
-#  TOKENS
-# =========================
+
 BANXICO_TOKEN = "677aaedf11d11712aa2ccf73da4d77b6b785474eaeb2e092f6bad31b29de6609"
 INEGI_TOKEN   = "0146a9ed-b70f-4ea2-8781-744b900c19d1"
-FRED_TOKEN    = "b4f11681f441da78103a3706d0dab1cf"  # opcional para gráficos
-# ------------------ FRED helper ------------------
+FRED_TOKEN    = "b4f11681f441da78103a3706d0dab1cf"  
+
 def fred_fetch_series(series_id: str, start: str | None = None, end: str | None = None, units: str = "lin"):
     """
     Consulta FRED para 'series_id' y retorna lista de dicts con 'date' y 'value' (float; None si inválido).
@@ -232,15 +206,15 @@ def fred_fetch_series(series_id: str, start: str | None = None, end: str | None 
 
 TZ_MX = pytz.timezone("America/Mexico_City")
 
-# ── Page config (debe ir antes de cualquier otro st.*)
+
 st.set_page_config(
     page_title="Indicadores Tipos de Cambio",
     page_icon=logo_image_or_emoji(),
     layout="centered"
 )
-_check_password()  # <<< Login requerido antes de mostrar la UI
+_check_password() 
 
-# CSS: ocultar menú y footer + estilos del header sticky
+
 st.markdown("""
 <style>
 #MainMenu {visibility: hidden;}      /* oculta hamburguesa */
@@ -262,7 +236,6 @@ footer {visibility: hidden;}         /* oculta footer */
 </style>
 """, unsafe_allow_html=True)
 
-# Encabezado sticky con logo
 _logo_b64 = logo_base64()
 if _logo_b64:
     st.markdown(
@@ -278,19 +251,14 @@ if _logo_b64:
         unsafe_allow_html=True
     )
 else:
-    # Fallback normal si no hay logo
+   
     st.title("📈 Indicadores (últimos 5 días) + Noticias")
     st.caption("Excel con tipos de cambio, noticias y gráficos.")
 
-# Logo también en el sidebar (si existe)
 if _logo_b64:
-   # st.sidebar.image(f"data:image/png;base64,{_logo_b64}", use_column_width=True)
-  #para quitar la leyenda verde debajo del logo
+ 
     st.sidebar.image(f"data:image/png;base64,{_logo_b64}", use_container_width=True)
 
-# =========================
-#  Helpers generales
-# =========================
 def http_session(timeout=15):
     s = requests.Session()
     retries = Retry(total=3, backoff_factor=0.8,
@@ -312,9 +280,6 @@ def parse_any_date(s: str):
             pass
     return None
 
-# =========================
-#  Verificación de tokens
-# =========================
 def _check_tokens():
     missing = []
     if not BANXICO_TOKEN.strip(): missing.append("BANXICO_TOKEN")
@@ -323,9 +288,6 @@ def _check_tokens():
         st.error("Faltan tokens: " + ", ".join(missing))
         st.stop()
 
-# =========================
-#  Banxico SIE
-# =========================
 @st.cache_data(ttl=60*30)
 def sie_opportuno(series_id):
     url = f"https://www.banxico.org.mx/SieAPIRest/service/v1/series/{series_id}/datos/oportuno"
@@ -389,15 +351,12 @@ def rolling_movex_for_last6(window:int=20):
         out.append(sum(sub)/len(sub) if sub else None)
     return out
 
-# =========================
-#  Series SIE / mapeo CETES, USD, etc.
-# =========================
 SIE_SERIES = {
     "USD_FIX":   "SF43718",
     "EUR_MXN":   "SF46410",
     "JPY_MXN":   "SF46406",
     "UDIS":      "SP68257",
-    "TIie_dummy": None,  # placeholder si requieres
+    "TIie_dummy": None, 
 
     "CETES_28":  "SF43936",
     "CETES_91":  "SF43939",
@@ -405,9 +364,6 @@ SIE_SERIES = {
     "CETES_364": "SF43945",
 }
 
-# =========================
-#  INEGI UMA – robusto (con fallback y diagnóstico)
-# =========================
 @st.cache_data(ttl=60*60)
 def get_uma(inegi_token: str):
     """
@@ -418,7 +374,7 @@ def get_uma(inegi_token: str):
     ids = "620706,620707,620708"
     urls = [
         f"{base}/{ids}/es/00/true/BISE/2.0/{inegi_token}?type=json",
-        f"{base}/{ids}/es/00/true/BIE/2.0/{inegi_token}?type=json",  # fallback
+        f"{base}/{ids}/es/00/true/BIE/2.0/{inegi_token}?type=json",  
     ]
 
     def _num(x):
@@ -468,9 +424,6 @@ def get_uma(inegi_token: str):
     return {"fecha": None, "diaria": None, "mensual": None, "anual": None,
             "_status": f"err: {last_err}", "_source": "fallback"}
 
-# =========================
-#  Render de estado en sidebar
-# =========================
 def _probe(fn, ok_condition):
     t0 = time.time()
     try:
@@ -500,17 +453,17 @@ def _render_sidebar_status():
     badge(f_status, "FRED (USA)",   f_msg, f_ms)
 
     st.sidebar.divider()
-# ==== Tokens editables (agregado) ====
+
 with st.sidebar.expander("🔑 Tokens de APIs", expanded=False):
     st.caption("Si ingresas un token aquí, la app lo usará en lugar del definido en el código.")
     token_banxico_input = st.text_input("BANXICO_TOKEN", value="", type="password")
     token_inegi_input   = st.text_input("INEGI_TOKEN",   value="", type="password")
-    # Asignación en caliente
+    
     if token_banxico_input.strip():
         BANXICO_TOKEN = token_banxico_input.strip()
     if token_inegi_input.strip():
         INEGI_TOKEN = token_inegi_input.strip()
-# ==== /Tokens editables ====
+
     with st.sidebar.expander("Herramientas"):
         c1, c2 = st.columns(2)
         if c1.button("Limpiar cachés Banxico"):
@@ -521,72 +474,52 @@ with st.sidebar.expander("🔑 Tokens de APIs", expanded=False):
         if st.button("Probar INEGI ahora"):
             res = get_uma(INEGI_TOKEN)
 
-# =========================
-#  Modifique este punto
-# =========================
+
 with st.expander("Opciones"):
-    # Mostrar el control solo como informativo y dejarlo fijo en 5
+    
     st.number_input(
         "Venta MONEX (historial días hábiles)", 
         min_value=5, max_value=5, value=5, step=1,
         key="movex_win_fixed", disabled=True, help="Fijo a 5 días hábiles"
     )
-    movex_win = 5  # <— se usa en todos los cálculos internos
+    movex_win = 5  
 
 
     margen_pct = st.number_input("Margen Compra/Venta sobre FIX ...% por lado)", min_value=0.0, max_value=5.0, value=0.5, step=0.1)
     uma_manual = st.number_input("UMA diaria (manual, si INEGI falla)", min_value=0.0, value=0.0, step=0.01)
     do_charts = st.toggle("Agregar hoja 'Gráficos' (últimos 12)", value=True)
     do_raw    = st.toggle("Agregar hoja 'Datos crudos' (últimos 12)", value=True)
-    # (deja intacto lo demás)
-    # margen_pct = ...
-    # uma_manual = ...
-    # do_charts = ...
-    # do_raw = ...
-
-
+    
 _check_tokens()
 _render_sidebar_status()
 
-# =========================
-#  Generar Excel (XlsxWriter)
-# =========================
 if st.button("Generar Excel"):
     def pad6(lst): return ([None]*(6-len(lst)))+lst if len(lst) < 6 else lst[-6:]
     none6 = [None]*6
 
-    # --- FIX USD/MXN (últimos 6)
     fix6 = pad6([v for _, v in sie_last_n(SIE_SERIES["USD_FIX"], n=6)])
-    # EUR/MXN, JPY/MXN
+    
     eur6 = pad6([v for _, v in sie_last_n(SIE_SERIES["EUR_MXN"], n=6)])
     jpy6 = pad6([v for _, v in sie_last_n(SIE_SERIES["JPY_MXN"], n=6)])
 
-    # --- MOVEX rolling window
+    
     movex_series = rolling_movex_for_last6(window=movex_win)
     movex6 = pad6(movex_series)
 
-    # --- CETES últimos 6
+    
     cetes28_6 = pad6([v for _, v in sie_last_n(SIE_SERIES["CETES_28"], n=6)])
     cetes91_6 = pad6([v for _, v in sie_last_n(SIE_SERIES["CETES_91"], n=6)])
     cetes182_6 = pad6([v for _, v in sie_last_n(SIE_SERIES["CETES_182"], n=6)])
     cetes364_6 = pad6([v for _, v in sie_last_n(SIE_SERIES["CETES_364"], n=6)])
 
-    # --- UMA con fallback manual
+    
     uma = get_uma(INEGI_TOKEN)
     if uma.get("diaria") is None and uma_manual > 0:
         uma["diaria"]  = uma_manual
         uma["mensual"] = uma_manual * 30.4
         uma["anual"]   = uma["mensual"] * 12
 
-    # (resto de tu generación de Excel con XlsxWriter: hojas, formatos, gráficos, etc.)
-    # ...
-    # ... (todo tu código original permanece igual aquí abajo)
-    #  (El bloque continúa con la construcción del workbook, hojas, estilos y gráficos)
 
-    # === A partir de aquí se mantiene íntegra tu lógica original de exportación ===
-    # (Código existente que escribe tablas, gráficos y crea el archivo para descargar)
-
-    # --- FRED opcional: bajar datos si se solicitó y hay token
     fred_rows = None
     try:
         if add_fred and fred_id.strip() and isinstance(fred_start, (datetime, date)) and isinstance(fred_end, (datetime, date)):
@@ -597,18 +530,18 @@ if st.button("Generar Excel"):
                 units=fred_units
             )
     except NameError:
-        fred_rows = None  # si no existe UI FRED, no agrega
+        fred_rows = None  
     bio = io.BytesIO()
     wb = xlsxwriter.Workbook(bio, {'in_memory': True})
 
-    # ====== Formatos ======
+
     fmt_bold  = wb.add_format({'bold': True})
     fmt_hdr   = wb.add_format({'bold': True, 'bg_color': '#F2F2F2', 'align':'center'})
     fmt_num4  = wb.add_format({'num_format': '0.0000'})
     fmt_num6  = wb.add_format({'num_format': '0.000000'})
     fmt_wrap  = wb.add_format({'text_wrap': True})
 
-    # ====== Preparar datos ======
+    
     _fix_pairs = sie_last_n(SIE_SERIES["USD_FIX"], n=6)
     header_dates = [d for d,_ in _fix_pairs]
     if len(header_dates) < 6:
@@ -625,7 +558,7 @@ if st.button("Generar Excel"):
     m_c364 = _as_map(sie_last_n(SIE_SERIES["CETES_364"],6))
 
     try:
-        movex6  # noqa
+        movex6  
     except NameError:
         movex6 = rolling_movex_for_last6(window=movex_win)
     compra = [(x*(1 - margen_pct/100) if x is not None else None) for x in movex6]
@@ -639,7 +572,7 @@ if st.button("Generar Excel"):
         eur_usd.append((e/u) if (e and u) else None)
 
     try:
-        uma  # noqa
+        uma  
     except NameError:
         uma = get_uma(INEGI_TOKEN)
 
@@ -655,7 +588,7 @@ if st.button("Generar Excel"):
     tiie91 = [tiie91_last]*6
     tiie182= [tiie182_last]*6
 
-    # ====== Hoja Indicadores ======
+   
     ws = wb.add_worksheet("Indicadores")
     ws.write(1, 0, "Fecha:", fmt_bold)
     for i, d in enumerate(header_dates):
@@ -667,8 +600,7 @@ if st.button("Generar Excel"):
     for i, d in enumerate(header_dates):
         ws.write(6, 1+i, m_fix.get(d), fmt_num4)
     ws.write(7, 0, "MONEX:")
-    #for i, v in enumerate(movex6):
-        #ws.write(7, 1+i, v, fmt_num6)
+    
     ws.write(8, 0, "Compra:")
     for i, v in enumerate(compra):
         ws.write(8, 1+i, v, fmt_num6)
@@ -723,7 +655,7 @@ if st.button("Generar Excel"):
     ws.write(40, 0, "Mensual:"); ws.write(40, 1, uma.get("mensual"))
     ws.write(41, 0, "Anual:");   ws.write(41, 1, uma.get("anual"))
 
-    # Noticias
+    
     ws2 = wb.add_worksheet("Noticias")
     ws2.write(0, 0, "Noticias financieras recientes", fmt_bold)
     try:
@@ -733,7 +665,7 @@ if st.button("Generar Excel"):
     ws2.write(1, 0, news_text, fmt_wrap)
     ws2.set_column(0, 0, 120)
 
-    # Datos crudos (opcional)
+    
     try:
         do_raw
     except NameError:
@@ -760,7 +692,7 @@ if st.button("Generar Excel"):
         r = _dump(ws3, r, "CETES 364d (%)",sie_last_n(SIE_SERIES["CETES_364"],6))
         ws3.set_column(0, 0, 18); ws3.set_column(1, 1, 12); ws3.set_column(2, 2, 16)
 
-    # Gráficos (opcional)
+    
     try:
         do_charts
     except NameError:
@@ -786,9 +718,7 @@ if st.button("Generar Excel"):
         chart2.set_title({'name': 'CETES (%)'})
         ws4.insert_chart('B18', chart2, {'x_scale': 1.3, 'y_scale': 1.2})
 
-    # Cerrar y descargar
     
-    # ===== Hoja FRED (opcional) =====
     try:
         if fred_rows:
             wsname  = f"FRED_{fred_id[:25]}"
@@ -798,12 +728,12 @@ if st.button("Generar Excel"):
             fmt_num  = wb.add_format({"num_format": "#,##0.0000"})
             fmt_date = wb.add_format({"num_format": "yyyy-mm-dd"})
 
-            # Encabezado y meta
+            
             wsfred.write(0, 0, f"FRED – {fred_id}", fmt_bold)
             wsfred.write(1, 0, f"Generado: {today_cdmx('%Y-%m-%d %H:%M')} (CDMX)")
             wsfred.write_row(3, 0, ["date", fred_id], fmt_bold)
 
-            # Datos
+            
             r_start = 4
             r = r_start
             valid_count = 0
@@ -812,14 +742,14 @@ if st.button("Generar Excel"):
                 d = row.get("date")
                 v = row.get("value")
 
-                # Fecha
+                
                 try:
                     dt = pd.to_datetime(d).to_pydatetime()
                     wsfred.write_datetime(r, 0, dt, fmt_date)
                 except Exception:
                     wsfred.write(r, 0, str(d))
 
-                # Valor
+                
                 try:
                     if v is not None:
                         v_float = float(v)
