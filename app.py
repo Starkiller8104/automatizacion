@@ -787,50 +787,71 @@ if st.button("Generar Excel"):
 
     # Cerrar y descargar
     
-        # ===== Hoja FRED (opcional) =====
-        try:
-            if fred_rows:
-                wsname = f"FRED_{fred_id[:25]}"
-                wsfred = wb.add_worksheet(wsname)
-                fmt_bold = wb.add_format({"bold": True})
-                fmt_num  = wb.add_format({"num_format": "#,##0.0000"})
-                fmt_date = wb.add_format({"num_format": "yyyy-mm-dd"})
+    # ===== Hoja FRED (opcional) =====
+    try:
+        if fred_rows:
+            wsname  = f"FRED_{fred_id[:25]}"
+            wsfred  = wb.add_worksheet(wsname)
 
-                wsfred.write(0, 0, f"FRED – {fred_id}", fmt_bold)
-                wsfred.write(1, 0, f"Generado: {today_cdmx('%Y-%m-%d %H:%M')} (CDMX)")
-                wsfred.write_row(3, 0, ["date", fred_id], fmt_bold)
+            fmt_bold = wb.add_format({"bold": True})
+            fmt_num  = wb.add_format({"num_format": "#,##0.0000"})
+            fmt_date = wb.add_format({"num_format": "yyyy-mm-dd"})
 
-                r = 4
-                valid_count = 0
-                for row in fred_rows:
-                    d = row.get("date"); v = row.get("value")
-                    # fecha
-                    try:
-                        dt = pd.to_datetime(d).to_pydatetime()
-                        wsfred.write_datetime(r, 0, dt, fmt_date)
-                    except Exception:
-                        wsfred.write(r, 0, str(d))
-                    # valor
-                    if v is None:
-                        wsfred.write_blank(r, 1, None)
+            # Encabezado y meta
+            wsfred.write(0, 0, f"FRED – {fred_id}", fmt_bold)
+            wsfred.write(1, 0, f"Generado: {today_cdmx('%Y-%m-%d %H:%M')} (CDMX)")
+            wsfred.write_row(3, 0, ["date", fred_id], fmt_bold)
+
+            # Datos
+            r_start = 4
+            r = r_start
+            valid_count = 0
+
+            for row in fred_rows:
+                d = row.get("date")
+                v = row.get("value")
+
+                # Fecha
+                try:
+                    dt = pd.to_datetime(d).to_pydatetime()
+                    wsfred.write_datetime(r, 0, dt, fmt_date)
+                except Exception:
+                    wsfred.write(r, 0, str(d))
+
+                # Valor
+                try:
+                    if v is not None:
+                        v_float = float(v)
+                        if not pd.isna(v_float):
+                            wsfred.write_number(r, 1, v_float, fmt_num)
+                            valid_count += 1
+                        else:
+                            wsfred.write_blank(r, 1, None)
                     else:
-                        wsfred.write_number(r, 1, float(v), fmt_num); valid_count += 1
-                    r += 1
+                        wsfred.write_blank(r, 1, None)
+                except Exception:
+                    wsfred.write_blank(r, 1, None)
 
-                wsfred.set_column(0, 0, 12)
-                wsfred.set_column(1, 1, 16)
+                r += 1
 
-                if valid_count >= 2:
-                    ch = wb.add_chart({"type": "line"})
-                    ch.add_series({
-                        "name": fred_id,
-                        "categories": f"={wsname}!$A$5:$A${r}",
-                        "values":     f"={wsname}!$B$5:$B${r}",
-                    })
-                    ch.set_title({"name": f"{fred_id} (FRED)"})
-                    ch.set_y_axis({"num_format": "#,##0.0000"})
-                    wsfred.insert_chart("D4", ch, {"x_scale": 1.2, "y_scale": 1.2})
-        except Exception as _e:
+            wsfred.set_column(0, 0, 12)
+            wsfred.set_column(1, 1, 16)
+
+            if valid_count >= 2:
+                first_excel_row = r_start + 1
+                last_excel_row  = r
+                ch = wb.add_chart({"type": "line"})
+                ch.add_series({
+                    "name": fred_id,
+                    "categories": f"={wsname}!$A${first_excel_row}:$A${last_excel_row}",
+                    "values":     f"={wsname}!$B${first_excel_row}:$B${last_excel_row}",
+                })
+                ch.set_title({"name": f"{fred_id} (FRED)"})
+                ch.set_y_axis({"num_format": "#,##0.0000"})
+                wsfred.insert_chart("D4", ch, {"x_scale": 1.2, "y_scale": 1.2})
+    except Exception as _e:
+        pass
+
             pass
     wb.close()
     st.download_button(
