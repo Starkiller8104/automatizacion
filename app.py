@@ -21,10 +21,81 @@ from requests.adapters import HTTPAdapter, Retry
 
 import streamlit as st
 
+# agrega código
+import streamlit as st
+
+# 1) Config de página
+st.set_page_config(page_title="IMEMSA - Indicadores", layout="wide")
+
+# 2) Inyectar CSS (antes de dibujar el encabezado)
+st.markdown("""
+<style>
+/* ---------- Layout general ---------- */
+.block-container { padding-top: 1.5rem; }
+
+/* Encabezado */
+.imemsa-header {
+  display: flex; gap: 1.25rem; align-items: center; 
+  margin-bottom: 0.75rem;
+}
+
+/* Logo: limita tamaño para que no se coma la fila */
+.imemsa-logo img {
+  max-height: 84px;        /* ajusta alto del logo aquí */
+  width: auto;
+  border-radius: 10px;
+}
+
+/* Títulos */
+.imemsa-title {
+  line-height: 1.1;
+}
+.imemsa-title h1 {
+  margin: 0 0 0.25rem 0; 
+  font-size: clamp(1.6rem, 2.4vw, 2.2rem);
+  font-weight: 800;
+}
+.imemsa-title h3 {
+  margin: 0; 
+  font-weight: 500; 
+  opacity: 0.95;
+}
+
+/* Línea divisoria con colores del logo */
+.imemsa-divider {
+  height: 6px;
+  width: 100%;
+  border-radius: 999px;
+  margin: 0.75rem 0 1rem 0;
+  background: linear-gradient(90deg, #0A4FA3 0%, #0A4FA3 40%, #E32028 40%, #E32028 60%, #0A4FA3 60%, #0A4FA3 100%);
+}
+
+/* Espaciado inferior tras el header */
+.imemsa-spacer { height: 12px; }
+</style>
+""", unsafe_allow_html=True)
+
+# 3) Encabezado (logo + título + subtítulo)
+st.markdown(
+    """
+    <div class="imemsa-header">
+      <div class="imemsa-logo">
+        <img src="logo.png" alt="IMEMSA logo">
+      </div>
+      <div class="imemsa-title">
+        <h1>IMEMSA – Indicadores</h1>
+        <h3>Excel con tu layout (B2..G2 fechas reales), noticias y gráficos con XlsxWriter.</h3>
+      </div>
+    </div>
+    <div class="imemsa-divider"></div>
+    <div class="imemsa-spacer"></div>
+    """,
+    unsafe_allow_html=True
+)
 #tres lineas agregadas
-import warnings
-warnings.filterwarnings("ignore", category=DeprecationWarning)
-st.image("logo.png", use_container_width=True)
+#import warnings
+#warnings.filterwarnings("ignore", category=DeprecationWarning)
+#st.image("logo.png", use_container_width=True)
 
 # ==== LOGIN (agregado) ====
 import os, pytz as _pytz_for_login  # _pytz_for_login sólo para asegurar import si no existía
