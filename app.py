@@ -193,7 +193,7 @@ def logo_base64(max_height_px: int = 40):
 # =========================
 BANXICO_TOKEN = "677aaedf11d11712aa2ccf73da4d77b6b785474eaeb2e092f6bad31b29de6609"
 INEGI_TOKEN   = "0146a9ed-b70f-4ea2-8781-744b900c19d1"
-FRED_TOKEN    = ""  # opcional para gráficos
+FRED_TOKEN    = "b4f11681f441da78103a3706d0dab1cf"  # opcional para gráficos
 
 TZ_MX = pytz.timezone("America/Mexico_City")
 
