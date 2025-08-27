@@ -1,27 +1,24 @@
 
-
 import io
 import re
 import time
 import html
 import base64
-from datetime import datetime, timedelta, date
-from email.utils import parsedate_to_datetime
-from pathlib import Path
-
 import pytz
 import re
 import requests
 import feedparser
+import xlsxwriter
+import streamlit as st
+from datetime import datetime, timedelta, date
+from email.utils import parsedate_to_datetime
+from pathlib import Path
 from PIL import Image
 from urllib.parse import urlparse
 from openpyxl import Workbook
 from openpyxl.styles import Alignment, Font, PatternFill
-import xlsxwriter
 from requests.adapters import HTTPAdapter, Retry
-import streamlit as st
 
-# ==== Helpers FRED + Noticias MX ====
 def _fred_req_v1():
     s = requests.Session()
     try:
@@ -143,7 +140,7 @@ def _mx_news_write_v1(wb, news_list, sheet_name="Noticias_RSS"):
     ws.set_column(0, 0, 80); ws.set_column(1, 1, 12)
     ws.set_column(2, 2, 20); ws.set_column(3, 3, 18)
     return ws
-# ==== Fin helpers ====
+
 import warnings
 warnings.filterwarnings("ignore", category=DeprecationWarning)
 
@@ -181,9 +178,9 @@ st.markdown("""
   margin-bottom: 0.75rem;
 }
 
-/* Logo: limita tamaño para que no se coma la fila */
+/* Logo */
 .imemsa-logo img {
-  max-height: 5px;        /* ajusta alto del logo aquí */
+  max-height: 5px;        
   width: auto;
   border-radius: 10px;
 }
@@ -298,8 +295,7 @@ FRED_TOKEN    = "b4f11681f441da78103a3706d0dab1cf"
 
 def fred_fetch_series(series_id: str, start: str | None = None, end: str | None = None, units: str = "lin"):
     """
-    Consulta FRED para 'series_id' y retorna lista de dicts con 'date' y 'value' (float; None si inválido).
-    Usa FRED_TOKEN si está configurado; si falta o hay error, devuelve lista vacía.
+    Consulta FRED 
     """
     try:
         token = FRED_TOKEN.strip()
@@ -602,7 +598,7 @@ with st.sidebar.expander("🔑 Tokens de APIs", expanded=False):
 
 with st.sidebar.expander("📄 Hojas del Excel", expanded=True):
     st.caption("Activa/desactiva hojas opcionales del archivo Excel")
-    want_fred   = st.checkbox("Agregar hoja FRED_v2 (si hay FRED_API_KEY)", value=st.session_state.get("want_fred", True))
+    want_fred   = st.checkbox("Agregar hoja FRED", value=st.session_state.get("want_fred", True))
     want_news   = st.checkbox("Agregar hoja Noticias_RSS", value=st.session_state.get("want_news", True))
     want_charts = st.checkbox("Agregar hoja 'Gráficos' (últimos 12)", value=st.session_state.get("want_charts", True))
     want_raw    = st.checkbox("Agregar hoja 'Datos crudos' (últimos 12)", value=st.session_state.get("want_raw", True))
@@ -793,7 +789,7 @@ if st.button("Generar Excel"):
     ws.write(41, 0, "Anual:");   ws.write(41, 1, uma.get("anual"))
 
     
-    # [Hoja 'Noticias' eliminada por solicitud]
+    
     do_raw = globals().get('do_raw', True)
     if do_raw:
         ws3 = wb.add_worksheet("Datos crudos")
@@ -904,7 +900,7 @@ if st.button("Generar Excel"):
                 wsfred.insert_chart("D4", ch, {"x_scale": 1.2, "y_scale": 1.2})
     except Exception as _e:
         pass
-# ==== Inserción: crear FRED_v2 y Noticias_RSS en el Excel ====
+
 try:
     fred_key = ""
     try:
@@ -942,7 +938,7 @@ try:
         _mx_news_write_v1(wb, _news, sheet_name="Noticias_RSS")
 except Exception:
     pass
-# ==== Fin inserción ====
+
 try:
     wb.close()
     try:
@@ -962,7 +958,7 @@ except Exception:
     
 
 
-# ---- Botón de descarga robusto ----
+
 try:
     xbytes = st.session_state.get('xlsx_bytes')
     if xbytes:
