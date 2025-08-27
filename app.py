@@ -1,4 +1,5 @@
 
+
 import io
 import re
 import time
@@ -18,6 +19,160 @@ from openpyxl import Workbook
 from openpyxl.styles import Alignment, Font, PatternFill
 import xlsxwriter
 from requests.adapters import HTTPAdapter, Retry
+
+# ==== [PATCH v2] Helpers para FRED y Noticias ====
+def _fred_news_requests_session_v2():
+    s = requests.Session()
+    try:
+        retries = Retry(total=3, backoff_factor=0.6, status_forcelist=[429, 500, 502, 503, 504])
+        s.mount("https://", HTTPAdapter(max_retries=retries))
+    except Exception:
+        pass
+    return s
+
+def fred_fetch_series_v2(series_id: str, start: str, end: str, api_key: str):
+    url = "https://api.stlouisfed.org/fred/series/observations"
+    params = {
+        "series_id": series_id,
+        "api_key": api_key,
+        "file_type": "json",
+        "observation_start": start,
+        "observation_end": end,
+        "units": "lin"
+    }
+    s = _fred_news_requests_session_v2()
+    r = s.get(url, params=params, timeout=30)
+    r.raise_for_status()
+    js = r.json()
+    out = []
+    for obs in js.get("observations", []):
+        v = obs.get("value")
+        if v not in (None, ".", ""):
+            try:
+                out.append((obs.get("date"), float(v)))
+            except Exception:
+                pass
+    return out
+
+def fred_write_sheet_and_chart_v2(wb, series_dict, sheet_name="FRED_v2"):
+    wsfred = wb.add_worksheet(sheet_name)
+    fmt_bold = wb.add_format({"bold": True, "align": "center"})
+    fmt_date = wb.add_format({"num_format": "yyyy-mm-dd"})
+    fmt_num = wb.add_format({"num_format": "#,##0.0000"})
+
+    headers = ["Fecha"] + list(series_dict.keys())
+    wsfred.write_row(0, 0, headers, fmt_bold)
+
+    # build full date index
+    fechas = set()
+    for vals in series_dict.values():
+        fechas.update([d for d, _ in vals])
+    fechas = sorted(fechas)
+
+    # quick lookup
+    lookup = {name: {d: v for d, v in vals} for name, vals in series_dict.items()}
+
+    for i, f in enumerate(fechas, start=1):
+        try:
+            wsfred.write_datetime(i, 0, datetime.fromisoformat(f), fmt_date)
+        except Exception:
+            # fallback: write as plain string if parse fails
+            wsfred.write_string(i, 0, f)
+        for j, name in enumerate(series_dict.keys(), start=1):
+            val = lookup[name].get(f)
+            if val is not None:
+                wsfred.write_number(i, j, val, fmt_num)
+
+    last_row = 1 + len(fechas)
+    cats = f"='{sheet_name}'!$A$2:$A${last_row}"
+    for j, name in enumerate(series_dict.keys(), start=1):
+        ch = wb.add_chart({"type": "line"})
+        col_letter = chr(64 + j + 0)  # B=66..
+        ch.add_series({
+            "name":       f"='{sheet_name}'!${col_letter}$1",
+            "categories": cats,
+            "values":     f"='{sheet_name}'!${col_letter}$2:${col_letter}${last_row}",
+        })
+        ch.set_title({"name": f"{name}"})
+        ch.set_x_axis({"date_axis": True})
+        ch.set_y_axis({"num_format": "#,##0.0000"})
+        # position charts downwards
+        row_pos = 3 + (j - 1) * 16
+        wsfred.insert_chart(row_pos, 3, ch, {"x_scale": 1.25, "y_scale": 1.15})
+
+    wsfred.set_column(0, 0, 12)
+    wsfred.set_column(1, len(series_dict), 16)
+    return wsfred
+
+def news_parse_rfc_dt_v2(dt_str):
+    try:
+        return parsedate_to_datetime(dt_str)
+    except Exception:
+        return None
+
+def news_get_financial_v2(max_items=12):
+    feeds = [
+        ("Reuters Markets", "https://feeds.reuters.com/reuters/marketsNews"),
+        ("WSJ Markets", "https://feeds.a.dj.com/rss/RSSMarketsMain.xml"),
+        ("CNBC Top News", "https://www.cnbc.com/id/100003114/device/rss/rss.html"),
+        ("FT Markets", "https://www.ft.com/markets?format=rss"),
+    ]
+    items = []
+    s = _fred_news_requests_session_v2()
+    for source, url in feeds:
+        try:
+            try:
+                s.head(url, timeout=6)
+            except Exception:
+                pass
+            fp = feedparser.parse(url)
+            for e in fp.get("entries", []):
+                title = e.get("title") or ""
+                link = e.get("link") or ""
+                pub = e.get("published") or e.get("updated") or ""
+                dt = news_parse_rfc_dt_v2(pub) if pub else None
+                items.append({
+                    "title": title.strip(),
+                    "link": link.strip(),
+                    "published_dt": dt,
+                    "source": source
+                })
+        except Exception:
+            continue
+    items.sort(key=lambda x: x["published_dt"] or datetime(1970,1,1), reverse=True)
+    return items[:max_items]
+
+def news_write_sheet_v2(wb, news_list, sheet_name="Noticias_RSS"):
+    try:
+        ws = wb.add_worksheet(sheet_name)
+    except Exception:
+        ws = wb.add_worksheet(f"{sheet_name}_1")
+    fmt_bold = wb.add_format({"bold": True})
+    fmt_link = wb.add_format({"font_color": "blue", "underline": 1})
+    fmt_date = wb.add_format({"num_format": "yyyy-mm-dd hh:mm"})
+
+    ws.write_row(0, 0, ["Título", "Link", "Fecha", "Fuente"], fmt_bold)
+    for i, n in enumerate(news_list, start=1):
+        ws.write_string(i, 0, n.get("title", ""))
+        link = n.get("link", "")
+        if link:
+            ws.write_url(i, 1, link, fmt_link, string="Abrir")
+        dt = n.get("published_dt")
+        if dt:
+            try:
+                ws.write_datetime(i, 2, dt, fmt_date)
+            except Exception:
+                ws.write_string(i, 2, str(dt))
+        ws.write_string(i, 3, n.get("source", ""))
+
+    ws.set_column(0, 0, 80)
+    ws.set_column(1, 1, 12)
+    ws.set_column(2, 2, 20)
+    ws.set_column(3, 3, 18)
+    return ws
+# ==== [FIN PATCH v2 helpers] ====
+
+
 import streamlit as st
 import warnings
 warnings.filterwarnings("ignore", category=DeprecationWarning)
@@ -782,6 +937,71 @@ if st.button("Generar Excel"):
                 wsfred.insert_chart("D4", ch, {"x_scale": 1.2, "y_scale": 1.2})
     except Exception as _e:
         pass
+
+# ==== [PATCH v2] FRED & Noticias (ejecución) ====
+try:
+    # --- FRED ---
+    try:
+        FRED_API_KEY = st.secrets.get("FRED_API_KEY", "").strip()
+    except Exception:
+        FRED_API_KEY = ""
+    if FRED_API_KEY:
+        end_dt = datetime.now()
+        start_dt = end_dt - timedelta(days=180)
+        start_str = start_dt.strftime("%Y-%m-%d")
+        end_str = end_dt.strftime("%Y-%m-%d")
+        fred_series_ids = {
+            "US 10Y (DGS10)": "DGS10",
+            "Fed Funds (DFF)": "DFF",
+            "MXN/USD (DEXMXUS)": "DEXMXUS",
+        }
+        fred_data = {}
+        for label, sid in fred_series_ids.items():
+            try:
+                fred_data[label] = fred_fetch_series_v2(sid, start_str, end_str, FRED_API_KEY)
+            except Exception:
+                fred_data[label] = []
+        if any(len(v) for v in fred_data.values()):
+            fred_sheet = fred_write_sheet_and_chart_v2(wb, fred_data, sheet_name="FRED_v2")
+            try:
+                st.success("Gráficas FRED agregadas al Excel (hoja FRED_v2).")
+            except Exception:
+                pass
+    else:
+        try:
+            st.warning("Para activar las gráficas FRED, agrega FRED_API_KEY en secrets.toml.")
+        except Exception:
+            pass
+
+    # --- Noticias ---
+    try:
+        top_news_v2 = news_get_financial_v2(max_items=12)
+    except Exception:
+        top_news_v2 = []
+    if top_news_v2:
+        # Mostrar encabezados en la app
+        try:
+            st.subheader("📰 Noticias financieras (encabezados)")
+            for n in top_news_v2:
+                dt_txt = n["published_dt"].strftime("%Y-%m-%d %H:%M") if n["published_dt"] else ""
+                st.markdown(f"- **{n['title']}** — *{n['source']}*  {('· ' + dt_txt) if dt_txt else ''}  \n  {n['link']}")
+        except Exception:
+            pass
+        # Escribir al Excel
+        news_write_sheet_v2(wb, top_news_v2, sheet_name="Noticias_RSS")
+    else:
+        try:
+            st.info("No se pudieron obtener noticias en este momento.")
+        except Exception:
+            pass
+except Exception as _patch_e:
+    try:
+        st.error(f"Error en FRED/Noticias (patch v2): {_patch_e}")
+    except Exception:
+        pass
+# ==== [FIN PATCH v2 ejecución] ====
+
+
 
 
     wb.close()
