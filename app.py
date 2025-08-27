@@ -84,7 +84,6 @@ st.markdown(
       </div>
       <div class="imemsa-title">
         <h1>Indicadores de Tipo de Cambio</h1>
-        <h3>       </h3>
       </div>
     </div>
     <div class="imemsa-divider"></div>
