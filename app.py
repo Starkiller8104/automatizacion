@@ -950,13 +950,6 @@ if st.button("Generar Excel"):
 
 
 
-# --- Guardar bytes para descarga (session_state) ---
-try:
-    if 'wb' in globals():
-        try:
-            wb.close()
-        except Exception:
-            pass
         try:
             st.session_state['xlsx_bytes'] = bio.getvalue()
         except Exception:
@@ -1009,9 +1002,15 @@ try:
             try:
                 st.subheader("📰 Noticias financieras de México (encabezados)")
                 for n in top_news_v2:
-                    dt_txt = n["published_dt"].strftime("%Y-%m-%d %H:%M") if n["published_dt"] else ""
-                    st.markdown(f"- **{n['title']}** — *{n['source']}*  {('· ' + dt_txt) if dt_txt else ''}  
-  {n['link']}")
+                    dt_txt = n.get('published_dt')
+                    dt_txt = dt_txt.strftime('%Y-%m-%d %H:%M') if dt_txt else ''
+                    line = f"- **{n.get('title','')}** — *{n.get('source','')}*"
+                    if dt_txt:
+                        line += f" · {dt_txt}"
+                    st.markdown(line)
+                    link = n.get('link','')
+                    if link:
+                        st.markdown(link)
             except Exception:
                 pass
         # Escribir al Excel
@@ -1030,6 +1029,25 @@ except Exception as _patch_e:
     except Exception:
         pass
 # ==== [FIN PATCH v2 ejecución] ====
+
+# --- Cerrar workbook y guardar bytes para descarga (después del patch) ---
+try:
+    if 'wb' in globals():
+        try:
+            wb.close()
+        except Exception:
+            pass
+        try:
+            st.session_state['xlsx_bytes'] = bio.getvalue()
+            try:
+                st.success('Excel generado. Ahora puedes descargarlo.')
+            except Exception:
+                pass
+        except Exception:
+            pass
+except Exception:
+    pass
+
 # -- Descarga robusta desde session_state --
 try:
     xbytes = st.session_state.get('xlsx_bytes')
