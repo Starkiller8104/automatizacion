@@ -24,6 +24,24 @@ import streamlit as st
 # agrega código
 import streamlit as st
 
+# ==== Apagador de depuración (silencia st.write/st.json/print opcionales) ====
+DEBUG = False   # déjalo en False para no mostrar nada
+
+def dwrite(*args, **kwargs):
+    if DEBUG:
+        import streamlit as st
+        st.write(*args, **kwargs)
+
+def djson(*args, **kwargs):
+    if DEBUG:
+        import streamlit as st
+        st.json(*args, **kwargs)
+
+def dprint(*args, **kwargs):
+    if DEBUG:
+        print(*args, **kwargs)
+# =======================================================
+
 # 1) Config de página
 st.set_page_config(page_title="IMEMSA - Indicadores", layout="wide")
 
