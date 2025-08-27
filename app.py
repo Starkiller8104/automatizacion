@@ -938,6 +938,27 @@ if st.button("Generar Excel"):
     except Exception as _e:
         pass
 
+
+
+# ---- Fallback para asegurar `wb` y `bio` antes de usar el patch ----
+try:
+    wb  # noqa: F821
+    bio  # noqa: F821
+except NameError:
+    try:
+        bio = io.BytesIO()
+        wb = xlsxwriter.Workbook(bio, {'in_memory': True})
+        try:
+            st.warning("Workbook no existía: se creó uno vacío para FRED/Noticias.")
+        except Exception:
+            pass
+    except Exception as _wb_init_e:
+        try:
+            st.error(f"No se pudo inicializar workbook antes del patch FRED/Noticias: {_wb_init_e}")
+        except Exception:
+            pass
+# --------------------------------------------------------------------
+
 # ==== [PATCH v2] FRED & Noticias (ejecución) ====
 try:
     # --- FRED ---
