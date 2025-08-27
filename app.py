@@ -597,242 +597,242 @@ if st.button("Generar Excel"):
             )
     except NameError:
         fred_rows = None  # si no existe UI FRED, no agrega
-bio = io.BytesIO()
-wb = xlsxwriter.Workbook(bio, {'in_memory': True})
+    bio = io.BytesIO()
+    wb = xlsxwriter.Workbook(bio, {'in_memory': True})
 
-# ====== Formatos ======
-fmt_bold  = wb.add_format({'bold': True})
-fmt_hdr   = wb.add_format({'bold': True, 'bg_color': '#F2F2F2', 'align':'center'})
-fmt_num4  = wb.add_format({'num_format': '0.0000'})
-fmt_num6  = wb.add_format({'num_format': '0.000000'})
-fmt_wrap  = wb.add_format({'text_wrap': True})
+    # ====== Formatos ======
+    fmt_bold  = wb.add_format({'bold': True})
+    fmt_hdr   = wb.add_format({'bold': True, 'bg_color': '#F2F2F2', 'align':'center'})
+    fmt_num4  = wb.add_format({'num_format': '0.0000'})
+    fmt_num6  = wb.add_format({'num_format': '0.000000'})
+    fmt_wrap  = wb.add_format({'text_wrap': True})
 
-# ====== Preparar datos ======
-_fix_pairs = sie_last_n(SIE_SERIES["USD_FIX"], n=6)
-header_dates = [d for d,_ in _fix_pairs]
-if len(header_dates) < 6:
-    header_dates = ([""]*(6-len(header_dates))) + header_dates
+    # ====== Preparar datos ======
+    _fix_pairs = sie_last_n(SIE_SERIES["USD_FIX"], n=6)
+    header_dates = [d for d,_ in _fix_pairs]
+    if len(header_dates) < 6:
+        header_dates = ([""]*(6-len(header_dates))) + header_dates
 
-def _as_map(pairs): return {d:v for d,v in pairs}
-m_fix  = _as_map(sie_last_n(SIE_SERIES["USD_FIX"], 6))
-m_eur  = _as_map(sie_last_n(SIE_SERIES["EUR_MXN"], 6))
-m_jpy  = _as_map(sie_last_n(SIE_SERIES["JPY_MXN"], 6))
-m_udis = _as_map(sie_last_n(SIE_SERIES["UDIS"],    6))
-m_c28  = _as_map(sie_last_n(SIE_SERIES["CETES_28"],6))
-m_c91  = _as_map(sie_last_n(SIE_SERIES["CETES_91"],6))
-m_c182 = _as_map(sie_last_n(SIE_SERIES["CETES_182"],6))
-m_c364 = _as_map(sie_last_n(SIE_SERIES["CETES_364"],6))
+    def _as_map(pairs): return {d:v for d,v in pairs}
+    m_fix  = _as_map(sie_last_n(SIE_SERIES["USD_FIX"], 6))
+    m_eur  = _as_map(sie_last_n(SIE_SERIES["EUR_MXN"], 6))
+    m_jpy  = _as_map(sie_last_n(SIE_SERIES["JPY_MXN"], 6))
+    m_udis = _as_map(sie_last_n(SIE_SERIES["UDIS"],    6))
+    m_c28  = _as_map(sie_last_n(SIE_SERIES["CETES_28"],6))
+    m_c91  = _as_map(sie_last_n(SIE_SERIES["CETES_91"],6))
+    m_c182 = _as_map(sie_last_n(SIE_SERIES["CETES_182"],6))
+    m_c364 = _as_map(sie_last_n(SIE_SERIES["CETES_364"],6))
 
-try:
-    movex6  # noqa
-except NameError:
-    movex6 = rolling_movex_for_last6(window=movex_win)
-compra = [(x*(1 - margen_pct/100) if x is not None else None) for x in movex6]
-venta  = [(x*(1 + margen_pct/100) if x is not None else None) for x in movex6]
-
-usd_jpy = []
-eur_usd = []
-for d in header_dates:
-    u = m_fix.get(d); j = m_jpy.get(d); e = m_eur.get(d)
-    usd_jpy.append((u/j) if (u and j) else None)
-    eur_usd.append((e/u) if (e and u) else None)
-
-try:
-    uma  # noqa
-except NameError:
-    uma = get_uma(INEGI_TOKEN)
-
-def _last_or_none(series_pairs): 
-    return series_pairs[-1][1] if series_pairs else None
-try:
-    tiie28_last = _last_or_none(sie_last_n("SF43783", 6))
-    tiie91_last = _last_or_none(sie_last_n("SF43784", 6))
-    tiie182_last= _last_or_none(sie_last_n("SF43785", 6))
-except Exception:
-    tiie28_last = tiie91_last = tiie182_last = None
-tiie28 = [tiie28_last]*6
-tiie91 = [tiie91_last]*6
-tiie182= [tiie182_last]*6
-
-# ====== Hoja Indicadores ======
-ws = wb.add_worksheet("Indicadores")
-ws.write(1, 0, "Fecha:", fmt_bold)
-for i, d in enumerate(header_dates):
-    ws.write(1, 1+i, d)
-
-ws.write(3, 0, "TIPOS DE CAMBIO:", fmt_bold)
-ws.write(5, 0, "DÓLAR AMERICANO.", fmt_bold)
-ws.write(6, 0, "Dólar/Pesos:")
-for i, d in enumerate(header_dates):
-    ws.write(6, 1+i, m_fix.get(d), fmt_num4)
-ws.write(7, 0, "MONEX:")
-for i, v in enumerate(movex6):
-    ws.write(7, 1+i, v, fmt_num6)
-ws.write(8, 0, "Compra:")
-for i, v in enumerate(compra):
-    ws.write(8, 1+i, v, fmt_num6)
-ws.write(9, 0, "Venta:")
-for i, v in enumerate(venta):
-    ws.write(9, 1+i, v, fmt_num6)
-
-ws.write(11, 0, "YEN JAPONÉS.", fmt_bold)
-ws.write(12, 0, "Yen Japonés/Peso:")
-for i, d in enumerate(header_dates):
-    ws.write(12, 1+i, m_jpy.get(d), fmt_num6)
-ws.write(13, 0, "Dólar/Yen Japonés:")
-for i, v in enumerate(usd_jpy):
-    ws.write(13, 1+i, v, fmt_num6)
-
-ws.write(15, 0, "EURO.", fmt_bold)
-ws.write(16, 0, "Euro/Peso:")
-for i, d in enumerate(header_dates):
-    ws.write(16, 1+i, m_eur.get(d), fmt_num6)
-ws.write(17, 0, "Euro/Dólar:")
-for i, v in enumerate(eur_usd):
-    ws.write(17, 1+i, v, fmt_num6)
-
-ws.write(19, 0, "UDIS:", fmt_bold)
-ws.write(21, 0, "UDIS: ")
-for i, d in enumerate(header_dates):
-    ws.write(21, 1+i, m_udis.get(d), fmt_num6)
-
-ws.write(23, 0, "TASAS TIIE:", fmt_bold)
-ws.write(25, 0, "TIIE objetivo:")
-ws.write(26, 0, "TIIE 28 Días:")
-ws.write(27, 0, "TIIE 91 Días:")
-ws.write(28, 0, "TIIE 182 Días:")
-for i in range(6):
-    ws.write(26, 1+i, tiie28[i])
-    ws.write(27, 1+i, tiie91[i])
-    ws.write(28, 1+i, tiie182[i])
-
-ws.write(30, 0, "CETES:", fmt_bold)
-ws.write(32, 0, "CETES 28 Días:")
-ws.write(33, 0, "CETES 91 Días:")
-ws.write(34, 0, "Cetes 182 Días:")
-ws.write(35, 0, "Cetes 364 Días:")
-for i, d in enumerate(header_dates):
-    ws.write(32, 1+i, m_c28.get(d))
-    ws.write(33, 1+i, m_c91.get(d))
-    ws.write(34, 1+i, m_c182.get(d))
-    ws.write(35, 1+i, m_c364.get(d))
-
-ws.write(37, 0, "UMA:", fmt_bold)
-ws.write(39, 0, "Diario:");  ws.write(39, 1, uma.get("diaria"))
-ws.write(40, 0, "Mensual:"); ws.write(40, 1, uma.get("mensual"))
-ws.write(41, 0, "Anual:");   ws.write(41, 1, uma.get("anual"))
-
-# Noticias
-ws2 = wb.add_worksheet("Noticias")
-ws2.write(0, 0, "Noticias financieras recientes", fmt_bold)
-try:
-    news_text = build_news_bullets(12)
-except Exception:
-    news_text = "Noticias no disponibles."
-ws2.write(1, 0, news_text, fmt_wrap)
-ws2.set_column(0, 0, 120)
-
-# Datos crudos (opcional)
-try:
-    do_raw
-except NameError:
-    do_raw = True
-if do_raw:
-    ws3 = wb.add_worksheet("Datos crudos")
-    ws3.write(0,0,"Serie", fmt_hdr); ws3.write(0,1,"Fecha", fmt_hdr); ws3.write(0,2,"Valor", fmt_hdr)
-    def _dump(ws_sheet, start_row, tag, pairs):
-        r = start_row
-        for d, v in pairs:
-            ws_sheet.write(r, 0, tag)
-            ws_sheet.write(r, 1, d)
-            ws_sheet.write(r, 2, v)
-            r += 1
-        return r
-    r = 1
-    r = _dump(ws3, r, "USD/MXN (FIX)", sie_last_n(SIE_SERIES["USD_FIX"], 6))
-    r = _dump(ws3, r, "EUR/MXN",       sie_last_n(SIE_SERIES["EUR_MXN"], 6))
-    r = _dump(ws3, r, "JPY/MXN",       sie_last_n(SIE_SERIES["JPY_MXN"], 6))
-    r = _dump(ws3, r, "UDIS",          sie_last_n(SIE_SERIES["UDIS"],    6))
-    r = _dump(ws3, r, "CETES 28d (%)", sie_last_n(SIE_SERIES["CETES_28"],6))
-    r = _dump(ws3, r, "CETES 91d (%)", sie_last_n(SIE_SERIES["CETES_91"],6))
-    r = _dump(ws3, r, "CETES 182d (%)",sie_last_n(SIE_SERIES["CETES_182"],6))
-    r = _dump(ws3, r, "CETES 364d (%)",sie_last_n(SIE_SERIES["CETES_364"],6))
-    ws3.set_column(0, 0, 18); ws3.set_column(1, 1, 12); ws3.set_column(2, 2, 16)
-
-# Gráficos (opcional)
-try:
-    do_charts
-except NameError:
-    do_charts = True
-if do_charts:
-    ws4 = wb.add_worksheet("Gráficos")
-    chart1 = wb.add_chart({'type': 'line'})
-    chart1.add_series({
-        'name':       "USD/MXN (FIX)",
-        'categories': "=Indicadores!$B$2:$G$2",
-        'values':     "=Indicadores!$B$7:$G$7",
-    })
-    chart1.set_title({'name': 'USD/MXN (FIX)'})
-    ws4.insert_chart('B2', chart1, {'x_scale': 1.3, 'y_scale': 1.2})
-
-    chart2 = wb.add_chart({'type': 'line'})
-    for row in (33,34,35,36):
-        chart2.add_series({
-            'name':       f"=Indicadores!$A${row}",
-            'categories': "=Indicadores!$B$2:$G$2",
-            'values':     f"=Indicadores!$B${row}:$G${row}",
-        })
-    chart2.set_title({'name': 'CETES (%)'})
-    ws4.insert_chart('B18', chart2, {'x_scale': 1.3, 'y_scale': 1.2})
-
-# Cerrar y descargar
-    
-    # ===== Hoja FRED (opcional) =====
     try:
-        if fred_rows:
-            wsname = f"FRED_{fred_id[:25]}"
-            wsfred = wb.add_worksheet(wsname)
-            fmt_bold = wb.add_format({"bold": True})
-            fmt_num  = wb.add_format({"num_format": "#,##0.0000"})
-            fmt_date = wb.add_format({"num_format": "yyyy-mm-dd"})
+        movex6  # noqa
+    except NameError:
+        movex6 = rolling_movex_for_last6(window=movex_win)
+    compra = [(x*(1 - margen_pct/100) if x is not None else None) for x in movex6]
+    venta  = [(x*(1 + margen_pct/100) if x is not None else None) for x in movex6]
 
-            wsfred.write(0, 0, f"FRED – {fred_id}", fmt_bold)
-            wsfred.write(1, 0, f"Generado: {today_cdmx('%Y-%m-%d %H:%M')} (CDMX)")
-            wsfred.write_row(3, 0, ["date", fred_id], fmt_bold)
+    usd_jpy = []
+    eur_usd = []
+    for d in header_dates:
+        u = m_fix.get(d); j = m_jpy.get(d); e = m_eur.get(d)
+        usd_jpy.append((u/j) if (u and j) else None)
+        eur_usd.append((e/u) if (e and u) else None)
 
-            r = 4
-            valid_count = 0
-            for row in fred_rows:
-                d = row.get("date"); v = row.get("value")
-                # fecha
-                try:
-                    dt = pd.to_datetime(d).to_pydatetime()
-                    wsfred.write_datetime(r, 0, dt, fmt_date)
-                except Exception:
-                    wsfred.write(r, 0, str(d))
-                # valor
-                if v is None:
-                    wsfred.write_blank(r, 1, None)
-                else:
-                    wsfred.write_number(r, 1, float(v), fmt_num); valid_count += 1
+    try:
+        uma  # noqa
+    except NameError:
+        uma = get_uma(INEGI_TOKEN)
+
+    def _last_or_none(series_pairs): 
+        return series_pairs[-1][1] if series_pairs else None
+    try:
+        tiie28_last = _last_or_none(sie_last_n("SF43783", 6))
+        tiie91_last = _last_or_none(sie_last_n("SF43784", 6))
+        tiie182_last= _last_or_none(sie_last_n("SF43785", 6))
+    except Exception:
+        tiie28_last = tiie91_last = tiie182_last = None
+    tiie28 = [tiie28_last]*6
+    tiie91 = [tiie91_last]*6
+    tiie182= [tiie182_last]*6
+
+    # ====== Hoja Indicadores ======
+    ws = wb.add_worksheet("Indicadores")
+    ws.write(1, 0, "Fecha:", fmt_bold)
+    for i, d in enumerate(header_dates):
+        ws.write(1, 1+i, d)
+
+    ws.write(3, 0, "TIPOS DE CAMBIO:", fmt_bold)
+    ws.write(5, 0, "DÓLAR AMERICANO.", fmt_bold)
+    ws.write(6, 0, "Dólar/Pesos:")
+    for i, d in enumerate(header_dates):
+        ws.write(6, 1+i, m_fix.get(d), fmt_num4)
+    ws.write(7, 0, "MONEX:")
+    for i, v in enumerate(movex6):
+        ws.write(7, 1+i, v, fmt_num6)
+    ws.write(8, 0, "Compra:")
+    for i, v in enumerate(compra):
+        ws.write(8, 1+i, v, fmt_num6)
+    ws.write(9, 0, "Venta:")
+    for i, v in enumerate(venta):
+        ws.write(9, 1+i, v, fmt_num6)
+
+    ws.write(11, 0, "YEN JAPONÉS.", fmt_bold)
+    ws.write(12, 0, "Yen Japonés/Peso:")
+    for i, d in enumerate(header_dates):
+        ws.write(12, 1+i, m_jpy.get(d), fmt_num6)
+    ws.write(13, 0, "Dólar/Yen Japonés:")
+    for i, v in enumerate(usd_jpy):
+        ws.write(13, 1+i, v, fmt_num6)
+
+    ws.write(15, 0, "EURO.", fmt_bold)
+    ws.write(16, 0, "Euro/Peso:")
+    for i, d in enumerate(header_dates):
+        ws.write(16, 1+i, m_eur.get(d), fmt_num6)
+    ws.write(17, 0, "Euro/Dólar:")
+    for i, v in enumerate(eur_usd):
+        ws.write(17, 1+i, v, fmt_num6)
+
+    ws.write(19, 0, "UDIS:", fmt_bold)
+    ws.write(21, 0, "UDIS: ")
+    for i, d in enumerate(header_dates):
+        ws.write(21, 1+i, m_udis.get(d), fmt_num6)
+
+    ws.write(23, 0, "TASAS TIIE:", fmt_bold)
+    ws.write(25, 0, "TIIE objetivo:")
+    ws.write(26, 0, "TIIE 28 Días:")
+    ws.write(27, 0, "TIIE 91 Días:")
+    ws.write(28, 0, "TIIE 182 Días:")
+    for i in range(6):
+        ws.write(26, 1+i, tiie28[i])
+        ws.write(27, 1+i, tiie91[i])
+        ws.write(28, 1+i, tiie182[i])
+
+    ws.write(30, 0, "CETES:", fmt_bold)
+    ws.write(32, 0, "CETES 28 Días:")
+    ws.write(33, 0, "CETES 91 Días:")
+    ws.write(34, 0, "Cetes 182 Días:")
+    ws.write(35, 0, "Cetes 364 Días:")
+    for i, d in enumerate(header_dates):
+        ws.write(32, 1+i, m_c28.get(d))
+        ws.write(33, 1+i, m_c91.get(d))
+        ws.write(34, 1+i, m_c182.get(d))
+        ws.write(35, 1+i, m_c364.get(d))
+
+    ws.write(37, 0, "UMA:", fmt_bold)
+    ws.write(39, 0, "Diario:");  ws.write(39, 1, uma.get("diaria"))
+    ws.write(40, 0, "Mensual:"); ws.write(40, 1, uma.get("mensual"))
+    ws.write(41, 0, "Anual:");   ws.write(41, 1, uma.get("anual"))
+
+    # Noticias
+    ws2 = wb.add_worksheet("Noticias")
+    ws2.write(0, 0, "Noticias financieras recientes", fmt_bold)
+    try:
+        news_text = build_news_bullets(12)
+    except Exception:
+        news_text = "Noticias no disponibles."
+    ws2.write(1, 0, news_text, fmt_wrap)
+    ws2.set_column(0, 0, 120)
+
+    # Datos crudos (opcional)
+    try:
+        do_raw
+    except NameError:
+        do_raw = True
+    if do_raw:
+        ws3 = wb.add_worksheet("Datos crudos")
+        ws3.write(0,0,"Serie", fmt_hdr); ws3.write(0,1,"Fecha", fmt_hdr); ws3.write(0,2,"Valor", fmt_hdr)
+        def _dump(ws_sheet, start_row, tag, pairs):
+            r = start_row
+            for d, v in pairs:
+                ws_sheet.write(r, 0, tag)
+                ws_sheet.write(r, 1, d)
+                ws_sheet.write(r, 2, v)
                 r += 1
+            return r
+        r = 1
+        r = _dump(ws3, r, "USD/MXN (FIX)", sie_last_n(SIE_SERIES["USD_FIX"], 6))
+        r = _dump(ws3, r, "EUR/MXN",       sie_last_n(SIE_SERIES["EUR_MXN"], 6))
+        r = _dump(ws3, r, "JPY/MXN",       sie_last_n(SIE_SERIES["JPY_MXN"], 6))
+        r = _dump(ws3, r, "UDIS",          sie_last_n(SIE_SERIES["UDIS"],    6))
+        r = _dump(ws3, r, "CETES 28d (%)", sie_last_n(SIE_SERIES["CETES_28"],6))
+        r = _dump(ws3, r, "CETES 91d (%)", sie_last_n(SIE_SERIES["CETES_91"],6))
+        r = _dump(ws3, r, "CETES 182d (%)",sie_last_n(SIE_SERIES["CETES_182"],6))
+        r = _dump(ws3, r, "CETES 364d (%)",sie_last_n(SIE_SERIES["CETES_364"],6))
+        ws3.set_column(0, 0, 18); ws3.set_column(1, 1, 12); ws3.set_column(2, 2, 16)
 
-            wsfred.set_column(0, 0, 12)
-            wsfred.set_column(1, 1, 16)
+    # Gráficos (opcional)
+    try:
+        do_charts
+    except NameError:
+        do_charts = True
+    if do_charts:
+        ws4 = wb.add_worksheet("Gráficos")
+        chart1 = wb.add_chart({'type': 'line'})
+        chart1.add_series({
+            'name':       "USD/MXN (FIX)",
+            'categories': "=Indicadores!$B$2:$G$2",
+            'values':     "=Indicadores!$B$7:$G$7",
+        })
+        chart1.set_title({'name': 'USD/MXN (FIX)'})
+        ws4.insert_chart('B2', chart1, {'x_scale': 1.3, 'y_scale': 1.2})
 
-            if valid_count >= 2:
-                ch = wb.add_chart({"type": "line"})
-                ch.add_series({
-                    "name": fred_id,
-                    "categories": f"={wsname}!$A$5:$A${r}",
-                    "values":     f"={wsname}!$B$5:$B${r}",
-                })
-                ch.set_title({"name": f"{fred_id} (FRED)"})
-                ch.set_y_axis({"num_format": "#,##0.0000"})
-                wsfred.insert_chart("D4", ch, {"x_scale": 1.2, "y_scale": 1.2})
-    except Exception as _e:
-        pass
-wb.close()
+        chart2 = wb.add_chart({'type': 'line'})
+        for row in (33,34,35,36):
+            chart2.add_series({
+                'name':       f"=Indicadores!$A${row}",
+                'categories': "=Indicadores!$B$2:$G$2",
+                'values':     f"=Indicadores!$B${row}:$G${row}",
+            })
+        chart2.set_title({'name': 'CETES (%)'})
+        ws4.insert_chart('B18', chart2, {'x_scale': 1.3, 'y_scale': 1.2})
+
+    # Cerrar y descargar
+    
+        # ===== Hoja FRED (opcional) =====
+        try:
+            if fred_rows:
+                wsname = f"FRED_{fred_id[:25]}"
+                wsfred = wb.add_worksheet(wsname)
+                fmt_bold = wb.add_format({"bold": True})
+                fmt_num  = wb.add_format({"num_format": "#,##0.0000"})
+                fmt_date = wb.add_format({"num_format": "yyyy-mm-dd"})
+
+                wsfred.write(0, 0, f"FRED – {fred_id}", fmt_bold)
+                wsfred.write(1, 0, f"Generado: {today_cdmx('%Y-%m-%d %H:%M')} (CDMX)")
+                wsfred.write_row(3, 0, ["date", fred_id], fmt_bold)
+
+                r = 4
+                valid_count = 0
+                for row in fred_rows:
+                    d = row.get("date"); v = row.get("value")
+                    # fecha
+                    try:
+                        dt = pd.to_datetime(d).to_pydatetime()
+                        wsfred.write_datetime(r, 0, dt, fmt_date)
+                    except Exception:
+                        wsfred.write(r, 0, str(d))
+                    # valor
+                    if v is None:
+                        wsfred.write_blank(r, 1, None)
+                    else:
+                        wsfred.write_number(r, 1, float(v), fmt_num); valid_count += 1
+                    r += 1
+
+                wsfred.set_column(0, 0, 12)
+                wsfred.set_column(1, 1, 16)
+
+                if valid_count >= 2:
+                    ch = wb.add_chart({"type": "line"})
+                    ch.add_series({
+                        "name": fred_id,
+                        "categories": f"={wsname}!$A$5:$A${r}",
+                        "values":     f"={wsname}!$B$5:$B${r}",
+                    })
+                    ch.set_title({"name": f"{fred_id} (FRED)"})
+                    ch.set_y_axis({"num_format": "#,##0.0000"})
+                    wsfred.insert_chart("D4", ch, {"x_scale": 1.2, "y_scale": 1.2})
+        except Exception as _e:
+            pass
+    wb.close()
     st.download_button(
     "Descargar Excel",
         data=bio.getvalue(),
