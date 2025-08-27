@@ -949,12 +949,6 @@ if st.button("Generar Excel"):
 
 
 
-
-        try:
-            st.session_state['xlsx_bytes'] = bio.getvalue()
-        except Exception:
-            pass
-except Exception:
     pass
 # ==== [PATCH v2] FRED & Noticias (ejecución) ====
 try:
