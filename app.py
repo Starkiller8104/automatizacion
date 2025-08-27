@@ -600,6 +600,19 @@ with st.sidebar.expander("🔑 Tokens de APIs", expanded=False):
             res = get_uma(INEGI_TOKEN)
 
 
+with st.sidebar.expander("📄 Hojas del Excel", expanded=True):
+    st.caption("Activa/desactiva hojas opcionales del archivo Excel")
+    want_fred   = st.checkbox("Agregar hoja FRED_v2 (si hay FRED_API_KEY)", value=st.session_state.get("want_fred", True))
+    want_news   = st.checkbox("Agregar hoja Noticias_RSS", value=st.session_state.get("want_news", True))
+    want_charts = st.checkbox("Agregar hoja 'Gráficos' (últimos 12)", value=st.session_state.get("want_charts", True))
+    want_raw    = st.checkbox("Agregar hoja 'Datos crudos' (últimos 12)", value=st.session_state.get("want_raw", True))
+    st.session_state["want_fred"] = want_fred
+    st.session_state["want_news"] = want_news
+    st.session_state["want_charts"] = want_charts
+    st.session_state["want_raw"] = want_raw
+
+
+
 with st.expander("Opciones"):
     
     st.number_input(
@@ -612,9 +625,8 @@ with st.expander("Opciones"):
 
     margen_pct = st.number_input("Margen Compra/Venta sobre FIX ...% por lado)", min_value=0.0, max_value=5.0, value=0.5, step=0.1)
     uma_manual = st.number_input("UMA diaria (manual, si INEGI falla)", min_value=0.0, value=0.0, step=0.01)
-    do_charts = st.toggle("Agregar hoja 'Gráficos' (últimos 12)", value=True)
-    do_raw    = st.toggle("Agregar hoja 'Datos crudos' (últimos 12)", value=True)
-    
+    do_charts = bool(st.session_state.get('want_charts', True))
+    do_raw = bool(st.session_state.get('want_raw', True))
 _check_tokens()
 _render_sidebar_status()
 
@@ -782,10 +794,7 @@ if st.button("Generar Excel"):
 
     
     # [Hoja 'Noticias' eliminada por solicitud]
-try:
-        do_raw
-    except NameError:
-        do_raw = True
+    do_raw = globals().get('do_raw', True)
     if do_raw:
         ws3 = wb.add_worksheet("Datos crudos")
         ws3.write(0,0,"Serie", fmt_hdr); ws3.write(0,1,"Fecha", fmt_hdr); ws3.write(0,2,"Valor", fmt_hdr)
@@ -809,10 +818,7 @@ try:
         ws3.set_column(0, 0, 18); ws3.set_column(1, 1, 12); ws3.set_column(2, 2, 16)
 
     
-    try:
-        do_charts
-    except NameError:
-        do_charts = True
+    do_charts = globals().get('do_charts', True)
     if do_charts:
         ws4 = wb.add_worksheet("Gráficos")
         chart1 = wb.add_chart({'type': 'line'})
@@ -905,7 +911,7 @@ try:
         fred_key = st.secrets.get("FRED_API_KEY", "").strip()
     except Exception:
         pass
-    if fred_key:
+    if fred_key and st.session_state.get('want_fred', True):
         end_dt = datetime.now()
         start_dt = end_dt - timedelta(days=180)
         fred_series = {
@@ -932,7 +938,7 @@ try:
         _news = _mx_news_get_v1(max_items=12)
     except Exception:
         _news = []
-    if _news:
+    if _news and st.session_state.get('want_news', True):
         _mx_news_write_v1(wb, _news, sheet_name="Noticias_RSS")
 except Exception:
     pass
