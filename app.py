@@ -21,26 +21,34 @@ from requests.adapters import HTTPAdapter, Retry
 
 import streamlit as st
 
-# agrega código
-import streamlit as st
+# ==== Parche de silencio para no mostrar leyendas/depuración ====
+import warnings
+warnings.filterwarnings("ignore", category=DeprecationWarning)
 
-# ==== Apagador de depuración (silencia st.write/st.json/print opcionales) ====
-DEBUG = False   # déjalo en False para no mostrar nada
+DEBUG = False  # pon True si quieres volver a ver st.write/st.json
 
-def dwrite(*args, **kwargs):
-    if DEBUG:
-        import streamlit as st
-        st.write(*args, **kwargs)
+def _noop(*args, **kwargs):
+    """Función vacía para suprimir salidas visibles."""
+    return None
 
-def djson(*args, **kwargs):
-    if DEBUG:
-        import streamlit as st
-        st.json(*args, **kwargs)
+# Silenciar funciones de salida comunes cuando DEBUG=False
+if not DEBUG:
+    # suprime prints de consola
+    import builtins as _b
+    _b.print = _noop
 
-def dprint(*args, **kwargs):
-    if DEBUG:
-        print(*args, **kwargs)
-# =======================================================
+    # suprime leyendas y depuración en Streamlit
+    try:
+        st.write   = _noop   # suprime listas, True, etc.
+        st.json    = _noop   # suprime dicts/JSON (ej. {"_status": "err: HTTP 401"})
+        st.success = _noop   # suprime la leyenda verde de "¡Listo!..."
+        # (si usaste st.caption para depurar, también puedes silenciarlo):
+        # st.caption = _noop
+    except Exception:
+        pass
+# =======================Borrar
+
+
 
 # 1) Config de página
 st.set_page_config(page_title="IMEMSA - Indicadores", layout="wide")
