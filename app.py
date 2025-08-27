@@ -71,7 +71,7 @@ st.markdown("""
 }
 
 /* Espaciado inferior tras el header */
-.imemsa-spacer { height: 8px; }
+.imemsa-spacer { height: 12px; }
 </style>
 """, unsafe_allow_html=True)
 
