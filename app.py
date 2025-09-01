@@ -454,6 +454,28 @@ def sie_last_n(series_id: str, n: int = 6):
     vals.sort(key=lambda x: parse_any_date(x[0]) or datetime.utcnow())
     return vals[-n:]
 
+def _ffill_by_dates(map_vals: dict, dates: list):
+    # keys are ISO-like strings. choose last available <= date
+    from datetime import datetime
+    def to_dt(s):
+        try:
+            if "/" in s:
+                return datetime.strptime(s, "%d/%m/%Y").date()
+            return datetime.fromisoformat(s).date()
+        except Exception:
+            return None
+    pairs = sorted([(to_dt(k), v) for k,v in map_vals.items() if to_dt(k)], key=lambda x: x[0])
+    out = []
+    last = None
+    for ds in dates:
+        d = to_dt(ds)
+        if d is None:
+            out.append(None); continue
+        while pairs and pairs[0][0] <= d:
+            last = pairs.pop(0)[1]
+        out.append(last)
+    return out
+
 def rolling_movex_for_last6(window:int=20):
     end = today_cdmx()
     start = end - timedelta(days=2*365)
@@ -478,7 +500,9 @@ SIE_SERIES = {
     "EUR_MXN":   "SF46410",
     "JPY_MXN":   "SF46406",
     "UDIS":      "SP68257",
-    "TIie_dummy": None, 
+    "TIIE_28": "SF60648",
+    "TIIE_91": "SF60649",
+    "TIIE_182": "SF60650",
 
     "CETES_28":  "SF43936",
     "CETES_91":  "SF43939",
@@ -614,8 +638,14 @@ with st.expander("📄 Hojas del Excel", expanded=True):
 
 # Parámetros fijos (Opciones retiradas del UI)
 movex_win = 5
-margen_pct = 0.0
-uma_manual = 0.0
+margen_pct = 0.002  # 0.20% por lado
+import os
+UMA_DIARIA = 0.0
+try:
+    UMA_DIARIA = float(st.secrets.get("UMA_DIARIA", os.getenv("UMA_DIARIA","0") or "0"))
+except Exception:
+    UMA_DIARIA = 0.0
+uma_manual = UMA_DIARIA
 
 
 _check_tokens()
@@ -684,6 +714,11 @@ if st.button("Generar Excel"):
     m_c91  = _as_map(sie_last_n(SIE_SERIES["CETES_91"],6))
     m_c182 = _as_map(sie_last_n(SIE_SERIES["CETES_182"],6))
     m_c364 = _as_map(sie_last_n(SIE_SERIES["CETES_364"],6))
+    cetes28 = _ffill_by_dates(m_c28, header_dates)
+    cetes91 = _ffill_by_dates(m_c91, header_dates)
+    cetes182 = _ffill_by_dates(m_c182, header_dates)
+    cetes364 = _ffill_by_dates(m_c364, header_dates)
+
 
     try:
         movex6  
@@ -707,28 +742,22 @@ if st.button("Generar Excel"):
     def _last_or_none(series_pairs): 
         return series_pairs[-1][1] if series_pairs else None
     try:
-        tiie28_last = _last_or_none(sie_last_n("SF43783", 6))
-        tiie91_last = _last_or_none(sie_last_n("SF43784", 6))
-        tiie182_last= _last_or_none(sie_last_n("SF43785", 6))
-    except Exception:
-        tiie28_last = tiie91_last = tiie182_last = None
-    
-    # Fallback: si las TIIE vienen iguales o vacías, usa SIE oportuno para 28 y 91 (mantén 182 como está)
-    try:
-        uniq_vals = {v for v in [tiie28_last, tiie91_last, tiie182_last] if v is not None}
-        if (not uniq_vals) or (len(uniq_vals) <= 1):
-            _d28, _v28 = sie_latest("SF60648")  # TIIE 28 (oportuno)
-            _d91, _v91 = sie_latest("SF60649")  # TIIE 91 (oportuno)
-            if _v28 is not None: tiie28_last = _v28
-            if _v91 is not None: tiie91_last = _v91
-    except Exception:
-        pass
-    tiie28 = [tiie28_last]*6
-    tiie91 = [tiie91_last]*6
-    tiie182= [tiie182_last]*6
+        
+    # TIIE (Banxico SIE) - usar histórico y alinear por fechas del encabezado
+    m_t28  = _as_map(sie_last_n(SIE_SERIES["TIIE_28"],  20))
+    m_t91  = _as_map(sie_last_n(SIE_SERIES["TIIE_91"],  20))
+    m_t182 = _as_map(sie_last_n(SIE_SERIES["TIIE_182"], 20))
+    # Objetivo (tasa de política monetaria)
+    m_obj  = _as_map(sie_last_n("SF61745", 20))
 
-   
-    ws = wb.add_worksheet("Indicadores")
+    tiie28 = _ffill_by_dates(m_t28,  header_dates)
+    tiie91 = _ffill_by_dates(m_t91,  header_dates)
+    tiie182= _ffill_by_dates(m_t182, header_dates)
+    tiie_obj = _ffill_by_dates(m_obj, header_dates)
+
+ws = wb.add_worksheet("Indicadores")
+    ws.set_column(0, 6, 16)
+
     ws.write(1, 0, "Fecha:", fmt_bold)
     for i, d in enumerate(header_dates):
         ws.write(1, 1+i, d)
@@ -780,7 +809,9 @@ if st.button("Generar Excel"):
     ws.write(26, 0, "TIIE 28 Días:")
     ws.write(27, 0, "TIIE 91 Días:")
     ws.write(28, 0, "TIIE 182 Días:")
-    for i in range(6):
+        for i in range(6):
+        ws.write(25, 1+i, tiie_obj[i])
+for i in range(6):
         ws.write(26, 1+i, tiie28[i])
         ws.write(27, 1+i, tiie91[i])
         ws.write(28, 1+i, tiie182[i])
@@ -790,11 +821,11 @@ if st.button("Generar Excel"):
     ws.write(33, 0, "CETES 91 Días:")
     ws.write(34, 0, "Cetes 182 Días:")
     ws.write(35, 0, "Cetes 364 Días:")
-    for i, d in enumerate(header_dates):
-        ws.write(32, 1+i, m_c28.get(d))
-        ws.write(33, 1+i, m_c91.get(d))
-        ws.write(34, 1+i, m_c182.get(d))
-        ws.write(35, 1+i, m_c364.get(d))
+    for i in range(6):
+        ws.write(32, 1+i, cetes28[i])
+        ws.write(33, 1+i, cetes91[i])
+        ws.write(34, 1+i, cetes182[i])
+        ws.write(35, 1+i, cetes364[i])
 
     ws.write(37, 0, "UMA:", fmt_bold)
     ws.write(39, 0, "Diario:");  ws.write(39, 1, uma.get("diaria"))
