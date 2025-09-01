@@ -830,27 +830,27 @@ if st.button("Generar Excel"):
     ws.write(41, 0, "Anual:");   ws.write(41, 1, uma.get("anual"))
 
 do_raw = globals().get('do_raw', True)
-if do_raw:
-        ws3 = wb.add_worksheet("Datos crudos")
-        ws3.write(0,0,"Serie", fmt_hdr); ws3.write(0,1,"Fecha", fmt_hdr); ws3.write(0,2,"Valor", fmt_hdr)
-        def _dump(ws_sheet, start_row, tag, pairs):
-            r = start_row
-            for d, v in pairs:
-                ws_sheet.write(r, 0, tag)
-                ws_sheet.write(r, 1, d)
-                ws_sheet.write(r, 2, v)
-                r += 1
-            return r
-        r = 1
-        r = _dump(ws3, r, "USD/MXN (FIX)", sie_last_n(SIE_SERIES["USD_FIX"], 6))
-        r = _dump(ws3, r, "EUR/MXN",       sie_last_n(SIE_SERIES["EUR_MXN"], 6))
-        r = _dump(ws3, r, "JPY/MXN",       sie_last_n(SIE_SERIES["JPY_MXN"], 6))
-        r = _dump(ws3, r, "UDIS",          sie_last_n(SIE_SERIES["UDIS"],    6))
-        r = _dump(ws3, r, "CETES 28d (%)", sie_last_n(SIE_SERIES["CETES_28"],6))
-        r = _dump(ws3, r, "CETES 91d (%)", sie_last_n(SIE_SERIES["CETES_91"],6))
-        r = _dump(ws3, r, "CETES 182d (%)",sie_last_n(SIE_SERIES["CETES_182"],6))
-        r = _dump(ws3, r, "CETES 364d (%)",sie_last_n(SIE_SERIES["CETES_364"],6))
-        ws3.set_column(0, 0, 18); ws3.set_column(1, 1, 12); ws3.set_column(2, 2, 16)
+if do_raw and ('wb' in globals()):
+    ws3 = wb.add_worksheet("Datos crudos")
+    ws3.write(0,0,"Serie", fmt_hdr); ws3.write(0,1,"Fecha", fmt_hdr); ws3.write(0,2,"Valor", fmt_hdr)
+    def _dump(ws_sheet, start_row, tag, pairs):
+        r = start_row
+        for d, v in pairs:
+            ws_sheet.write(r, 0, tag)
+            ws_sheet.write(r, 1, d)
+            ws_sheet.write(r, 2, v)
+            r += 1
+
+    r = 1
+    r = _dump(ws3, r, "USD/MXN (FIX)", sie_last_n(SIE_SERIES["USD_FIX"], 6))
+    r = _dump(ws3, r, "EUR/MXN",       sie_last_n(SIE_SERIES["EUR_MXN"], 6))
+    r = _dump(ws3, r, "JPY/MXN",       sie_last_n(SIE_SERIES["JPY_MXN"], 6))
+    r = _dump(ws3, r, "UDIS",          sie_last_n(SIE_SERIES["UDIS"],    6))
+    r = _dump(ws3, r, "CETES 28d (%)", sie_last_n(SIE_SERIES["CETES_28"],6))
+    r = _dump(ws3, r, "CETES 91d (%)", sie_last_n(SIE_SERIES["CETES_91"],6))
+    r = _dump(ws3, r, "CETES 182d (%)",sie_last_n(SIE_SERIES["CETES_182"],6))
+    r = _dump(ws3, r, "CETES 364d (%)",sie_last_n(SIE_SERIES["CETES_364"],6))
+    ws3.set_column(0, 0, 18); ws3.set_column(1, 1, 12); ws3.set_column(2, 2, 16)
 
     
 do_charts = globals().get('do_charts', True)
