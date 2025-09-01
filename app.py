@@ -830,7 +830,7 @@ if st.button("Generar Excel"):
     ws.write(41, 0, "Anual:");   ws.write(41, 1, uma.get("anual"))
 
 do_raw = globals().get('do_raw', True)
-    if do_raw:
+if do_raw:
         ws3 = wb.add_worksheet("Datos crudos")
         ws3.write(0,0,"Serie", fmt_hdr); ws3.write(0,1,"Fecha", fmt_hdr); ws3.write(0,2,"Valor", fmt_hdr)
         def _dump(ws_sheet, start_row, tag, pairs):
@@ -853,8 +853,8 @@ do_raw = globals().get('do_raw', True)
         ws3.set_column(0, 0, 18); ws3.set_column(1, 1, 12); ws3.set_column(2, 2, 16)
 
     
-    do_charts = globals().get('do_charts', True)
-    if do_charts:
+do_charts = globals().get('do_charts', True)
+if do_charts:
         ws4 = wb.add_worksheet("Gráficos")
         chart1 = wb.add_chart({'type': 'line'})
         chart1.add_series({
@@ -876,7 +876,7 @@ do_raw = globals().get('do_raw', True)
         ws4.insert_chart('B18', chart2, {'x_scale': 1.3, 'y_scale': 1.2})
 
     
-    try:
+try:
         if fred_rows:
             wsname  = f"FRED_{fred_id[:25]}"
             wsfred  = wb.add_worksheet(wsname)
@@ -937,7 +937,7 @@ do_raw = globals().get('do_raw', True)
                 ch.set_title({"name": f"{fred_id} (FRED)"})
                 ch.set_y_axis({"num_format": "#,##0.0000"})
                 wsfred.insert_chart("D4", ch, {"x_scale": 1.2, "y_scale": 1.2})
-    except Exception as _e:
+except Exception as _e:
         pass
 
 try:
