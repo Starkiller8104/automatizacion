@@ -1,4 +1,5 @@
 
+
 import io
 import re
 import time
@@ -596,7 +597,11 @@ with st.sidebar.expander("🔑 Tokens de APIs", expanded=False):
             res = get_uma(INEGI_TOKEN)
 
 
-with st.sidebar.expander("📄 Hojas del Excel", expanded=True):
+
+
+
+
+with st.expander("📄 Hojas del Excel", expanded=True):
     st.caption("Activa/desactiva hojas opcionales del archivo Excel")
     want_fred   = st.checkbox("Agregar hoja FRED", value=st.session_state.get("want_fred", True))
     want_news   = st.checkbox("Agregar hoja Noticias_RSS", value=st.session_state.get("want_news", True))
@@ -607,22 +612,12 @@ with st.sidebar.expander("📄 Hojas del Excel", expanded=True):
     st.session_state["want_charts"] = want_charts
     st.session_state["want_raw"] = want_raw
 
+# Parámetros fijos (Opciones retiradas del UI)
+movex_win = 5
+margen_pct = 0.0
+uma_manual = 0.0
 
 
-with st.expander("Opciones"):
-    
-    st.number_input(
-        "Venta MONEX (historial días hábiles)", 
-        min_value=5, max_value=5, value=5, step=1,
-        key="movex_win_fixed", disabled=True, help="Fijo a 5 días hábiles"
-    )
-    movex_win = 5  
-
-
-    margen_pct = st.number_input("Margen Compra/Venta sobre FIX ...% por lado)", min_value=0.0, max_value=5.0, value=0.5, step=0.1)
-    uma_manual = st.number_input("UMA diaria (manual, si INEGI falla)", min_value=0.0, value=0.0, step=0.01)
-    do_charts = bool(st.session_state.get('want_charts', True))
-    do_raw = bool(st.session_state.get('want_raw', True))
 _check_tokens()
 _render_sidebar_status()
 
