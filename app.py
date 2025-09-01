@@ -854,28 +854,28 @@ if do_raw and ('wb' in globals()):
 
     
 do_charts = globals().get('do_charts', True)
-if do_charts:
-        ws4 = wb.add_worksheet("Gráficos")
-        chart1 = wb.add_chart({'type': 'line'})
-        chart1.add_series({
-            'name':       "USD/MXN (FIX)",
+if do_charts and ('wb' in globals()):
+    ws4 = wb.add_worksheet("Gráficos")
+    chart1 = wb.add_chart({'type': 'line'})
+    chart1.add_series({
+    'name':       "USD/MXN (FIX)",
+    'categories': "=Indicadores!$B$2:$G$2",
+    'values':     "=Indicadores!$B$7:$G$7",
+    })
+    chart1.set_title({'name': 'USD/MXN (FIX)'})
+    ws4.insert_chart('B2', chart1, {'x_scale': 1.3, 'y_scale': 1.2})
+
+    chart2 = wb.add_chart({'type': 'line'})
+    for row in (33,34,35,36):
+        chart2.add_series({
+            'name':       f"=Indicadores!$A${row}",
             'categories': "=Indicadores!$B$2:$G$2",
-            'values':     "=Indicadores!$B$7:$G$7",
+            'values':     f"=Indicadores!$B${row}:$G${row}",
         })
-        chart1.set_title({'name': 'USD/MXN (FIX)'})
-        ws4.insert_chart('B2', chart1, {'x_scale': 1.3, 'y_scale': 1.2})
+    chart2.set_title({'name': 'CETES (%)'})
+    ws4.insert_chart('B18', chart2, {'x_scale': 1.3, 'y_scale': 1.2})
 
-        chart2 = wb.add_chart({'type': 'line'})
-        for row in (33,34,35,36):
-            chart2.add_series({
-                'name':       f"=Indicadores!$A${row}",
-                'categories': "=Indicadores!$B$2:$G$2",
-                'values':     f"=Indicadores!$B${row}:$G${row}",
-            })
-        chart2.set_title({'name': 'CETES (%)'})
-        ws4.insert_chart('B18', chart2, {'x_scale': 1.3, 'y_scale': 1.2})
 
-    
 try:
         if fred_rows:
             wsname  = f"FRED_{fred_id[:25]}"
