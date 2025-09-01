@@ -799,13 +799,12 @@ if st.button("Generar Excel"):
     for i, v in enumerate(eur_usd):
         ws.write(17, 1+i, v, fmt_num6)
 
-        ws.write(19, 0, "UDIS:", fmt_bold)
+    ws.write(19, 0, "UDIS:", fmt_bold)
     ws.write(21, 0, "UDIS: ")
     for i, d in enumerate(header_dates):
         ws.write(21, 1+i, m_udis.get(d), fmt_num6)
 
     ws.write(23, 0, "TASAS TIIE:", fmt_bold)
-, fmt_bold)
     ws.write(25, 0, "TIIE objetivo:")
     ws.write(26, 0, "TIIE 28 Días:")
     ws.write(27, 0, "TIIE 91 Días:")
