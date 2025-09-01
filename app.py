@@ -1,3 +1,4 @@
+
 # -*- coding: utf-8 -*-
 # -*- coding: utf-8 -*-
 
@@ -12,61 +13,6 @@ from urllib.parse import quote_plus
 from bs4 import BeautifulSoup
 from openpyxl import load_workbook
 import streamlit as st
-
-
-# ---- PATCH: Parámetros de Compra/Venta (no afecta tu UI) ----
-USD_COMPRA_CELL = "F12"   # ajusta si tu plantilla usa otras celdas
-USD_VENTA_CELL  = "F13"
-USD_SPREAD_TOTAL_PCT = 0.40  # % total alrededor del FIX (0.40 => ±0.20%)
-# ---- /PATCH parámetros ----
-
-def _to_float_safe(x):
-    try:
-        return float(str(x).replace(",", "").strip())
-    except Exception:
-        return None
-
-def calc_compra_venta_val(fix_val, spread_total_pct=USD_SPREAD_TOTAL_PCT):
-    """Devuelve (compra, venta) a partir de un FIX (float) y un spread total en %."""
-    if fix_val is None:
-        return None, None
-    try:
-        half = (spread_total_pct/100.0)/2.0
-        compra = round(float(fix_val) * (1.0 - half), 5)
-        venta  = round(float(fix_val) * (1.0 + half), 5)
-        return compra, venta
-    except Exception:
-        return None, None
-
-def tiie_sie_opportuno(token:str):
-    """Obtiene TIIE 28 y 91 (oportuno) desde SIE; 182 se mantiene por DOF si no hay serie acordada."""
-    try:
-        ids = {"tiie_28":"SF60648", "tiie_91":"SF60649"}
-        url = "https://www.banxico.org.mx/SieAPIRest/service/v1/series/{}/datos/oportuno".format(",".join(ids.values()))
-        r = requests.get(url, headers={"Bmx-Token": token.strip()}, timeout=20)
-        r.raise_for_status()
-        series = r.json().get("bmx",{}).get("series",[])
-        out = {}
-        for s in series:
-            sid = s.get("idSerie")
-            datos = s.get("datos",[])
-            val = None
-            if datos:
-                d0 = datos[0].get("dato")
-                if d0 not in (None,"","N/E"):
-                    try:
-                        val = float(str(d0).replace(",",""))
-                    except Exception:
-                        val = None
-            # map back
-            for k,v in ids.items():
-                if v == sid:
-                    out[k] = val
-        return out
-    except Exception:
-        return {}
-
-
 
 # --------------------------
 # Configuración de página (si ya tienes una, puedes conservarla)
@@ -257,25 +203,8 @@ if uploaded:
     usd_mxn, jpy_mxn, eur_mxn = fx.get("SF43718"), fx.get("SF46406"), fx.get("SF46410")
     usd_jpy = (usd_mxn / jpy_mxn) if (usd_mxn and jpy_mxn) else None
     eur_usd = (eur_mxn / usd_mxn) if (eur_mxn and usd_mxn) else None
-    # ---- PATCH: USD Compra/Venta desde FIX ----
-    usd_compra, usd_venta = calc_compra_venta_val(usd_mxn, spread_total_pct=USD_SPREAD_TOTAL_PCT)
-    # ---- /PATCH USD Compra/Venta ----
-
 
     tiie = fetch_tiie_from_dof()
-
-    # ---- PATCH: si las TIIE salen iguales o vacías, intenta SIE (28 y 91) ----
-    try:
-        values = [tiie.get("tiie_28"), tiie.get("tiie_91"), tiie.get("tiie_182")]
-        uniq = {v for v in values if v is not None}
-        if (not uniq or len(uniq) <= 1) and BANXICO_TOKEN:
-            t_sie = tiie_sie_opportuno(BANXICO_TOKEN)
-            for k,v in t_sie.items():
-                if v is not None:
-                    tiie[k] = safe_round(v,4)
-    except Exception:
-        pass
-    # ---- /PATCH TIIE ----
     cetes = cetes_sie(BANXICO_TOKEN)
     udis = sie_opportuno(["SP68257"], BANXICO_TOKEN).get("SP68257")
     uma_diaria, uma_mensual, uma_anual = fetch_uma_values()
@@ -288,14 +217,6 @@ if uploaded:
     # (Tu mapeo original de celdas; ejemplo:)
     ws_ind["F7"], ws_ind["L7"], ws_ind["F32"], ws_ind["K32"] = FECHA_HOY, FECHA_HOY, FECHA_HOY, FECHA_HOY
     ws_ind["F10"] = safe_round(usd_mxn,4)
-
-    # ---- PATCH: escribir Compra/Venta en celdas configurables ----
-    try:
-        ws_ind[USD_COMPRA_CELL] = safe_round(usd_compra,4)
-        ws_ind[USD_VENTA_CELL]  = safe_round(usd_venta,4)
-    except Exception:
-        pass
-    # ---- /PATCH escribir Compra/Venta ----
     ws_ind["F16"] = safe_round(jpy_mxn,6)
     ws_ind["F17"] = safe_round(usd_jpy,6)
     ws_ind["F21"] = safe_round(eur_mxn,6)
