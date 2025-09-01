@@ -638,7 +638,7 @@ with st.expander("📄 Hojas del Excel", expanded=True):
 
 # Parámetros fijos (Opciones retiradas del UI)
 movex_win = 5
-margen_pct = 0.002  # 0.20% por lado
+margen_pct = 0.20  # 0.20% por lado
 import os
 UMA_DIARIA = 0.0
 try:
@@ -741,7 +741,7 @@ if st.button("Generar Excel"):
 
     def _last_or_none(series_pairs): 
         return series_pairs[-1][1] if series_pairs else None
-    try:
+
         
     # TIIE (Banxico SIE) - usar histórico y alinear por fechas del encabezado
     m_t28  = _as_map(sie_last_n(SIE_SERIES["TIIE_28"],  20))
@@ -755,7 +755,7 @@ if st.button("Generar Excel"):
     tiie182= _ffill_by_dates(m_t182, header_dates)
     tiie_obj = _ffill_by_dates(m_obj, header_dates)
 
-ws = wb.add_worksheet("Indicadores")
+    ws = wb.add_worksheet("Indicadores")
     ws.set_column(0, 6, 16)
 
     ws.write(1, 0, "Fecha:", fmt_bold)
@@ -768,7 +768,7 @@ ws = wb.add_worksheet("Indicadores")
     for i, d in enumerate(header_dates):
         ws.write(6, 1+i, m_fix.get(d), fmt_num4)
     ws.write(7, 0, "MONEX:")
-    
+
     ws.write(8, 0, "Compra:")
     for i, v in enumerate(compra):
         ws.write(8, 1+i, v, fmt_num6)
@@ -799,42 +799,38 @@ ws = wb.add_worksheet("Indicadores")
     for i, v in enumerate(eur_usd):
         ws.write(17, 1+i, v, fmt_num6)
 
-    ws.write(19, 0, "UDIS:", fmt_bold)
+        ws.write(19, 0, "UDIS:", fmt_bold)
     ws.write(21, 0, "UDIS: ")
     for i, d in enumerate(header_dates):
         ws.write(21, 1+i, m_udis.get(d), fmt_num6)
 
     ws.write(23, 0, "TASAS TIIE:", fmt_bold)
+, fmt_bold)
     ws.write(25, 0, "TIIE objetivo:")
     ws.write(26, 0, "TIIE 28 Días:")
     ws.write(27, 0, "TIIE 91 Días:")
     ws.write(28, 0, "TIIE 182 Días:")
-        for i in range(6):
+    for i in range(6):
         ws.write(25, 1+i, tiie_obj[i])
-for i in range(6):
         ws.write(26, 1+i, tiie28[i])
         ws.write(27, 1+i, tiie91[i])
         ws.write(28, 1+i, tiie182[i])
-
     ws.write(30, 0, "CETES:", fmt_bold)
     ws.write(32, 0, "CETES 28 Días:")
     ws.write(33, 0, "CETES 91 Días:")
-    ws.write(34, 0, "Cetes 182 Días:")
-    ws.write(35, 0, "Cetes 364 Días:")
+    ws.write(34, 0, "CETES 182 Días:")
+    ws.write(35, 0, "CETES 364 Días:")
     for i in range(6):
         ws.write(32, 1+i, cetes28[i])
         ws.write(33, 1+i, cetes91[i])
         ws.write(34, 1+i, cetes182[i])
         ws.write(35, 1+i, cetes364[i])
-
     ws.write(37, 0, "UMA:", fmt_bold)
     ws.write(39, 0, "Diario:");  ws.write(39, 1, uma.get("diaria"))
     ws.write(40, 0, "Mensual:"); ws.write(40, 1, uma.get("mensual"))
     ws.write(41, 0, "Anual:");   ws.write(41, 1, uma.get("anual"))
 
-    
-    
-    do_raw = globals().get('do_raw', True)
+do_raw = globals().get('do_raw', True)
     if do_raw:
         ws3 = wb.add_worksheet("Datos crudos")
         ws3.write(0,0,"Serie", fmt_hdr); ws3.write(0,1,"Fecha", fmt_hdr); ws3.write(0,2,"Valor", fmt_hdr)
