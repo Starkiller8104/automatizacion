@@ -1,4 +1,3 @@
-
 # -*- coding: utf-8 -*-
 """
 Indicadores IMEMSA (Streamlit) - con LOGIN
@@ -25,7 +24,7 @@ import streamlit as st
 # Configuración de página
 # ===============================
 st.set_page_config(page_title="Indicadores IMEMSA", layout="wide")
-st.title("Indicadores de Tipo de Cambio")
+st.title("Indicadores IMEMSA")
 
 TZ_MX = pytz.timezone("America/Mexico_City")
 BASE = "https://www.banxico.org.mx/SieAPIRest/service/v1"
@@ -33,7 +32,7 @@ BASE = "https://www.banxico.org.mx/SieAPIRest/service/v1"
 # ===============================
 # LOGIN
 # ===============================
-DEFAULT_APP_PASSWORD = os.environ.get("imemsa79", None)
+DEFAULT_APP_PASSWORD = os.environ.get("APP_PASSWORD", None)
 if DEFAULT_APP_PASSWORD is None:
     # Si no hay variable de entorno ni secret, usa st.secrets si existe; de lo contrario fija valor demo.
     try:
