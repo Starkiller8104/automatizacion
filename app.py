@@ -728,7 +728,7 @@ if st.button("Generar Excel"):
             if _v91 is not None: tiie91_last = _v91
     except Exception:
         pass
-tiie28 = [tiie28_last]*6
+    tiie28 = [tiie28_last]*6
     tiie91 = [tiie91_last]*6
     tiie182= [tiie182_last]*6
 
