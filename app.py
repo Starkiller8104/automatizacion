@@ -717,7 +717,18 @@ if st.button("Generar Excel"):
         tiie182_last= _last_or_none(sie_last_n("SF43785", 6))
     except Exception:
         tiie28_last = tiie91_last = tiie182_last = None
-    tiie28 = [tiie28_last]*6
+    
+    # Fallback: si las TIIE vienen iguales o vacías, usa SIE oportuno para 28 y 91 (mantén 182 como está)
+    try:
+        uniq_vals = {v for v in [tiie28_last, tiie91_last, tiie182_last] if v is not None}
+        if (not uniq_vals) or (len(uniq_vals) <= 1):
+            _d28, _v28 = sie_latest("SF60648")  # TIIE 28 (oportuno)
+            _d91, _v91 = sie_latest("SF60649")  # TIIE 91 (oportuno)
+            if _v28 is not None: tiie28_last = _v28
+            if _v91 is not None: tiie91_last = _v91
+    except Exception:
+        pass
+tiie28 = [tiie28_last]*6
     tiie91 = [tiie91_last]*6
     tiie182= [tiie182_last]*6
 
@@ -740,6 +751,13 @@ if st.button("Generar Excel"):
     ws.write(9, 0, "Venta:")
     for i, v in enumerate(venta):
         ws.write(9, 1+i, v, fmt_num6)
+    # Asegura explícitamente las celdas G9/G10 (columna 6, fila 8 y 9)
+    try:
+        if compra: ws.write(8, 6, compra[-1], fmt_num6)
+        if venta:  ws.write(9, 6, venta[-1],  fmt_num6)
+    except Exception:
+        pass
+
 
     ws.write(11, 0, "YEN JAPONÉS.", fmt_bold)
     ws.write(12, 0, "Yen Japonés/Peso:")
