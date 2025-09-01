@@ -841,6 +841,8 @@ if do_raw and ('wb' in globals()):
             ws_sheet.write(r, 2, v)
             r += 1
 
+        return r
+
     r = 1
     r = _dump(ws3, r, "USD/MXN (FIX)", sie_last_n(SIE_SERIES["USD_FIX"], 6))
     r = _dump(ws3, r, "EUR/MXN",       sie_last_n(SIE_SERIES["EUR_MXN"], 6))
