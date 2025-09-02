@@ -742,6 +742,7 @@ if st.button("Generar Excel"):
     fmt_hdr   = wb.add_format({'bold': True, 'bg_color': '#F2F2F2', 'align':'center'})
     fmt_num4  = wb.add_format({'num_format': '0.0000'})
     fmt_num6  = wb.add_format({'num_format': '0.000000'})
+    fmt_num2  = wb.add_format({'num_format': '0.00'})
     fmt_wrap  = wb.add_format({'text_wrap': True})
 
     
