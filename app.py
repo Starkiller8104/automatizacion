@@ -1,5 +1,4 @@
 
-
 import io
 import re
 import time
@@ -291,7 +290,7 @@ def logo_base64(max_height_px: int = 40):
 
 
 BANXICO_TOKEN = "677aaedf11d11712aa2ccf73da4d77b6b785474eaeb2e092f6bad31b29de6609"
-INEGI_TOKEN = (st.secrets.get("INEGI_TOKEN", "") or os.getenv("INEGI_TOKEN", ""))
+INEGI_TOKEN   = "0146a9ed-b70f-4ea2-8781-744b900c19d1"
 FRED_TOKEN    = "b4f11681f441da78103a3706d0dab1cf"  
 
 def fred_fetch_series(series_id: str, start: str | None = None, end: str | None = None, units: str = "lin"):
@@ -511,91 +510,64 @@ SIE_SERIES = {
 }
 
 @st.cache_data(ttl=60*60)
-
 def get_uma(inegi_token: str):
     """
-    UMA nacional desde INEGI únicamente.
-      - Intenta 620706/620707/620708 (BISE y luego BIE).
-      - Si no hay esas series, intenta 628644 (mensual) y deriva diaria/anual.
-      - Si no hay token o todo falla, regresa None en los tres campos.
+    UMA nacional: 620706 (diaria), 620707 (mensual), 620708 (anual)
+    Retorna: {'fecha','diaria','mensual','anual','_status','_source'}
     """
+    base = "https://www.inegi.org.mx/app/api/indicadores/desarrolladores/jsonxml/INDICATOR"
+    ids = "620706,620707,620708"
+    urls = [
+        f"{base}/{ids}/es/00/true/BISE/2.0/{inegi_token}?type=json",
+        f"{base}/{ids}/es/00/true/BIE/2.0/{inegi_token}?type=json",  
+    ]
+
     def _num(x):
         try:
             return float(str(x).replace(",", ""))
-        except Exception:
+        except:
             return None
 
-    if not inegi_token:
-        return {"fecha": None, "diaria": None, "mensual": None, "anual": None, "_status": "no_token", "_source": "none"}
-
-    base = "https://www.inegi.org.mx/app/api/indicadores/desarrolladores/jsonxml/INDICATOR"
-    ids  = "620706,620707,620708"
-    urls = [
-        f"{base}/{ids}/es/00/true/BISE/2.0/{inegi_token}?type=json",
-        f"{base}/{ids}/es/00/true/BIE/2.0/{inegi_token}?type=json",
-    ]
-
+    last_err = None
     for u in urls:
         try:
             r = http_session(20).get(u, timeout=20)
             if r.status_code != 200:
+                last_err = f"HTTP {r.status_code}"
                 continue
             data = r.json()
-            series = data.get("Series") or []
-            if not series or len(series) < 3:
-                continue
+            series = data.get("Series") or data.get("series") or []
+            if not series:
+                last_err = "Sin 'Series'"; continue
 
             def last_obs(s):
                 obs = s.get("OBSERVATIONS") or s.get("observations") or []
                 return obs[-1] if obs else None
 
-            d_obs = last_obs(series[0]); m_obs = last_obs(series[1]); a_obs = last_obs(series[2])
+            d_obs = last_obs(series[0]); m_obs = last_obs(series[1]) if len(series)>1 else None
+            a_obs = last_obs(series[2]) if len(series)>2 else None
 
             def get_v(o):
                 if not o: return None
                 return _num(o.get("OBS_VALUE") or o.get("value"))
             def get_f(o):
                 if not o: return None
-                return o.get("TIME_PERIOD") or o.get("time_period") or o.get("TIME_PERIOD_ID") or o.get("time_period_id")
+                return o.get("TIME_PERIOD") or o.get("periodo") or o.get("time_period") or o.get("fecha")
 
-            d_val, m_val, a_val = get_v(d_obs), get_v(m_obs), get_v(a_obs)
-            if any(v is not None for v in (d_val, m_val, a_val)):
-                if d_val is None and m_val is not None: d_val = m_val / 30.43
-                if d_val is None and a_val is not None: d_val = a_val / 365.25
-                if m_val is None and d_val is not None: m_val = d_val * 30.43
-                if a_val is None and d_val is not None: a_val = d_val * 365.25
-                return {
-                    "fecha": get_f(d_obs) or get_f(m_obs) or get_f(a_obs),
-                    "diaria":  d_val,
-                    "mensual": m_val,
-                    "anual":   a_val,
-                    "_status": "ok",
-                    "_source": "INEGI:620706/7/8",
-                }
-        except Exception:
-            pass
+            return {
+                "fecha": get_f(d_obs) or get_f(m_obs) or get_f(a_obs),
+                "diaria":  get_v(d_obs),
+                "mensual": get_v(m_obs),
+                "anual":   get_v(a_obs),
+                "_status": "ok",
+                "_source": "INEGI",
+            }
+        except Exception as e:
+            last_err = str(e)
+            continue
 
-    # Fallback: 628644 (mensual), derivar diaria/anual
-    try:
-        u2 = f"{base}/628644/00000/es/false/BISE/2.0/{inegi_token}/?type=json"
-        r2 = http_session(20).get(u2, timeout=20)
-        if r2.status_code == 200:
-            js = r2.json()
-            series = js.get("Series") or []
-            obs = series[0].get("Obs") if series else None
-            if obs:
-                last = obs[-1]
-                m_val = _num(last.get("ObsValue"))
-                if m_val is not None:
-                    d_val = m_val / 30.43
-                    a_val = d_val * 365.25
-                    return {"fecha": last.get("TIME_PERIOD") or last.get("TimePeriod") or last.get("TIME_PERIOD_ID"),
-                            "diaria": d_val, "mensual": m_val, "anual": a_val,
-                            "_status":"ok","_source":"INEGI:628644"}
-    except Exception:
-        pass
-
-    return {"fecha": None, "diaria": None, "mensual": None, "anual": None, "_status":"fail","_source":"none"}
+    return {"fecha": None, "diaria": None, "mensual": None, "anual": None,
+            "_status": f"err: {last_err}", "_source": "fallback"}
 
 def _probe(fn, ok_condition):
     t0 = time.time()
@@ -782,6 +754,32 @@ if st.button("Generar Excel"):
     tiie182= _ffill_by_dates(m_t182, header_dates)
     tiie_obj = _ffill_by_dates(m_obj, header_dates)
 
+
+    # --- Fallback robusto para TIIE 182 días ---
+    try:
+        # Si todo quedó en None (no hubo match de fechas o no hay histórico),
+        # intentamos con el dato oportuno y/o el último disponible de SIE.
+        if all(v is None for v in tiie182):
+            v182_op = None
+            try:
+                _, v182_op = sie_latest(SIE_SERIES["TIIE_182"], BANXICO_TOKEN)
+            except Exception:
+                v182_op = None
+            if v182_op is not None:
+                # Replicamos el oportuno a las 6 columnas
+                tiie182 = [round(float(v182_op), 4)] * len(header_dates)
+            else:
+                # Como segunda opción, tomamos el último 'last_n' y replicamos
+                try:
+                    _pairs182 = sie_last_n(SIE_SERIES["TIIE_182"], 6, BANXICO_TOKEN)
+                    _last = _pairs182[-1][1] if _pairs182 else None
+                    if _last is not None:
+                        tiie182 = [round(float(_last), 4)] * len(header_dates)
+                except Exception:
+                    pass
+    except Exception:
+        pass
+    # --- /fallback ---
     ws = wb.add_worksheet("Indicadores")
     ws.set_column(0, 6, 16)
 
