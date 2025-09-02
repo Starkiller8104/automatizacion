@@ -1,5 +1,4 @@
 
-
 import io
 import re
 import time
@@ -755,15 +754,32 @@ if st.button("Generar Excel"):
     tiie182= _ffill_by_dates(m_t182, header_dates)
     tiie_obj = _ffill_by_dates(m_obj, header_dates)
 
-    # Fallback: si tiie182 quedó vacío por fechas, usa oportuno de SIE y repite
+
+    # --- Fallback robusto para TIIE 182 días ---
     try:
+        # Si todo quedó en None (no hubo match de fechas o no hay histórico),
+        # intentamos con el dato oportuno y/o el último disponible de SIE.
         if all(v is None for v in tiie182):
-            _, v182_op = sie_latest(SIE_SERIES["TIIE_182"], BANXICO_TOKEN)
+            v182_op = None
+            try:
+                _, v182_op = sie_latest(SIE_SERIES["TIIE_182"], BANXICO_TOKEN)
+            except Exception:
+                v182_op = None
             if v182_op is not None:
-                tiie182 = [round(float(v182_op), 4)] * 6
+                # Replicamos el oportuno a las 6 columnas
+                tiie182 = [round(float(v182_op), 4)] * len(header_dates)
+            else:
+                # Como segunda opción, tomamos el último 'last_n' y replicamos
+                try:
+                    _pairs182 = sie_last_n(SIE_SERIES["TIIE_182"], 6, BANXICO_TOKEN)
+                    _last = _pairs182[-1][1] if _pairs182 else None
+                    if _last is not None:
+                        tiie182 = [round(float(_last), 4)] * len(header_dates)
+                except Exception:
+                    pass
     except Exception:
         pass
-
+    # --- /fallback ---
     ws = wb.add_worksheet("Indicadores")
     ws.set_column(0, 6, 16)
 
