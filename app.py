@@ -1,4 +1,5 @@
 
+
 import io
 import re
 import time
@@ -757,29 +758,32 @@ if st.button("Generar Excel"):
 
     # --- Fallback robusto para TIIE 182 días ---
     try:
-        # Si todo quedó en None (no hubo match de fechas o no hay histórico),
-        # intentamos con el dato oportuno y/o el último disponible de SIE.
+        # Si todo quedó en None (no hubo match de fechas o no hay histórico reciente),
+        # intentamos primero dato oportuno; si no existe (serie descontinuada),
+        # buscamos el ÚLTIMO valor histórico con una ventana amplia.
         if all(v is None for v in tiie182):
-            v182_op = None
+            v182 = None
+            # 1) Dato oportuno
             try:
-                _, v182_op = sie_latest(SIE_SERIES["TIIE_182"], BANXICO_TOKEN)
+                _, v182 = sie_latest(SIE_SERIES["TIIE_182"], BANXICO_TOKEN)
             except Exception:
-                v182_op = None
-            if v182_op is not None:
-                # Replicamos el oportuno a las 6 columnas
-                tiie182 = [round(float(v182_op), 4)] * len(header_dates)
-            else:
-                # Como segunda opción, tomamos el último 'last_n' y replicamos
+                v182 = None
+            # 2) Último histórico amplio (si oportuno no trajo nada)
+            if v182 is None:
                 try:
-                    _pairs182 = sie_last_n(SIE_SERIES["TIIE_182"], 6, BANXICO_TOKEN)
-                    _last = _pairs182[-1][1] if _pairs182 else None
-                    if _last is not None:
-                        tiie182 = [round(float(_last), 4)] * len(header_dates)
+                    # rango amplio para capturar series descontinuadas
+                    hist = sie_range(SIE_SERIES["TIIE_182"], "1990-01-01", "2999-12-31")
+                    # filtrar N/E y vacíos
+                    vals = [try_float(o.get("dato")) for o in hist if try_float(o.get("dato")) is not None]
+                    v182 = vals[-1] if vals else None
                 except Exception:
-                    pass
+                    v182 = None
+            if v182 is not None:
+                tiie182 = [round(float(v182), 4)] * len(header_dates)
     except Exception:
         pass
-    # --- /fallback ---
+# --- /fallback ---
+
     ws = wb.add_worksheet("Indicadores")
     ws.set_column(0, 6, 16)
 
