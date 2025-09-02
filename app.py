@@ -625,7 +625,7 @@ with st.sidebar.expander("🔑 Tokens de APIs", expanded=False):
 
 
 
-with st.expander("📄 Hojas del Excel", expanded=True):
+with st.expander("📄 Selecciona las Hojas del Excel que contendra tu archivo", expanded=True):
     st.caption("Activa/desactiva hojas opcionales del archivo Excel")
     want_fred   = st.checkbox("Agregar hoja FRED", value=st.session_state.get("want_fred", True))
     want_news   = st.checkbox("Agregar hoja Noticias_RSS", value=st.session_state.get("want_news", True))
