@@ -1,5 +1,6 @@
 
 
+
 import io
 import re
 import time
@@ -292,6 +293,9 @@ def logo_base64(max_height_px: int = 40):
 
 BANXICO_TOKEN = "677aaedf11d11712aa2ccf73da4d77b6b785474eaeb2e092f6bad31b29de6609"
 INEGI_TOKEN   = "0146a9ed-b70f-4ea2-8781-744b900c19d1"
+
+# Valor manual por defecto para UMA diaria (si no hay token o falla el API)
+DEFAULT_UMA_DIARIA = float(st.secrets.get("DEFAULT_UMA_DIARIA", os.getenv("DEFAULT_UMA_DIARIA", "108.57")))
 FRED_TOKEN    = "b4f11681f441da78103a3706d0dab1cf"  
 
 def fred_fetch_series(series_id: str, start: str | None = None, end: str | None = None, units: str = "lin"):
@@ -512,18 +516,16 @@ SIE_SERIES = {
 
 @st.cache_data(ttl=60*60)
 
+
 def get_uma(inegi_token: str):
     """
-    UMA nacional: 620706 (diaria), 620707 (mensual), 620708 (anual)
-    Fallback alterno: 628644 (mensual promedio), del cual derivamos diaria/anual.
+    UMA nacional:
+      - Primer intento: INEGI 620706 (diaria), 620707 (mensual), 620708 (anual) vía BISE/BIE.
+      - Fallback 1: INEGI 628644 (mensual) y derivamos diaria/anual.
+      - Fallback 2: Valor manual DEFAULT_UMA_DIARIA.
     Retorna: {'fecha','diaria','mensual','anual','_status','_source'}
     """
-    base = "https://www.inegi.org.mx/app/api/indicadores/desarrolladores/jsonxml/INDICATOR"
-    ids  = "620706,620707,620708"
-    urls = [
-        f"{base}/{ids}/es/00/true/BISE/2.0/{inegi_token}?type=json",
-        f"{base}/{ids}/es/00/true/BIE/2.0/{inegi_token}?type=json",
-    ]
+    default_d = DEFAULT_UMA_DIARIA
 
     def _num(x):
         try:
@@ -531,18 +533,27 @@ def get_uma(inegi_token: str):
         except Exception:
             return None
 
-    last_err = None
-    # Intento 1: series directas diaria/mensual/anual
+    # Si no hay token => usar manual
+    if not inegi_token:
+        return {"fecha": None, "diaria": default_d, "mensual": default_d*30.4, "anual": default_d*12,
+                "_status": "manual", "_source": "manual"}
+
+    # Intento 1: 620706/620707/620708 (BISE y luego BIE)
+    base = "https://www.inegi.org.mx/app/api/indicadores/desarrolladores/jsonxml/INDICATOR"
+    ids  = "620706,620707,620708"
+    urls = [
+        f"{base}/{ids}/es/00/true/BISE/2.0/{inegi_token}?type=json",
+        f"{base}/{ids}/es/00/true/BIE/2.0/{inegi_token}?type=json",
+    ]
     for u in urls:
         try:
             r = http_session(20).get(u, timeout=20)
             if r.status_code != 200:
-                last_err = f"HTTP {r.status_code}"
                 continue
             data = r.json()
-            series = data.get("Series") or data.get("series") or []
+            series = data.get("Series") or []
             if not series or len(series) < 3:
-                last_err = "Sin 'Series'"; continue
+                continue
 
             def last_obs(s):
                 obs = s.get("OBSERVATIONS") or s.get("observations") or []
@@ -561,17 +572,16 @@ def get_uma(inegi_token: str):
             if any(v is not None for v in (d_val, m_val, a_val)):
                 return {
                     "fecha": get_f(d_obs) or get_f(m_obs) or get_f(a_obs),
-                    "diaria":  d_val,
-                    "mensual": m_val if m_val is not None else (d_val*30.4 if d_val is not None else None),
-                    "anual":   a_val if a_val is not None else (m_val*12 if m_val is not None else (d_val*365 if d_val is not None else None)),
+                    "diaria":  d_val if d_val is not None else (m_val/30.4 if m_val is not None else default_d),
+                    "mensual": m_val if m_val is not None else (d_val*30.4 if d_val is not None else default_d*30.4),
+                    "anual":   a_val if a_val is not None else ((m_val*12) if m_val is not None else (d_val*365 if d_val is not None else default_d*12)),
                     "_status": "ok",
                     "_source": "INEGI:620706/7/8",
                 }
-        except Exception as e:
-            last_err = str(e)
-            continue
+        except Exception:
+            pass
 
-    # Intento 2 (fallback): serie 628644 (mensual). Derivamos diaria/anual.
+    # Intento 2: 628644 (mensual); derivar diaria/anual
     try:
         u2 = f"{base}/628644/00000/es/false/BISE/2.0/{inegi_token}/?type=json"
         r2 = http_session(20).get(u2, timeout=20)
@@ -583,16 +593,17 @@ def get_uma(inegi_token: str):
                 last = obs[-1]
                 m_val = _num(last.get("ObsValue"))
                 if m_val is not None:
-                    d_val = round(m_val/30.4, 6)
-                    a_val = round(m_val*12, 6)
+                    d_val = m_val/30.4
+                    a_val = m_val*12
                     return {"fecha": last.get("TIME_PERIOD") or last.get("TimePeriod") or last.get("TIME_PERIOD_ID"),
                             "diaria": d_val, "mensual": m_val, "anual": a_val,
                             "_status":"ok","_source":"INEGI:628644"}
-    except Exception as e:
-        last_err = str(e)
+    except Exception:
+        pass
 
-    return {"fecha": None, "diaria": None, "mensual": None, "anual": None,
-            "_status": f"err: {last_err}", "_source": "fallback"}
+    # Fallback final: manual
+    return {"fecha": None, "diaria": default_d, "mensual": default_d*30.4, "anual": default_d*12,
+            "_status": "manual", "_source": "manual"}
 
 
 def _probe(fn, ok_condition):
@@ -697,10 +708,11 @@ if st.button("Generar Excel"):
 
     
     uma = get_uma(INEGI_TOKEN)
-    if uma.get("diaria") is None and uma_manual > 0:
-        uma["diaria"]  = uma_manual
-        uma["mensual"] = uma_manual * 30.4
-        uma["anual"]   = uma["mensual"] * 12
+    if uma.get("diaria") is None:
+        d = DEFAULT_UMA_DIARIA
+        uma["diaria"]  = d
+        uma["mensual"] = d * 30.4
+        uma["anual"]   = d * 12
 
 
     fred_rows = None
