@@ -511,25 +511,28 @@ SIE_SERIES = {
 }
 
 @st.cache_data(ttl=60*60)
+
 def get_uma(inegi_token: str):
     """
     UMA nacional: 620706 (diaria), 620707 (mensual), 620708 (anual)
+    Fallback alterno: 628644 (mensual promedio), del cual derivamos diaria/anual.
     Retorna: {'fecha','diaria','mensual','anual','_status','_source'}
     """
     base = "https://www.inegi.org.mx/app/api/indicadores/desarrolladores/jsonxml/INDICATOR"
-    ids = "620706,620707,620708"
+    ids  = "620706,620707,620708"
     urls = [
         f"{base}/{ids}/es/00/true/BISE/2.0/{inegi_token}?type=json",
-        f"{base}/{ids}/es/00/true/BIE/2.0/{inegi_token}?type=json",  
+        f"{base}/{ids}/es/00/true/BIE/2.0/{inegi_token}?type=json",
     ]
 
     def _num(x):
         try:
             return float(str(x).replace(",", ""))
-        except:
+        except Exception:
             return None
 
     last_err = None
+    # Intento 1: series directas diaria/mensual/anual
     for u in urls:
         try:
             r = http_session(20).get(u, timeout=20)
@@ -538,37 +541,59 @@ def get_uma(inegi_token: str):
                 continue
             data = r.json()
             series = data.get("Series") or data.get("series") or []
-            if not series:
+            if not series or len(series) < 3:
                 last_err = "Sin 'Series'"; continue
 
             def last_obs(s):
                 obs = s.get("OBSERVATIONS") or s.get("observations") or []
                 return obs[-1] if obs else None
 
-            d_obs = last_obs(series[0]); m_obs = last_obs(series[1]) if len(series)>1 else None
-            a_obs = last_obs(series[2]) if len(series)>2 else None
+            d_obs = last_obs(series[0]); m_obs = last_obs(series[1]); a_obs = last_obs(series[2])
 
             def get_v(o):
                 if not o: return None
                 return _num(o.get("OBS_VALUE") or o.get("value"))
             def get_f(o):
                 if not o: return None
-                return o.get("TIME_PERIOD") or o.get("periodo") or o.get("time_period") or o.get("fecha")
+                return o.get("TIME_PERIOD") or o.get("time_period") or o.get("TIME_PERIOD_ID") or o.get("time_period_id")
 
-            return {
-                "fecha": get_f(d_obs) or get_f(m_obs) or get_f(a_obs),
-                "diaria":  get_v(d_obs),
-                "mensual": get_v(m_obs),
-                "anual":   get_v(a_obs),
-                "_status": "ok",
-                "_source": "INEGI",
-            }
+            d_val, m_val, a_val = get_v(d_obs), get_v(m_obs), get_v(a_obs)
+            if any(v is not None for v in (d_val, m_val, a_val)):
+                return {
+                    "fecha": get_f(d_obs) or get_f(m_obs) or get_f(a_obs),
+                    "diaria":  d_val,
+                    "mensual": m_val if m_val is not None else (d_val*30.4 if d_val is not None else None),
+                    "anual":   a_val if a_val is not None else (m_val*12 if m_val is not None else (d_val*365 if d_val is not None else None)),
+                    "_status": "ok",
+                    "_source": "INEGI:620706/7/8",
+                }
         except Exception as e:
             last_err = str(e)
             continue
 
+    # Intento 2 (fallback): serie 628644 (mensual). Derivamos diaria/anual.
+    try:
+        u2 = f"{base}/628644/00000/es/false/BISE/2.0/{inegi_token}/?type=json"
+        r2 = http_session(20).get(u2, timeout=20)
+        if r2.status_code == 200:
+            js = r2.json()
+            series = js.get("Series") or []
+            obs = series[0].get("Obs") if series else None
+            if obs:
+                last = obs[-1]
+                m_val = _num(last.get("ObsValue"))
+                if m_val is not None:
+                    d_val = round(m_val/30.4, 6)
+                    a_val = round(m_val*12, 6)
+                    return {"fecha": last.get("TIME_PERIOD") or last.get("TimePeriod") or last.get("TIME_PERIOD_ID"),
+                            "diaria": d_val, "mensual": m_val, "anual": a_val,
+                            "_status":"ok","_source":"INEGI:628644"}
+    except Exception as e:
+        last_err = str(e)
+
     return {"fecha": None, "diaria": None, "mensual": None, "anual": None,
             "_status": f"err: {last_err}", "_source": "fallback"}
+
 
 def _probe(fn, ok_condition):
     t0 = time.time()
