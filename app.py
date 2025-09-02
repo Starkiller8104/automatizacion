@@ -755,6 +755,15 @@ if st.button("Generar Excel"):
     tiie182= _ffill_by_dates(m_t182, header_dates)
     tiie_obj = _ffill_by_dates(m_obj, header_dates)
 
+    # Fallback: si tiie182 quedó vacío por fechas, usa oportuno de SIE y repite
+    try:
+        if all(v is None for v in tiie182):
+            _, v182_op = sie_latest(SIE_SERIES["TIIE_182"], BANXICO_TOKEN)
+            if v182_op is not None:
+                tiie182 = [round(float(v182_op), 4)] * 6
+    except Exception:
+        pass
+
     ws = wb.add_worksheet("Indicadores")
     ws.set_column(0, 6, 16)
 
