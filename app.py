@@ -1,6 +1,5 @@
 
 
-
 import io
 import re
 import time
@@ -292,17 +291,7 @@ def logo_base64(max_height_px: int = 40):
 
 
 BANXICO_TOKEN = "677aaedf11d11712aa2ccf73da4d77b6b785474eaeb2e092f6bad31b29de6609"
-INEGI_TOKEN   = "0146a9ed-b70f-4ea2-8781-744b900c19d1"
-
-# Valores manuales por defecto para UMA (si no hay token o falla el API)
-DEFAULT_UMA_DIARIA  = float(st.secrets.get("DEFAULT_UMA_DIARIA", os.getenv("DEFAULT_UMA_DIARIA", "113.0")))
-DEFAULT_UMA_MENSUAL = float(st.secrets.get("DEFAULT_UMA_MENSUAL", os.getenv("DEFAULT_UMA_MENSUAL", "3439.0")))
-DEFAULT_UMA_ANUAL   = float(st.secrets.get("DEFAULT_UMA_ANUAL", os.getenv("DEFAULT_UMA_ANUAL", "41273.0")))
-# Factores de conversión de referencia (si derivamos)
-UMA_MONTH_DAYS = 30.43
-UMA_YEAR_DAYS  = 365.25
-
-# Valor manual por defecto para UMA diaria (si no hay token o falla el API)
+INEGI_TOKEN = (st.secrets.get("INEGI_TOKEN", "") or os.getenv("INEGI_TOKEN", ""))
 FRED_TOKEN    = "b4f11681f441da78103a3706d0dab1cf"  
 
 def fred_fetch_series(series_id: str, start: str | None = None, end: str | None = None, units: str = "lin"):
@@ -523,14 +512,12 @@ SIE_SERIES = {
 
 @st.cache_data(ttl=60*60)
 
-
-
 def get_uma(inegi_token: str):
     """
-    UMA nacional:
-      - Sin token: regresa valores manuales fijos DEFAULT_UMA_*.
-      - Con token: intenta 620706/620707/620708 (BISE/BIE). Si falla, 628644 (mensual) y deriva diaria/anual con factores 30.43 y 365.25.
-      - Si todo falla: regresa DEFAULT_UMA_*.
+    UMA nacional desde INEGI únicamente.
+      - Intenta 620706/620707/620708 (BISE y luego BIE).
+      - Si no hay esas series, intenta 628644 (mensual) y deriva diaria/anual.
+      - Si no hay token o todo falla, regresa None en los tres campos.
     """
     def _num(x):
         try:
@@ -538,10 +525,8 @@ def get_uma(inegi_token: str):
         except Exception:
             return None
 
-    # Sin token => manual
     if not inegi_token:
-        return {"fecha": None, "diaria": DEFAULT_UMA_DIARIA, "mensual": DEFAULT_UMA_MENSUAL, "anual": DEFAULT_UMA_ANUAL,
-                "_status": "manual", "_source": "manual"}
+        return {"fecha": None, "diaria": None, "mensual": None, "anual": None, "_status": "no_token", "_source": "none"}
 
     base = "https://www.inegi.org.mx/app/api/indicadores/desarrolladores/jsonxml/INDICATOR"
     ids  = "620706,620707,620708"
@@ -549,6 +534,7 @@ def get_uma(inegi_token: str):
         f"{base}/{ids}/es/00/true/BISE/2.0/{inegi_token}?type=json",
         f"{base}/{ids}/es/00/true/BIE/2.0/{inegi_token}?type=json",
     ]
+
     for u in urls:
         try:
             r = http_session(20).get(u, timeout=20)
@@ -574,11 +560,10 @@ def get_uma(inegi_token: str):
 
             d_val, m_val, a_val = get_v(d_obs), get_v(m_obs), get_v(a_obs)
             if any(v is not None for v in (d_val, m_val, a_val)):
-                # Derivaciones con factores estándar si falta uno
-                if d_val is None and m_val is not None: d_val = m_val / UMA_MONTH_DAYS
-                if d_val is None and a_val is not None: d_val = a_val / UMA_YEAR_DAYS
-                if m_val is None and d_val is not None: m_val = d_val * UMA_MONTH_DAYS
-                if a_val is None and d_val is not None: a_val = d_val * UMA_YEAR_DAYS
+                if d_val is None and m_val is not None: d_val = m_val / 30.43
+                if d_val is None and a_val is not None: d_val = a_val / 365.25
+                if m_val is None and d_val is not None: m_val = d_val * 30.43
+                if a_val is None and d_val is not None: a_val = d_val * 365.25
                 return {
                     "fecha": get_f(d_obs) or get_f(m_obs) or get_f(a_obs),
                     "diaria":  d_val,
@@ -590,7 +575,7 @@ def get_uma(inegi_token: str):
         except Exception:
             pass
 
-    # Fallback 628644 (mensual); derivamos con factores estándar
+    # Fallback: 628644 (mensual), derivar diaria/anual
     try:
         u2 = f"{base}/628644/00000/es/false/BISE/2.0/{inegi_token}/?type=json"
         r2 = http_session(20).get(u2, timeout=20)
@@ -602,18 +587,15 @@ def get_uma(inegi_token: str):
                 last = obs[-1]
                 m_val = _num(last.get("ObsValue"))
                 if m_val is not None:
-                    d_val = m_val / UMA_MONTH_DAYS
-                    a_val = d_val * UMA_YEAR_DAYS
+                    d_val = m_val / 30.43
+                    a_val = d_val * 365.25
                     return {"fecha": last.get("TIME_PERIOD") or last.get("TimePeriod") or last.get("TIME_PERIOD_ID"),
                             "diaria": d_val, "mensual": m_val, "anual": a_val,
                             "_status":"ok","_source":"INEGI:628644"}
     except Exception:
         pass
 
-    # Manual final
-    return {"fecha": None, "diaria": DEFAULT_UMA_DIARIA, "mensual": DEFAULT_UMA_MENSUAL, "anual": DEFAULT_UMA_ANUAL,
-            "_status": "manual", "_source": "manual"}
-
+    return {"fecha": None, "diaria": None, "mensual": None, "anual": None, "_status":"fail","_source":"none"}
 
 def _probe(fn, ok_condition):
     t0 = time.time()
@@ -717,10 +699,10 @@ if st.button("Generar Excel"):
 
     
     uma = get_uma(INEGI_TOKEN)
-    if uma.get("diaria") is None:
-        uma["diaria"]  = DEFAULT_UMA_DIARIA
-        uma["mensual"] = DEFAULT_UMA_MENSUAL
-        uma["anual"]   = DEFAULT_UMA_ANUAL
+    if uma.get("diaria") is None and uma_manual > 0:
+        uma["diaria"]  = uma_manual
+        uma["mensual"] = uma_manual * 30.4
+        uma["anual"]   = uma["mensual"] * 12
 
 
     fred_rows = None
@@ -742,7 +724,6 @@ if st.button("Generar Excel"):
     fmt_hdr   = wb.add_format({'bold': True, 'bg_color': '#F2F2F2', 'align':'center'})
     fmt_num4  = wb.add_format({'num_format': '0.0000'})
     fmt_num6  = wb.add_format({'num_format': '0.000000'})
-    fmt_num2  = wb.add_format({'num_format': '0.00'})
     fmt_wrap  = wb.add_format({'text_wrap': True})
 
     
@@ -800,35 +781,6 @@ if st.button("Generar Excel"):
     tiie91 = _ffill_by_dates(m_t91,  header_dates)
     tiie182= _ffill_by_dates(m_t182, header_dates)
     tiie_obj = _ffill_by_dates(m_obj, header_dates)
-
-
-    # --- Fallback robusto para TIIE 182 días ---
-    try:
-        # Si todo quedó en None (no hubo match de fechas o no hay histórico reciente),
-        # intentamos primero dato oportuno; si no existe (serie descontinuada),
-        # buscamos el ÚLTIMO valor histórico con una ventana amplia.
-        if all(v is None for v in tiie182):
-            v182 = None
-            # 1) Dato oportuno
-            try:
-                _, v182 = sie_latest(SIE_SERIES["TIIE_182"], BANXICO_TOKEN)
-            except Exception:
-                v182 = None
-            # 2) Último histórico amplio (si oportuno no trajo nada)
-            if v182 is None:
-                try:
-                    # rango amplio para capturar series descontinuadas
-                    hist = sie_range(SIE_SERIES["TIIE_182"], "1990-01-01", "2999-12-31")
-                    # filtrar N/E y vacíos
-                    vals = [try_float(o.get("dato")) for o in hist if try_float(o.get("dato")) is not None]
-                    v182 = vals[-1] if vals else None
-                except Exception:
-                    v182 = None
-            if v182 is not None:
-                tiie182 = [round(float(v182), 4)] * len(header_dates)
-    except Exception:
-        pass
-# --- /fallback ---
 
     ws = wb.add_worksheet("Indicadores")
     ws.set_column(0, 6, 16)
@@ -900,9 +852,9 @@ if st.button("Generar Excel"):
         ws.write(34, 1+i, cetes182[i])
         ws.write(35, 1+i, cetes364[i])
     ws.write(37, 0, "UMA:", fmt_bold)
-    ws.write(39, 0, "Diario:");  ws.write(39, 1, uma.get("diaria")), fmt_num2
-    ws.write(40, 0, "Mensual:"); ws.write(40, 1, uma.get("mensual")), fmt_num2
-    ws.write(41, 0, "Anual:");   ws.write(41, 1, uma.get("anual")), fmt_num2
+    ws.write(39, 0, "Diario:");  ws.write(39, 1, uma.get("diaria"))
+    ws.write(40, 0, "Mensual:"); ws.write(40, 1, uma.get("mensual"))
+    ws.write(41, 0, "Anual:");   ws.write(41, 1, uma.get("anual"))
 
 do_raw = globals().get('do_raw', True)
 if do_raw and ('wb' in globals()):
