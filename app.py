@@ -1127,26 +1127,95 @@ except Exception:
 try:
     # === Hoja 'Lógica de datos' (siempre en ruta normal) ===
     try:
-        wsh_ld = wb.add_worksheet("Lógica de datos")
+        # Intentamos reutilizar formatos si existen; si no, los creamos
         try:
-            wsh_ld.set_column(0, 0, 28)
-            wsh_ld.set_column(1, 1, 90)
+            fmt_all = fmt_all
+        except NameError:
+            fmt_all = wb.add_format({'font_name': 'Arial'})
+        try:
+            fmt_hdr = fmt_hdr
+        except NameError:
+            fmt_hdr = wb.add_format({'font_name': 'Arial', 'bold': True, 'bg_color': '#F2F2F2'})
+        try:
+            fmt_bold = fmt_bold
+        except NameError:
+            fmt_bold = wb.add_format({'font_name': 'Arial', 'bold': True})
+        fmt_wrap = wb.add_format({'font_name': 'Arial', 'text_wrap': True})
+    
+        wsh_ld = wb.add_worksheet("Lógica de datos")
+        # Layout: dos columnas (Sección / Contenido)
+        wsh_ld.set_column(0, 0, 28, fmt_all)
+        wsh_ld.set_column(1, 1, 95, fmt_all)
+        try:
             wsh_ld.hide_gridlines(2)
         except Exception:
             pass
-        # Encabezados y contenido mínimo
-        try:
-            wsh_ld.write(0, 0, "Sección")
-            wsh_ld.write(0, 1, "Contenido")
-            wsh_ld.write(1, 0, "Propósito")
-            wsh_ld.write(1, 1, "Este archivo explica el origen de los datos y cómo leerlos.")
-            wsh_ld.write(2, 0, "Fechas")
-            wsh_ld.write(2, 1, "Se generan para los últimos días hábiles (America/Mexico_City).")
-            wsh_ld.write(3, 0, "Arrastres (ffill)")
-            wsh_ld.write(3, 1, "Cuando no hay publicación del día, se usa el último valor disponible.")
-        except Exception:
-            pass
+        wsh_ld.write(0, 0, "Sección", fmt_hdr)
+        wsh_ld.write(0, 1, "Contenido", fmt_hdr)
+    
+        row = 1
+        def add(sec, txt):
+            nonlocal row
+            wsh_ld.write(row, 0, sec, fmt_bold)
+            wsh_ld.write(row, 1, txt, fmt_wrap)
+            row += 1
+    
+        add("Propósito", "Concentrar indicadores (FX, UDIS, TIIE, CETES) para \
+             ""los últimos 6 días hábiles (zona America/Mexico_City) en un Excel listo para reporteo.")
+    
+        add("Flujo de generación",
+            "1) Se calcula el encabezado de fechas con días hábiles (lun–vie).\n"
+            "2) Se consultan series en Banxico SIE por rango (fecha inicial ~30 días antes, fecha final hoy CDMX).\n"
+            "3) Se normalizan valores a numéricos.\n"
+            "4) Se aplica *forward-fill* por fecha (si no hay publicación, se usa el último valor disponible).\n"
+            "5) Se escribe la hoja **Indicadores** con formato: Arial, fecha `dd \"de\" mmm`, sin gridlines, y **sparklines**.\n"
+            "6) Se añaden **Metadatos** (zona, reglas, claves SIE) y esta hoja de **Lógica de datos**.")
+    
+        add("Fuentes / Series SIE",
+            "Banxico SIE (API REST). Series típicas: \n"
+            "• USD/MXN FIX (SF43718)\n"
+            "• EUR/MXN (SF46410)\n"
+            "• JPY/MXN (SF46406)\n"
+            "• UDIS (SP68257)\n"
+            "• CETES 28/91/182/364 (SF60634/SF60635/SF60636/SF60637)\n"
+            "• TIIE 28/91/182 (SF60653/SF60654/SF60655)\n"
+            "• Tasa objetivo (SF61745).\n"
+            "Nota: verifica claves vigentes en la hoja *Metadatos*.")
+    
+        add("Tratamiento de datos",
+            "• Conversión a numérico; vacíos -> `NA`.\n"
+            "• *Forward-fill* por fecha para cubrir días sin publicación.\n"
+            "• Tasas (TIIE, CETES, Objetivo): si el valor > 1.0, se divide entre 100 para mostrarlo en formato % (p.ej. 11.25% = 0.1125).\n"
+            "• UDIS y tipos de cambio se muestran con 6/4 decimales según corresponda.")
+    
+        add("Formato y presentación",
+            "• Fuente **Arial** en todas las hojas.\n"
+            "• Fechas del encabezado con formato `dd \"de\" mmm` (ej.: 09 de sep).\n"
+            "• Sin líneas de división (gridlines) en pantalla e impresión.\n"
+            "• **Sparklines** de tendencia en la columna H (rango B..G de cada indicador).\n"
+            "• Valores **arrastrados** se muestran en *itálica* y gris e incluyen leyenda ‘*’.")
+    
+        add("Rangos con nombre",
+            "RANGO_FECHAS, RANGO_USDMXN, RANGO_EURMXN, RANGO_JPYMXN, RANGO_UDIS,\n"
+            "RANGO_TOBJ, RANGO_TIIE28, RANGO_TIIE91, RANGO_TIIE182, RANGO_C28, RANGO_C91, RANGO_C182, RANGO_C364.")
+    
+        add("Trazabilidad y metadatos",
+            "Hoja **Metadatos**: fecha/hora de generación (CDMX), zona horaria, reglas aplicadas y claves SIE.\n"
+            "Para auditoría, cotejar las fechas del encabezado con el calendario hábil y la disponibilidad de Banxico.")
+    
+        add("Limitaciones conocidas",
+            "• Publicaciones de Banxico pueden tener rezagos o feriados.\n"
+            "• UDIS suelen moverse con calendario específico; si faltan últimas fechas, se usa arrastre.\n"
+            "• Si un valor viene nulo/inválido, se deja la celda vacía.")
+    
+        add("Hojas opcionales",
+            "Si se habilitan en la app: **FRED_v2**, **Noticias_RSS** (plantillas para integrar otras fuentes).")
+    
+        add("Contacto / versión",
+            "Generado automáticamente por la app de Streamlit; este documento resume reglas y supuestos del pipeline.")
+    
     except Exception:
+        # Si por alguna razón esta hoja falla, no se detiene la generación del archivo
         pass
     wb.close()
     try:
