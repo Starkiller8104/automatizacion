@@ -1125,20 +1125,6 @@ except Exception:
     pass
 
 try:
-    # ---- Hoja 'Manual' (siempre activa) ----
-    try:
-        ws_manual = wb.add_worksheet("Manual")
-        ws_manual.write(0, 0, "Sección")
-        ws_manual.write(0, 1, "Contenido")
-        ws_manual.write(1, 0, "Propósito")
-        ws_manual.write(1, 1, "Este archivo explica el origen de los datos y cómo leerlos.")
-        ws_manual.write(2, 0, "Fechas")
-        ws_manual.write(2, 1, "Se generan para los últimos días hábiles en zona America/Mexico_City.")
-        ws_manual.write(3, 0, "Leyenda de arrastre")
-        ws_manual.write(3, 1, "Cuando no hay publicación del día, se arrastra el último valor disponible.")
-    except Exception:
-        pass
-
     wb.close()
     try:
         st.session_state['xlsx_bytes'] = bio.getvalue()
@@ -1173,7 +1159,7 @@ except Exception:
 
     # Hoja Manual / Ayuda para usuarios
     try:
-        wsh = wb.add_worksheet("Manual")
+        wsh = wb.add_worksheet("Lógica de datos")
         wsh.set_column(0, 0, 28, fmt_all)
         wsh.set_column(1, 1, 90, fmt_all)
         wsh.hide_gridlines(2)
