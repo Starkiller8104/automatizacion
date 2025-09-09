@@ -626,14 +626,20 @@ with st.sidebar.expander("🔑 Tokens de APIs", expanded=False):
 
 with st.expander("📄 Selecciona las Hojas del Excel que contendra tu archivo", expanded=True):
     st.caption("Activa/desactiva hojas opcionales del archivo Excel")
-    want_fred   = st.checkbox("Agregar hoja FRED", value=st.session_state.get("want_fred", True))
-    want_news   = st.checkbox("Agregar hoja Noticias_RSS", value=st.session_state.get("want_news", True))
-    want_charts = st.checkbox("Agregar hoja 'Gráficos' (últimos 12)", value=st.session_state.get("want_charts", True))
-    want_raw    = st.checkbox("Agregar hoja 'Datos crudos' (últimos 12)", value=st.session_state.get("want_raw", True))
+    want_fred   = st.checkbox("Agregar hoja FRED", value=st.session_state.get("want_fred", False))
+    want_news   = st.checkbox("Agregar hoja Noticias_RSS", value=st.session_state.get("want_news", False))
+    want_charts = st.checkbox("Agregar hoja 'Gráficos' (últimos 12)", value=st.session_state.get("want_charts", False))
+    want_raw    = st.checkbox("Agregar hoja 'Datos crudos' (últimos 12)", value=st.session_state.get("want_raw", False))
     st.session_state["want_fred"] = want_fred
     st.session_state["want_news"] = want_news
     st.session_state["want_charts"] = want_charts
     st.session_state["want_raw"] = want_raw
+
+# Sincroniza flags de Excel con las opciones del UI
+do_fred   = st.session_state.get("want_fred", False)
+do_news   = st.session_state.get("want_news", False)
+do_charts = st.session_state.get("want_charts", False)
+do_raw    = st.session_state.get("want_raw", False)
 
 # Parámetros fijos (Opciones retiradas del UI)
 movex_win = 5
@@ -826,8 +832,9 @@ if st.button("Generar Excel"):
 
     ws.write(19, 0, "UDIS:", fmt_bold)
     ws.write(21, 0, "UDIS: ")
-    for i, d in enumerate(header_dates):
-        ws.write(21, 1+i, m_udis.get(d), fmt_num6)
+    udis_vals = _ffill_by_dates(m_udis, header_dates)
+    for i, v in enumerate(udis_vals):
+        ws.write(21, 1+i, v, fmt_num6)
 
     ws.write(23, 0, "TASAS TIIE:", fmt_bold)
     ws.write(25, 0, "TIIE objetivo:")
@@ -904,7 +911,7 @@ if do_charts and ('wb' in globals()):
 
 
 try:
-        if fred_rows:
+        if fred_rows and st.session_state.get('want_fred', False):
             wsname  = f"FRED_{fred_id[:25]}"
             wsfred  = wb.add_worksheet(wsname)
 
@@ -973,7 +980,7 @@ try:
         fred_key = st.secrets.get("FRED_API_KEY", "").strip()
     except Exception:
         pass
-    if fred_key and st.session_state.get('want_fred', True):
+    if fred_key and st.session_state.get('want_fred', False):
         end_dt = datetime.now()
         start_dt = end_dt - timedelta(days=180)
         fred_series = {
@@ -1000,7 +1007,7 @@ try:
         _news = _mx_news_get_v1(max_items=12)
     except Exception:
         _news = []
-    if _news and st.session_state.get('want_news', True):
+    if _news and st.session_state.get('want_news', False):
         _mx_news_write_v1(wb, _news, sheet_name="Noticias_RSS")
 except Exception:
     pass
