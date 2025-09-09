@@ -1125,30 +1125,29 @@ except Exception:
     pass
 
 try:
-        # === Hoja 'Lógica de datos' (siempre en ruta normal) ===
+    # === Hoja 'Lógica de datos' (siempre en ruta normal) ===
+    try:
+        wsh_ld = wb.add_worksheet("Lógica de datos")
         try:
-            wsh_ld = wb.add_worksheet("Lógica de datos")
-            # Formatos si existen; si no, se ignoran
-            try:
-                wsh_ld.set_column(0, 0, 28)
-                wsh_ld.set_column(1, 1, 90)
-                wsh_ld.hide_gridlines(2)
-            except Exception:
-                pass
-            # Encabezados y contenido mínimo
-            try:
-                wsh_ld.write(0, 0, "Sección")
-                wsh_ld.write(0, 1, "Contenido")
-                wsh_ld.write(1, 0, "Propósito")
-                wsh_ld.write(1, 1, "Este archivo explica el origen de los datos y cómo leerlos.")
-                wsh_ld.write(2, 0, "Fechas")
-                wsh_ld.write(2, 1, "Se generan para los últimos días hábiles (America/Mexico_City).")
-                wsh_ld.write(3, 0, "Arrastres (ffill)")
-                wsh_ld.write(3, 1, "Cuando no hay publicación del día, se usa el último valor disponible.")
-            except Exception:
-                pass
+            wsh_ld.set_column(0, 0, 28)
+            wsh_ld.set_column(1, 1, 90)
+            wsh_ld.hide_gridlines(2)
         except Exception:
             pass
+        # Encabezados y contenido mínimo
+        try:
+            wsh_ld.write(0, 0, "Sección")
+            wsh_ld.write(0, 1, "Contenido")
+            wsh_ld.write(1, 0, "Propósito")
+            wsh_ld.write(1, 1, "Este archivo explica el origen de los datos y cómo leerlos.")
+            wsh_ld.write(2, 0, "Fechas")
+            wsh_ld.write(2, 1, "Se generan para los últimos días hábiles (America/Mexico_City).")
+            wsh_ld.write(3, 0, "Arrastres (ffill)")
+            wsh_ld.write(3, 1, "Cuando no hay publicación del día, se usa el último valor disponible.")
+        except Exception:
+            pass
+    except Exception:
+        pass
     wb.close()
     try:
         st.session_state['xlsx_bytes'] = bio.getvalue()
