@@ -475,6 +475,34 @@ def _ffill_by_dates(map_vals: dict, dates: list):
         out.append(last)
     return out
 
+def _ffill_with_flags(map_vals: dict, dates: list):
+    # Similar a _ffill_by_dates pero devuelve (valores, flags_ffill)
+    from datetime import datetime
+    def to_dt(s):
+        try:
+            if isinstance(s, str) and "/" in s:
+                return datetime.strptime(s, "%d/%m/%Y").date()
+            return datetime.fromisoformat(str(s)).date()
+        except Exception:
+            return None
+    normalized = {}
+    for k, v in map_vals.items():
+        kd = to_dt(k)
+        if kd:
+            normalized[kd.isoformat()] = v
+    out_vals, out_flags = [], []
+    last = None
+    for ds in dates:
+        key = ds if isinstance(ds, str) else (ds.isoformat() if ds else None)
+        if key in normalized and normalized[key] is not None:
+            last = normalized[key]
+            out_vals.append(last)
+            out_flags.append(False)
+        else:
+            out_vals.append(last)
+            out_flags.append(last is not None)
+    return out_vals, out_flags
+
 def rolling_movex_for_last6(window:int=20):
     end = today_cdmx()
     start = end - timedelta(days=2*365)
@@ -704,6 +732,26 @@ if st.button("Generar Excel"):
     fmt_num6  = wb.add_format({'num_format': '0.000000'})
     fmt_wrap  = wb.add_format({'text_wrap': True})
     fmt_date_dm = wb.add_format({'num_format': 'dd "de" mmm'})
+
+    # Formatos adicionales
+    fmt_num4_ffill = wb.add_format({'num_format': '0.0000', 'italic': True, 'font_color': '#666666'})
+    fmt_num6_ffill = wb.add_format({'num_format': '0.000000', 'italic': True, 'font_color': '#666666'})
+    fmt_pct2      = wb.add_format({'num_format': '0.00%'})
+    fmt_pct2_ffill= wb.add_format({'num_format': '0.00%', 'italic': True, 'font_color': '#666666'})
+
+    # Branding y layout
+    try:
+        ws.insert_image('A1', 'logo.png')
+    except Exception:
+        pass
+
+    # Claridad inmediata: anchos y congelar encabezado (hasta B3)
+    ws.set_column(0, 0, 22)   # columna A (rótulos)
+    ws.set_column(1, 7, 13)   # columnas B..H (fechas y sparklines)
+    ws.freeze_panes(2, 1)
+
+    # Leyenda para arrastres (ffill)
+    ws.write(0, 7, '* Valor arrastrado cuando no hay publicación del día', wb.add_format({'italic': True, 'font_color': '#666'}))
     end = today_cdmx()
     # Últimos 6 días hábiles (lun-vie), incluyendo hoy si aplica
     header_dates_date = []
@@ -734,17 +782,17 @@ if st.button("Generar Excel"):
     m_jpy  = _as_map_from_range('JPY_MXN')
     m_udis = _as_map_from_range('UDIS')
     # Alinear a header_dates con forward-fill para evitar huecos en días sin publicación
-    fix_vals = _ffill_by_dates(m_fix, header_dates)
-    eur_vals = _ffill_by_dates(m_eur, header_dates)
-    jpy_vals = _ffill_by_dates(m_jpy, header_dates)
+    fix_vals, fix_fflags = _ffill_with_flags(m_fix, header_dates)
+    eur_vals, eur_fflags = _ffill_with_flags(m_eur, header_dates)
+    jpy_vals, jpy_fflags = _ffill_with_flags(m_jpy, header_dates)
     m_c28  = _as_map_from_range('CETES_28')
     m_c91  = _as_map_from_range('CETES_91')
     m_c182 = _as_map_from_range('CETES_182')
     m_c364 = _as_map_from_range('CETES_364')
-    cetes28 = _ffill_by_dates(m_c28, header_dates)
-    cetes91 = _ffill_by_dates(m_c91, header_dates)
-    cetes182 = _ffill_by_dates(m_c182, header_dates)
-    cetes364 = _ffill_by_dates(m_c364, header_dates)
+    cetes28, cetes28_f = _ffill_with_flags(m_c28, header_dates)
+    cetes91, cetes91_f = _ffill_with_flags(m_c91, header_dates)
+    cetes182, cetes182_f = _ffill_with_flags(m_c182, header_dates)
+    cetes364, cetes364_f = _ffill_with_flags(m_c364, header_dates)
 
 
     try:
@@ -778,10 +826,10 @@ if st.button("Generar Excel"):
         if _f and (_v is not None):
             m_obj[_f.date().isoformat()] = _v
 
-    tiie28 = _ffill_by_dates(m_t28,  header_dates)
-    tiie91 = _ffill_by_dates(m_t91,  header_dates)
-    tiie182= _ffill_by_dates(m_t182, header_dates)
-    tiie_obj = _ffill_by_dates(m_obj, header_dates)
+    tiie28, tiie28_f = _ffill_with_flags(m_t28, header_dates)
+    tiie91, tiie91_f = _ffill_with_flags(m_t91, header_dates)
+    tiie182, tiie182_f = _ffill_with_flags(m_t182, header_dates)
+    tiie_obj, tiie_obj_f = _ffill_with_flags(m_obj, header_dates)
 
 
     # --- Fallback robusto para TIIE 182 días ---
@@ -821,7 +869,7 @@ if st.button("Generar Excel"):
     ws.write(5, 0, "DÓLAR AMERICANO.", fmt_bold)
     ws.write(6, 0, "Dólar/Pesos:")
     for i, v in enumerate(fix_vals):
-        ws.write(6, 1+i, v, fmt_num4)
+        ws.write(6, 1+i, v, fmt_num4_ffill if (fix_fflags[i]) else fmt_num4)
     ws.write(7, 0, "MONEX:")
 
     ws.write(8, 0, "Compra:")
@@ -841,7 +889,7 @@ if st.button("Generar Excel"):
     ws.write(11, 0, "YEN JAPONÉS.", fmt_bold)
     ws.write(12, 0, "Yen Japonés/Peso:")
     for i, v in enumerate(jpy_vals):
-        ws.write(12, 1+i, v, fmt_num6)
+        ws.write(12, 1+i, v, fmt_num6_ffill if (jpy_fflags[i]) else fmt_num6)
     ws.write(13, 0, "Dólar/Yen Japonés:")
     for i, v in enumerate(usd_jpy):
         ws.write(13, 1+i, v, fmt_num6)
@@ -849,7 +897,7 @@ if st.button("Generar Excel"):
     ws.write(15, 0, "EURO.", fmt_bold)
     ws.write(16, 0, "Euro/Peso:")
     for i, v in enumerate(eur_vals):
-        ws.write(16, 1+i, v, fmt_num6)
+        ws.write(16, 1+i, v, fmt_num6_ffill if (eur_fflags[i]) else fmt_num6)
     ws.write(17, 0, "Euro/Dólar:")
     for i, v in enumerate(eur_usd):
         ws.write(17, 1+i, v, fmt_num6)
@@ -866,9 +914,9 @@ if st.button("Generar Excel"):
         _v = try_float(o.get("dato"))
         if _f and (_v is not None):
             m_udis_r[_f.date().isoformat()] = _v
-    udis_vals = _ffill_by_dates(m_udis_r, header_dates)
+    udis_vals, udis_fflags = _ffill_with_flags(m_udis_r, header_dates)
     for i, v in enumerate(udis_vals):
-        ws.write(21, 1+i, v, fmt_num6)
+        ws.write(21, 1+i, v, fmt_num6_ffill if (udis_fflags[i]) else fmt_num6)
 
     ws.write(23, 0, "TASAS TIIE:", fmt_bold)
     ws.write(25, 0, "TIIE objetivo:")
@@ -876,20 +924,28 @@ if st.button("Generar Excel"):
     ws.write(27, 0, "TIIE 91 Días:")
     ws.write(28, 0, "TIIE 182 Días:")
     for i in range(6):
-        ws.write(25, 1+i, tiie_obj[i])
-        ws.write(26, 1+i, tiie28[i])
-        ws.write(27, 1+i, tiie91[i])
-        ws.write(28, 1+i, tiie182[i])
+        vobj = (tiie_obj[i]/100.0) if (tiie_obj[i] is not None) else None
+        ws.write(25, 1+i, vobj, fmt_pct2_ffill if (tiie_obj_f[i]) else fmt_pct2)
+        v28 = (tiie28[i]/100.0) if (tiie28[i] is not None) else None
+        ws.write(26, 1+i, v28, fmt_pct2_ffill if (tiie28_f[i]) else fmt_pct2)
+        v91 = (tiie91[i]/100.0) if (tiie91[i] is not None) else None
+        ws.write(27, 1+i, v91, fmt_pct2_ffill if (tiie91_f[i]) else fmt_pct2)
+        v182 = (tiie182[i]/100.0) if (tiie182[i] is not None) else None
+        ws.write(28, 1+i, v182, fmt_pct2_ffill if (tiie182_f[i]) else fmt_pct2)
     ws.write(30, 0, "CETES:", fmt_bold)
     ws.write(32, 0, "CETES 28 Días:")
     ws.write(33, 0, "CETES 91 Días:")
     ws.write(34, 0, "CETES 182 Días:")
     ws.write(35, 0, "CETES 364 Días:")
     for i in range(6):
-        ws.write(32, 1+i, cetes28[i])
-        ws.write(33, 1+i, cetes91[i])
-        ws.write(34, 1+i, cetes182[i])
-        ws.write(35, 1+i, cetes364[i])
+        v0 = (cetes28[i]/100.0) if (cetes28[i] is not None) else None
+        ws.write(32, 1+i, v0, fmt_pct2_ffill if (cetes28_f[i]) else fmt_pct2)
+        v1 = (cetes91[i]/100.0) if (cetes91[i] is not None) else None
+        ws.write(33, 1+i, v1, fmt_pct2_ffill if (cetes91_f[i]) else fmt_pct2)
+        v2 = (cetes182[i]/100.0) if (cetes182[i] is not None) else None
+        ws.write(34, 1+i, v2, fmt_pct2_ffill if (cetes182_f[i]) else fmt_pct2)
+        v3 = (cetes364[i]/100.0) if (cetes364[i] is not None) else None
+        ws.write(35, 1+i, v3, fmt_pct2_ffill if (cetes364_f[i]) else fmt_pct2)
     ws.write(37, 0, "UMA:", fmt_bold)
     ws.write(39, 0, "Diario:");  ws.write(39, 1, uma.get("diaria"))
     ws.write(40, 0, "Mensual:"); ws.write(40, 1, uma.get("mensual"))
