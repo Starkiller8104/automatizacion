@@ -713,6 +713,11 @@ if st.button("Generar Excel"):
     m_eur  = _as_map(sie_last_n(SIE_SERIES["EUR_MXN"], 6))
     m_jpy  = _as_map(sie_last_n(SIE_SERIES["JPY_MXN"], 6))
     m_udis = _as_map(sie_last_n(SIE_SERIES["UDIS"],    6))
+
+    # Alinear a header_dates con forward-fill para evitar huecos en días sin publicación
+    fix_vals = _ffill_by_dates(m_fix, header_dates)
+    eur_vals = _ffill_by_dates(m_eur, header_dates)
+    jpy_vals = _ffill_by_dates(m_jpy, header_dates)
     m_c28  = _as_map(sie_last_n(SIE_SERIES["CETES_28"],6))
     m_c91  = _as_map(sie_last_n(SIE_SERIES["CETES_91"],6))
     m_c182 = _as_map(sie_last_n(SIE_SERIES["CETES_182"],6))
@@ -729,13 +734,8 @@ if st.button("Generar Excel"):
         movex6 = rolling_movex_for_last6(window=movex_win)
     compra = [(x*(1 - margen_pct/100) if x is not None else None) for x in movex6]
     venta  = [(x*(1 + margen_pct/100) if x is not None else None) for x in movex6]
-
-    usd_jpy = []
-    eur_usd = []
-    for d in header_dates:
-        u = m_fix.get(d); j = m_jpy.get(d); e = m_eur.get(d)
-        usd_jpy.append((u/j) if (u and j) else None)
-        eur_usd.append((e/u) if (e and u) else None)
+    usd_jpy = [((u/j) if (u is not None and j not in (None, 0)) else None) for u,j in zip(fix_vals, jpy_vals)]
+    eur_usd = [((e/u) if (e is not None and u not in (None, 0)) else None) for e,u in zip(eur_vals, fix_vals)]
 
     try:
         uma  
@@ -794,8 +794,8 @@ if st.button("Generar Excel"):
     ws.write(3, 0, "TIPOS DE CAMBIO:", fmt_bold)
     ws.write(5, 0, "DÓLAR AMERICANO.", fmt_bold)
     ws.write(6, 0, "Dólar/Pesos:")
-    for i, d in enumerate(header_dates):
-        ws.write(6, 1+i, m_fix.get(d), fmt_num4)
+    for i, v in enumerate(fix_vals):
+        ws.write(6, 1+i, v, fmt_num4)
     ws.write(7, 0, "MONEX:")
 
     ws.write(8, 0, "Compra:")
@@ -814,16 +814,16 @@ if st.button("Generar Excel"):
 
     ws.write(11, 0, "YEN JAPONÉS.", fmt_bold)
     ws.write(12, 0, "Yen Japonés/Peso:")
-    for i, d in enumerate(header_dates):
-        ws.write(12, 1+i, m_jpy.get(d), fmt_num6)
+    for i, v in enumerate(jpy_vals):
+        ws.write(12, 1+i, v, fmt_num6)
     ws.write(13, 0, "Dólar/Yen Japonés:")
     for i, v in enumerate(usd_jpy):
         ws.write(13, 1+i, v, fmt_num6)
 
     ws.write(15, 0, "EURO.", fmt_bold)
     ws.write(16, 0, "Euro/Peso:")
-    for i, d in enumerate(header_dates):
-        ws.write(16, 1+i, m_eur.get(d), fmt_num6)
+    for i, v in enumerate(eur_vals):
+        ws.write(16, 1+i, v, fmt_num6)
     ws.write(17, 0, "Euro/Dólar:")
     for i, v in enumerate(eur_usd):
         ws.write(17, 1+i, v, fmt_num6)
