@@ -1168,6 +1168,73 @@ try:
     except Exception:
         # No bloquear la generación del archivo si falla esta hoja
         pass
+    # === Hoja "Metadatos" (crear siempre, al final) ===
+    try:
+        # Reutiliza formatos si existen; si no, crea mínimos
+        try:
+            fmt_all = fmt_all
+        except NameError:
+            fmt_all = wb.add_format({"font_name": "Arial"})
+        try:
+            fmt_bold = fmt_bold
+        except NameError:
+            fmt_bold = wb.add_format({"font_name": "Arial", "bold": True})
+    
+        # Crear hoja; si ya existe, usar nombre alterno
+        try:
+            wsm = wb.add_worksheet("Metadatos")
+        except Exception:
+            wsm = wb.add_worksheet("Meta datos")
+    
+        # Presentación básica
+        try:
+            wsm.set_column(0, 0, 28, fmt_all)
+            wsm.set_column(1, 1, 48, fmt_all)
+            wsm.hide_gridlines(2)
+        except Exception:
+            pass
+    
+        # Contenido
+        from datetime import datetime
+        ts = None
+        try:
+            ts = today_cdmx("%Y-%m-%d %H:%M (CDMX)")
+        except Exception:
+            ts = datetime.now().strftime("%Y-%m-%d %H:%M")
+        rows = [
+            ("Generado", ts),
+            ("Zona horaria", "America/Mexico_City"),
+            ("Fechas incluidas", "Últimos 6 días hábiles"),
+            ("Regla de faltantes", "Forward-fill (arrastre)"),
+            ("Formato de fecha", 'dd "de" mmm'),
+        ]
+        # Series SIE si existe el dict
+        try:
+            rows.extend([
+                ("SIE USD/MXN", SIE_SERIES.get("USD_FIX","")),
+                ("SIE EUR/MXN", SIE_SERIES.get("EUR_MXN","")),
+                ("SIE JPY/MXN", SIE_SERIES.get("JPY_MXN","")),
+                ("SIE UDIS", SIE_SERIES.get("UDIS","")),
+                ("SIE CETES 28", SIE_SERIES.get("CETES_28","")),
+                ("SIE CETES 91", SIE_SERIES.get("CETES_91","")),
+                ("SIE CETES 182", SIE_SERIES.get("CETES_182","")),
+                ("SIE CETES 364", SIE_SERIES.get("CETES_364","")),
+                ("SIE TIIE 28", SIE_SERIES.get("TIIE_28","")),
+                ("SIE TIIE 91", SIE_SERIES.get("TIIE_91","")),
+                ("SIE TIIE 182", SIE_SERIES.get("TIIE_182","")),
+                ("SIE Tasa objetivo", SIE_SERIES.get("OBJETIVO","")),
+            ])
+        except Exception:
+            pass
+        for i, (k, v) in enumerate(rows):
+            try:
+                wsm.write(i, 0, k, fmt_bold)
+            except Exception:
+                wsm.write(i, 0, k)
+            wsm.write(i, 1, v)
+    except Exception:
+        # No bloquear la generación del archivo si falla esta hoja
+        pass
     wb.close()
     try:
         st.session_state['xlsx_bytes'] = bio.getvalue()
