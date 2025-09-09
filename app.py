@@ -839,7 +839,17 @@ if st.button("Generar Excel"):
 
     ws.write(19, 0, "UDIS:", fmt_bold)
     ws.write(21, 0, "UDIS: ")
-    udis_vals = _ffill_by_dates(m_udis, header_dates)
+    # Trae rango suficiente para cubrir el span de header_dates (días hábiles)
+    udi_start = (header_dates_date[0] - timedelta(days=30)).isoformat()
+    udi_end   = header_dates_date[-1].isoformat()
+    udi_obs   = sie_range(SIE_SERIES["UDIS"], udi_start, udi_end)
+    m_udis_r  = {}
+    for o in udi_obs:
+        _f = parse_any_date(o.get("fecha"))
+        _v = try_float(o.get("dato"))
+        if _f and (_v is not None):
+            m_udis_r[_f.date().isoformat()] = _v
+    udis_vals = _ffill_by_dates(m_udis_r, header_dates)
     for i, v in enumerate(udis_vals):
         ws.write(21, 1+i, v, fmt_num6)
 
