@@ -656,8 +656,8 @@ with st.expander("📄 Selecciona las Hojas del Excel que contendra tu archivo",
     st.caption("Activa/desactiva hojas opcionales del archivo Excel")
     want_fred   = st.checkbox("Agregar hoja FRED", value=st.session_state.get("want_fred", False))
     want_news   = st.checkbox("Agregar hoja Noticias_RSS", value=st.session_state.get("want_news", False))
-    want_charts = st.checkbox("Agregar hoja 'Gráficos' (últimos 12)", value=st.session_state.get("want_charts", False))
-    want_raw    = st.checkbox("Agregar hoja 'Datos crudos' (últimos 12)", value=st.session_state.get("want_raw", False))
+    want_charts = st.checkbox("Agregar hoja 'Gráficos' ", value=st.session_state.get("want_charts", False))
+    want_raw    = st.checkbox("Agregar hoja 'Datos crudos' ", value=st.session_state.get("want_raw", False))
     st.session_state["want_fred"] = want_fred
     st.session_state["want_news"] = want_news
     st.session_state["want_charts"] = want_charts
@@ -823,7 +823,7 @@ if st.button("Generar Excel"):
     # --- Fallback robusto para TIIE 182 días ---
     try:
         # Si todo quedó en None (no hubo match de fechas o no hay histórico),
-        # intentamos con el dato oportuno y/o el último disponible de SIE.
+        # 
         if all(v is None for v in tiie182):
             v182_op = None
             try:
@@ -864,7 +864,7 @@ if st.button("Generar Excel"):
     ws.freeze_panes(2, 1)
 
     # Leyenda para arrastres (ffill)
-    ws.write(0, 7, '* Valor arrastrado cuando no hay publicación del día', wb.add_format({'font_name': 'Arial', 'italic': True, 'font_color': '#666'}))
+    ws.write(0, 7, '* Valor copiado cuando no hay publicación del día', wb.add_format({'font_name': 'Arial', 'italic': True, 'font_color': '#666'}))
 
 
     ws.write(1, 0, "Fecha:", fmt_bold)
@@ -1154,16 +1154,14 @@ try:
     
         row = 1
         # Contenido detallado
-        wsh_ld.write(row, 0, "Propósito", fmt_bold); wsh_ld.write(row, 1, "Concentrar indicadores (FX, UDIS, TIIE, CETES) para los últimos 6 días hábiles (America/Mexico_City) en un Excel listo para reporteo.", fmt_wrap); row += 1
-        wsh_ld.write(row, 0, "Flujo de generación", fmt_bold); wsh_ld.write(row, 1, "1) Encabezado con días hábiles.\n2) Consulta Banxico SIE por rango.\n3) Normalización numérica.\n4) Forward‑fill por fecha (arrastres).\n5) Escritura de hoja 'Indicadores' con formato y sparklines.\n6) Metadatos y esta hoja de Lógica de datos.", fmt_wrap); row += 1
+        wsh_ld.write(row, 0, "Propósito", fmt_bold); wsh_ld.write(row, 1, "Concentrar indicadores (FX, UDIS, TIIE, CETES) para los últimos 6 días hábiles.", fmt_wrap); row += 1
+        wsh_ld.write(row, 0, "Flujo de generación", fmt_bold); wsh_ld.write(row, 1, "1) Encabezado con días hábiles.\n2) Consulta Banxico SIE por rango.\n3) Normalización numérica.\n4) Forward‑fill por fecha.", fmt_wrap); row += 1
         wsh_ld.write(row, 0, "Fuentes / Series SIE", fmt_bold); wsh_ld.write(row, 1, "USD/MXN FIX (SF43718), EUR/MXN (SF46410), JPY/MXN (SF46406), UDIS (SP68257), CETES 28/91/182/364 (SF60634/5/6/7), TIIE 28/91/182 (SF60653/4/5), Tasa objetivo (SF61745).", fmt_wrap); row += 1
-        wsh_ld.write(row, 0, "Tratamiento de datos", fmt_bold); wsh_ld.write(row, 1, "• Conversión a numérico; vacíos → NA.\n• Forward‑fill por fecha cuando falte publicación.\n• Tasas en %: si valor > 1.0, dividir entre 100 (11.25% = 0.1125).\n• UDIS / FX con 6/4 decimales según corresponda.", fmt_wrap); row += 1
-        wsh_ld.write(row, 0, "Formato y presentación", fmt_bold); wsh_ld.write(row, 1, "Arial en todas las hojas; fechas 'dd \"de\" mmm'; sin gridlines; sparklines en columna H; arrastres en itálica y gris con leyenda *.", fmt_wrap); row += 1
+        wsh_ld.write(row, 0, "Tratamiento de datos", fmt_bold); wsh_ld.write(row, 1, "• Forward‑fill por fecha cuando falte publicación.\n• Tasas en %: si valor > 1.0, dividir entre 100 (11.25% = 0.1125).\n• UDIS / FX con 6/4 decimales según corresponda.", fmt_wrap); row += 1
         wsh_ld.write(row, 0, "Rangos con nombre", fmt_bold); wsh_ld.write(row, 1, "RANGO_FECHAS, RANGO_USDMXN, RANGO_EURMXN, RANGO_JPYMXN, RANGO_UDIS, RANGO_TOBJ, RANGO_TIIE28/91/182, RANGO_C28/91/182/364.", fmt_wrap); row += 1
         wsh_ld.write(row, 0, "Trazabilidad y metadatos", fmt_bold); wsh_ld.write(row, 1, "Ver hoja 'Metadatos': fecha/hora CDMX, zona, reglas y claves SIE. Cotejar encabezado con calendario hábil y disponibilidad de Banxico.", fmt_wrap); row += 1
-        wsh_ld.write(row, 0, "Limitaciones", fmt_bold); wsh_ld.write(row, 1, "Feriados/rezagos de publicación; UDIS con calendario propio; valores nulos permanecen vacíos.", fmt_wrap); row += 1
-        wsh_ld.write(row, 0, "Hojas opcionales", fmt_bold); wsh_ld.write(row, 1, "FRED_v2 y Noticias_RSS (si se habilitan en la app) para integrar otras fuentes.", fmt_wrap); row += 1
-        wsh_ld.write(row, 0, "Contacto / versión", fmt_bold); wsh_ld.write(row, 1, "Generado por la app de Streamlit; este documento resume reglas y supuestos del pipeline.", fmt_wrap); row += 1
+        wsh_ld.write(row, 0, "Limitaciones", fmt_bold); wsh_ld.write(row, 1, "Feriados/rezagos de publicación; valores nulos permanecen vacíos.", fmt_wrap); row += 1
+        wsh_ld.write(row, 0, "Versión", fmt_bold); wsh_ld.write(row, 1, "Indicadores de Tipo de Cambio Ver.3.0", fmt_wrap); row += 1
     
     except Exception:
         # No bloquear la generación del archivo si falla esta hoja
@@ -1204,9 +1202,6 @@ try:
         rows = [
             ("Generado", ts),
             ("Zona horaria", "America/Mexico_City"),
-            ("Fechas incluidas", "Últimos 6 días hábiles"),
-            ("Regla de faltantes", "Forward-fill (arrastre)"),
-            ("Formato de fecha", 'dd "de" mmm'),
         ]
         # Series SIE si existe el dict
         try:
