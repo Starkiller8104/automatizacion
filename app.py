@@ -51,9 +51,9 @@ def _fred_fetch_v1(series_id: str, start: str, end: str, api_key: str):
 
 def _fred_write_v1(wb, series_dict, sheet_name="FRED_v2"):
     ws = wb.add_worksheet(sheet_name)
-    fmt_bold = wb.add_format({"bold": True, "align": "center"})
-    fmt_date = wb.add_format({"num_format": "yyyy-mm-dd"})
-    fmt_num  = wb.add_format({"num_format": "#,##0.0000"})
+    fmt_bold = wb.add_format({'font_name': 'Arial', "bold": True, "align": "center"})
+    fmt_date = wb.add_format({'font_name': 'Arial', "num_format": "yyyy-mm-dd"})
+    fmt_num  = wb.add_format({'font_name': 'Arial', "num_format": "#,##0.0000"})
     headers = ["Fecha"] + list(series_dict.keys())
     ws.write_row(0, 0, headers, fmt_bold)
     fechas = sorted({d for vals in series_dict.values() for d, _ in vals})
@@ -121,9 +121,9 @@ def _mx_news_write_v1(wb, news_list, sheet_name="Noticias_RSS"):
     if not news_list:
         return None
     ws = wb.add_worksheet(sheet_name)
-    fmt_bold = wb.add_format({"bold": True})
-    fmt_link = wb.add_format({"font_color": "blue", "underline": 1})
-    fmt_date = wb.add_format({"num_format": "yyyy-mm-dd hh:mm"})
+    fmt_bold = wb.add_format({'font_name': 'Arial', "bold": True})
+    fmt_link = wb.add_format({'font_name': 'Arial', "font_color": "blue", "underline": 1})
+    fmt_date = wb.add_format({'font_name': 'Arial', "num_format": "yyyy-mm-dd hh:mm"})
     ws.write_row(0, 0, ["Título", "Link", "Fecha", "Fuente"], fmt_bold)
     for i, n in enumerate(news_list, start=1):
         ws.write_string(i, 0, n.get("title",""))
@@ -726,18 +726,19 @@ if st.button("Generar Excel"):
     wb = xlsxwriter.Workbook(bio, {'in_memory': True})
 
 
-    fmt_bold  = wb.add_format({'bold': True})
-    fmt_hdr   = wb.add_format({'bold': True, 'bg_color': '#F2F2F2', 'align':'center'})
-    fmt_num4  = wb.add_format({'num_format': '0.0000'})
-    fmt_num6  = wb.add_format({'num_format': '0.000000'})
-    fmt_wrap  = wb.add_format({'text_wrap': True})
-    fmt_date_dm = wb.add_format({'num_format': 'dd "de" mmm'})
+    fmt_bold  = wb.add_format({'font_name': 'Arial', 'bold': True})
+    fmt_hdr   = wb.add_format({'font_name': 'Arial', 'bold': True, 'bg_color': '#F2F2F2', 'align':'center'})
+    fmt_num4  = wb.add_format({'font_name': 'Arial', 'num_format': '0.0000'})
+    fmt_num6  = wb.add_format({'font_name': 'Arial', 'num_format': '0.000000'})
+    fmt_wrap  = wb.add_format({'font_name': 'Arial', 'text_wrap': True})
+    fmt_date_dm = wb.add_format({'font_name': 'Arial', 'num_format': 'dd "de" mmm'})
 
+    fmt_all = wb.add_format({'font_name': 'Arial', 'font_name': 'Arial'})
     # Formatos adicionales
-    fmt_num4_ffill = wb.add_format({'num_format': '0.0000', 'italic': True, 'font_color': '#666666'})
-    fmt_num6_ffill = wb.add_format({'num_format': '0.000000', 'italic': True, 'font_color': '#666666'})
-    fmt_pct2      = wb.add_format({'num_format': '0.00%'})
-    fmt_pct2_ffill= wb.add_format({'num_format': '0.00%', 'italic': True, 'font_color': '#666666'})
+    fmt_num4_ffill = wb.add_format({'font_name': 'Arial', 'num_format': '0.0000', 'italic': True, 'font_color': '#666666'})
+    fmt_num6_ffill = wb.add_format({'font_name': 'Arial', 'num_format': '0.000000', 'italic': True, 'font_color': '#666666'})
+    fmt_pct2      = wb.add_format({'font_name': 'Arial', 'num_format': '0.00%'})
+    fmt_pct2_ffill= wb.add_format({'font_name': 'Arial', 'num_format': '0.00%', 'italic': True, 'font_color': '#666666'})
 
     end = today_cdmx()
     # Últimos 6 días hábiles (lun-vie), incluyendo hoy si aplica
@@ -851,6 +852,11 @@ if st.button("Generar Excel"):
         ws.insert_image('A1', 'logo.png')
     except Exception:
         pass
+    try:
+        ws.set_column(0, 50, None, fmt_all)
+        ws.hide_gridlines(2)
+    except Exception:
+        pass
 
     # Claridad inmediata: anchos y congelar encabezado (hasta B3)
     ws.set_column(0, 0, 22)   # columna A (rótulos)
@@ -858,7 +864,7 @@ if st.button("Generar Excel"):
     ws.freeze_panes(2, 1)
 
     # Leyenda para arrastres (ffill)
-    ws.write(0, 7, '* Valor arrastrado cuando no hay publicación del día', wb.add_format({'italic': True, 'font_color': '#666'}))
+    ws.write(0, 7, '* Valor arrastrado cuando no hay publicación del día', wb.add_format({'font_name': 'Arial', 'italic': True, 'font_color': '#666'}))
 
 
     ws.write(1, 0, "Fecha:", fmt_bold)
@@ -955,6 +961,11 @@ if st.button("Generar Excel"):
 do_raw = globals().get('do_raw', True)
 if do_raw and ('wb' in globals()):
     ws3 = wb.add_worksheet("Datos crudos")
+    try:
+        ws3.set_column(0, 50, None, fmt_all)
+        ws3.hide_gridlines(2)
+    except Exception:
+        pass
     ws3.write(0,0,"Serie", fmt_hdr); ws3.write(0,1,"Fecha", fmt_hdr); ws3.write(0,2,"Valor", fmt_hdr)
     def _dump(ws_sheet, start_row, tag, pairs):
         r = start_row
@@ -981,6 +992,11 @@ if do_raw and ('wb' in globals()):
 do_charts = globals().get('do_charts', True)
 if do_charts and ('wb' in globals()):
     ws4 = wb.add_worksheet("Gráficos")
+    try:
+        ws4.set_column(0, 50, None, fmt_all)
+        ws4.hide_gridlines(2)
+    except Exception:
+        pass
     chart1 = wb.add_chart({'type': 'line'})
     chart1.add_series({
     'name':       "USD/MXN (FIX)",
@@ -1001,14 +1017,19 @@ if do_charts and ('wb' in globals()):
     ws4.insert_chart('B18', chart2, {'x_scale': 1.3, 'y_scale': 1.2})
 
 
-try:
+    try:
         if fred_rows and st.session_state.get('want_fred', False):
             wsname  = f"FRED_{fred_id[:25]}"
             wsfred  = wb.add_worksheet(wsname)
 
-            fmt_bold = wb.add_format({"bold": True})
-            fmt_num  = wb.add_format({"num_format": "#,##0.0000"})
-            fmt_date = wb.add_format({"num_format": "yyyy-mm-dd"})
+            try:
+                wsfred.set_column(0, 50, None, fmt_all)
+                wsfred.hide_gridlines(2)
+            except Exception:
+                pass
+            fmt_bold = wb.add_format({'font_name': 'Arial', "bold": True})
+            fmt_num  = wb.add_format({'font_name': 'Arial', "num_format": "#,##0.0000"})
+            fmt_date = wb.add_format({'font_name': 'Arial', "num_format": "yyyy-mm-dd"})
 
             
             wsfred.write(0, 0, f"FRED – {fred_id}", fmt_bold)
@@ -1062,7 +1083,7 @@ try:
                 ch.set_title({"name": f"{fred_id} (FRED)"})
                 ch.set_y_axis({"num_format": "#,##0.0000"})
                 wsfred.insert_chart("D4", ch, {"x_scale": 1.2, "y_scale": 1.2})
-except Exception as _e:
+    except Exception as _e:
         pass
 
 try:
@@ -1135,3 +1156,27 @@ try:
         )
 except Exception:
     pass
+
+    # Hoja Manual / Ayuda para usuarios
+    try:
+        wsh = wb.add_worksheet("Manual")
+        wsh.set_column(0, 0, 28, fmt_all)
+        wsh.set_column(1, 1, 90, fmt_all)
+        wsh.hide_gridlines(2)
+        wsh.write(0,0,"Sección", fmt_hdr); wsh.write(0,1,"Contenido", fmt_hdr)
+
+        manual_rows = [
+            ("Propósito", "Este archivo presenta indicadores de tipo de cambio, UDIS, TIIE y CETES para los últimos 6 días hábiles. Incluye tendencias (sparklines), metadatos y rangos con nombre para su integración en reportes."),
+            ("Fechas", "Se usan días hábiles (lun-vie). Formato de fecha en cabecera: dd \"de\" mmm (ej.: 09 de sep)."),
+            ("Fuentes", "Banxico SIE para FIX, EUR/MXN, JPY/MXN, UDIS, CETES (28/91/182/364) y TIIE (28/91/182) + SF61745 (tasa objetivo)."),
+            ("Cálculos derivados", "USD/JPY = USD/MXN ÷ JPY/MXN; Euro/Dólar = EUR/MXN ÷ USD/MXN. UDIS/TIIE/CETES se muestran con relleno (ffill) cuando no hay publicación del día."),
+            ("Relleno (ffill)", "Cuando el día hábil no tiene aún publicación, el valor se arrastra desde el último disponible. En la hoja Indicadores, los valores arrastrados se distinguen en itálicas color gris y con la leyenda *."),
+            ("Sparklines", "Columna H muestra la tendencia de B..G para cada indicador principal."),
+            ("Rangos con nombre", "RANGO_FECHAS, RANGO_USDMXN, RANGO_JPYMXN, RANGO_EURMXN, RANGO_UDIS, RANGO_TOBJ, RANGO_TIIE28, RANGO_TIIE91, RANGO_TIIE182, RANGO_C28, RANGO_C91, RANGO_C182, RANGO_C364."),
+            ("Branding", "Se inserta logo.png (si existe) en la hoja Indicadores."),
+            ("Trazabilidad", "Ver hoja Metadatos: zona horaria, reglas de negocio y claves SIE/FRED utilizadas."),
+        ]
+        for i,(k,v) in enumerate(manual_rows, start=1):
+            wsh.write(i,0,k, fmt_bold); wsh.write(i,1,v, fmt_wrap)
+    except Exception:
+        pass
