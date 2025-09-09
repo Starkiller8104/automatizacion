@@ -1158,25 +1158,25 @@ except Exception:
     pass
 
     # Hoja Manual / Ayuda para usuarios
-    try:
-        wsh = wb.add_worksheet("Lógica de datos")
-        wsh.set_column(0, 0, 28, fmt_all)
-        wsh.set_column(1, 1, 90, fmt_all)
-        wsh.hide_gridlines(2)
-        wsh.write(0,0,"Sección", fmt_hdr); wsh.write(0,1,"Contenido", fmt_hdr)
+try:
+    wsh = wb.add_worksheet("Lógica de datos")
+    wsh.set_column(0, 0, 28, fmt_all)
+    wsh.set_column(1, 1, 90, fmt_all)
+    wsh.hide_gridlines(2)
+    wsh.write(0,0,"Sección", fmt_hdr); wsh.write(0,1,"Contenido", fmt_hdr)
 
-        manual_rows = [
-            ("Propósito", "Este archivo presenta indicadores de tipo de cambio, UDIS, TIIE y CETES para los últimos 6 días hábiles. Incluye tendencias (sparklines), metadatos y rangos con nombre para su integración en reportes."),
-            ("Fechas", "Se usan días hábiles (lun-vie). Formato de fecha en cabecera: dd \"de\" mmm (ej.: 09 de sep)."),
-            ("Fuentes", "Banxico SIE para FIX, EUR/MXN, JPY/MXN, UDIS, CETES (28/91/182/364) y TIIE (28/91/182) + SF61745 (tasa objetivo)."),
-            ("Cálculos derivados", "USD/JPY = USD/MXN ÷ JPY/MXN; Euro/Dólar = EUR/MXN ÷ USD/MXN. UDIS/TIIE/CETES se muestran con relleno (ffill) cuando no hay publicación del día."),
-            ("Relleno (ffill)", "Cuando el día hábil no tiene aún publicación, el valor se arrastra desde el último disponible. En la hoja Indicadores, los valores arrastrados se distinguen en itálicas color gris y con la leyenda *."),
-            ("Sparklines", "Columna H muestra la tendencia de B..G para cada indicador principal."),
-            ("Rangos con nombre", "RANGO_FECHAS, RANGO_USDMXN, RANGO_JPYMXN, RANGO_EURMXN, RANGO_UDIS, RANGO_TOBJ, RANGO_TIIE28, RANGO_TIIE91, RANGO_TIIE182, RANGO_C28, RANGO_C91, RANGO_C182, RANGO_C364."),
-            ("Branding", "Se inserta logo.png (si existe) en la hoja Indicadores."),
-            ("Trazabilidad", "Ver hoja Metadatos: zona horaria, reglas de negocio y claves SIE/FRED utilizadas."),
-        ]
-        for i,(k,v) in enumerate(manual_rows, start=1):
-            wsh.write(i,0,k, fmt_bold); wsh.write(i,1,v, fmt_wrap)
-    except Exception:
-        pass
+    manual_rows = [
+        ("Propósito", "Este archivo presenta indicadores de tipo de cambio, UDIS, TIIE y CETES para los últimos 6 días hábiles. Incluye tendencias (sparklines), metadatos y rangos con nombre para su integración en reportes."),
+        ("Fechas", "Se usan días hábiles (lun-vie). Formato de fecha en cabecera: dd \"de\" mmm (ej.: 09 de sep)."),
+        ("Fuentes", "Banxico SIE para FIX, EUR/MXN, JPY/MXN, UDIS, CETES (28/91/182/364) y TIIE (28/91/182) + SF61745 (tasa objetivo)."),
+        ("Cálculos derivados", "USD/JPY = USD/MXN ÷ JPY/MXN; Euro/Dólar = EUR/MXN ÷ USD/MXN. UDIS/TIIE/CETES se muestran con relleno (ffill) cuando no hay publicación del día."),
+        ("Relleno (ffill)", "Cuando el día hábil no tiene aún publicación, el valor se arrastra desde el último disponible. En la hoja Indicadores, los valores arrastrados se distinguen en itálicas color gris y con la leyenda *."),
+        ("Sparklines", "Columna H muestra la tendencia de B..G para cada indicador principal."),
+        ("Rangos con nombre", "RANGO_FECHAS, RANGO_USDMXN, RANGO_JPYMXN, RANGO_EURMXN, RANGO_UDIS, RANGO_TOBJ, RANGO_TIIE28, RANGO_TIIE91, RANGO_TIIE182, RANGO_C28, RANGO_C91, RANGO_C182, RANGO_C364."),
+        ("Branding", "Se inserta logo.png (si existe) en la hoja Indicadores."),
+        ("Trazabilidad", "Ver hoja Metadatos: zona horaria, reglas de negocio y claves SIE/FRED utilizadas."),
+    ]
+    for i,(k,v) in enumerate(manual_rows, start=1):
+        wsh.write(i,0,k, fmt_bold); wsh.write(i,1,v, fmt_wrap)
+except Exception:
+    pass
