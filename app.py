@@ -739,19 +739,6 @@ if st.button("Generar Excel"):
     fmt_pct2      = wb.add_format({'num_format': '0.00%'})
     fmt_pct2_ffill= wb.add_format({'num_format': '0.00%', 'italic': True, 'font_color': '#666666'})
 
-    # Branding y layout
-    try:
-        ws.insert_image('A1', 'logo.png')
-    except Exception:
-        pass
-
-    # Claridad inmediata: anchos y congelar encabezado (hasta B3)
-    ws.set_column(0, 0, 22)   # columna A (rótulos)
-    ws.set_column(1, 7, 13)   # columnas B..H (fechas y sparklines)
-    ws.freeze_panes(2, 1)
-
-    # Leyenda para arrastres (ffill)
-    ws.write(0, 7, '* Valor arrastrado cuando no hay publicación del día', wb.add_format({'italic': True, 'font_color': '#666'}))
     end = today_cdmx()
     # Últimos 6 días hábiles (lun-vie), incluyendo hoy si aplica
     header_dates_date = []
@@ -859,6 +846,20 @@ if st.button("Generar Excel"):
     # --- /fallback ---
     ws = wb.add_worksheet("Indicadores")
     ws.set_column(0, 6, 16)
+    # Branding y layout
+    try:
+        ws.insert_image('A1', 'logo.png')
+    except Exception:
+        pass
+
+    # Claridad inmediata: anchos y congelar encabezado (hasta B3)
+    ws.set_column(0, 0, 22)   # columna A (rótulos)
+    ws.set_column(1, 7, 13)   # columnas B..H (fechas y sparklines)
+    ws.freeze_panes(2, 1)
+
+    # Leyenda para arrastres (ffill)
+    ws.write(0, 7, '* Valor arrastrado cuando no hay publicación del día', wb.add_format({'italic': True, 'font_color': '#666'}))
+
 
     ws.write(1, 0, "Fecha:", fmt_bold)
     from datetime import datetime as _dt
