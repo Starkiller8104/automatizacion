@@ -703,10 +703,18 @@ if st.button("Generar Excel"):
     fmt_num4  = wb.add_format({'num_format': '0.0000'})
     fmt_num6  = wb.add_format({'num_format': '0.000000'})
     fmt_wrap  = wb.add_format({'text_wrap': True})
-
-    
+    fmt_date_dm = wb.add_format({'num_format': 'dd "de" mmm'})
     end = today_cdmx()
-    header_dates = [(end - timedelta(days=i)).isoformat() for i in range(5, -1, -1)]
+    # Últimos 6 días hábiles (lun-vie), incluyendo hoy si aplica
+    header_dates_date = []
+    d = end
+    while len(header_dates_date) < 6:
+        if d.weekday() < 5:  # 0=lunes, 6=domingo
+            header_dates_date.append(d)
+        d -= timedelta(days=1)
+    header_dates_date = list(reversed(header_dates_date))
+    # Lista paralela en ISO para consultas a diccionarios de series
+    header_dates = [x.isoformat() for x in header_dates_date]
 
     def _as_map(pairs): return {d:v for d,v in pairs}
     m_fix  = _as_map(sie_last_n(SIE_SERIES["USD_FIX"], 6))
@@ -788,8 +796,9 @@ if st.button("Generar Excel"):
     ws.set_column(0, 6, 16)
 
     ws.write(1, 0, "Fecha:", fmt_bold)
-    for i, d in enumerate(header_dates):
-        ws.write(1, 1+i, d)
+    from datetime import datetime as _dt
+    for i, d in enumerate(header_dates_date):
+        ws.write_datetime(1, 1+i, _dt(d.year, d.month, d.day), fmt_date_dm)
 
     ws.write(3, 0, "TIPOS DE CAMBIO:", fmt_bold)
     ws.write(5, 0, "DÓLAR AMERICANO.", fmt_bold)
