@@ -717,19 +717,30 @@ if st.button("Generar Excel"):
     header_dates = [x.isoformat() for x in header_dates_date]
 
     def _as_map(pairs): return {d:v for d,v in pairs}
-    m_fix  = _as_map(sie_last_n(SIE_SERIES["USD_FIX"], 6))
-    m_eur  = _as_map(sie_last_n(SIE_SERIES["EUR_MXN"], 6))
-    m_jpy  = _as_map(sie_last_n(SIE_SERIES["JPY_MXN"], 6))
-    m_udis = _as_map(sie_last_n(SIE_SERIES["UDIS"],    6))
-
+    # Construir mapas FX con rango que cubra el span del encabezado (con buffer) y luego ffill
+    fx_start = (header_dates_date[0] - timedelta(days=30)).isoformat()
+    fx_end   = header_dates_date[-1].isoformat()
+    def _as_map_from_range(series_key):
+        obs = sie_range(SIE_SERIES[series_key], fx_start, fx_end)
+        m = {}
+        for o in obs:
+            _f = parse_any_date(o.get('fecha'))
+            _v = try_float(o.get('dato'))
+            if _f and (_v is not None):
+                m[_f.date().isoformat()] = _v
+        return m
+    m_fix  = _as_map_from_range('USD_FIX')
+    m_eur  = _as_map_from_range('EUR_MXN')
+    m_jpy  = _as_map_from_range('JPY_MXN')
+    m_udis = _as_map_from_range('UDIS')
     # Alinear a header_dates con forward-fill para evitar huecos en días sin publicación
     fix_vals = _ffill_by_dates(m_fix, header_dates)
     eur_vals = _ffill_by_dates(m_eur, header_dates)
     jpy_vals = _ffill_by_dates(m_jpy, header_dates)
-    m_c28  = _as_map(sie_last_n(SIE_SERIES["CETES_28"],6))
-    m_c91  = _as_map(sie_last_n(SIE_SERIES["CETES_91"],6))
-    m_c182 = _as_map(sie_last_n(SIE_SERIES["CETES_182"],6))
-    m_c364 = _as_map(sie_last_n(SIE_SERIES["CETES_364"],6))
+    m_c28  = _as_map_from_range('CETES_28')
+    m_c91  = _as_map_from_range('CETES_91')
+    m_c182 = _as_map_from_range('CETES_182')
+    m_c364 = _as_map_from_range('CETES_364')
     cetes28 = _ffill_by_dates(m_c28, header_dates)
     cetes91 = _ffill_by_dates(m_c91, header_dates)
     cetes182 = _ffill_by_dates(m_c182, header_dates)
@@ -755,11 +766,17 @@ if st.button("Generar Excel"):
 
         
     # TIIE (Banxico SIE) - usar histórico y alinear por fechas del encabezado
-    m_t28  = _as_map(sie_last_n(SIE_SERIES["TIIE_28"],  20))
-    m_t91  = _as_map(sie_last_n(SIE_SERIES["TIIE_91"],  20))
-    m_t182 = _as_map(sie_last_n(SIE_SERIES["TIIE_182"], 20))
+    m_t28  = _as_map_from_range('TIIE_28')
+    m_t91  = _as_map_from_range('TIIE_91')
+    m_t182 = _as_map_from_range('TIIE_182')
     # Objetivo (tasa de política monetaria)
-    m_obj  = _as_map(sie_last_n("SF61745", 20))
+    _obs_obj = sie_range('SF61745', fx_start, fx_end)
+    m_obj = {}
+    for o in _obs_obj:
+        _f = parse_any_date(o.get('fecha'))
+        _v = try_float(o.get('dato'))
+        if _f and (_v is not None):
+            m_obj[_f.date().isoformat()] = _v
 
     tiie28 = _ffill_by_dates(m_t28,  header_dates)
     tiie91 = _ffill_by_dates(m_t91,  header_dates)
