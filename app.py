@@ -706,7 +706,7 @@ if st.button("Generar Excel"):
 
     
     end = today_cdmx()
-header_dates = [(end - timedelta(days=i)).isoformat() for i in range(5, -1, -1)]
+    header_dates = [(end - timedelta(days=i)).isoformat() for i in range(5, -1, -1)]
 
     def _as_map(pairs): return {d:v for d,v in pairs}
     m_fix  = _as_map(sie_last_n(SIE_SERIES["USD_FIX"], 6))
