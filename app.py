@@ -705,10 +705,8 @@ if st.button("Generar Excel"):
     fmt_wrap  = wb.add_format({'text_wrap': True})
 
     
-    _fix_pairs = sie_last_n(SIE_SERIES["USD_FIX"], n=6)
-    header_dates = [d for d,_ in _fix_pairs]
-    if len(header_dates) < 6:
-        header_dates = ([""]*(6-len(header_dates))) + header_dates
+    end = today_cdmx()
+header_dates = [(end - timedelta(days=i)).isoformat() for i in range(5, -1, -1)]
 
     def _as_map(pairs): return {d:v for d,v in pairs}
     m_fix  = _as_map(sie_last_n(SIE_SERIES["USD_FIX"], 6))
