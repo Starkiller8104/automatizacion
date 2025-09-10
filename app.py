@@ -1416,8 +1416,33 @@ try:
             use_container_width=True,
         )
 
-except NameError:
+except NameError as e:
+    st.session_state['gen_error'] = str(e)
+    st.error('Error generando Excel (NameError). Revisa la sección de indicadores.')
+except Exception as e:
+    st.session_state['gen_error'] = str(e)
+    st.error('Error generando Excel. Detalle capturado en memoria de sesión.')
+
+
+# === Fallback global: mostrar botón de descarga si hay bytes en sesión ===
+try:
+    _xbytes = st.session_state.get('xlsx_bytes')
+    if _xbytes:
+        st.download_button(
+            "Descargar Excel",
+            data=_xbytes,
+            file_name=f"indicadores_{today_cdmx()}.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            use_container_width=True
+        )
+except Exception:
     pass
+
+# Si hubo error, muéstralo (si no se mostró ya)
+try:
+    _err = st.session_state.get('gen_error')
+    if _err:
+        st.info("Se detectó un error en la generación del archivo. Intenta nuevamente o revisa los logs.")
 except Exception:
     pass
 
