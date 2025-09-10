@@ -871,7 +871,7 @@ if st.button("Generar Excel"):
     ws.freeze_panes(2, 1)
 
     # Leyenda para arrastres (ffill)
-    ws.write(0, 7, '* Valor copiado cuando no hay publicación del día', wb.add_format({'font_name': 'Arial', 'italic': True, 'font_color': '#666'}))
+    ws.write(32, 7, '* Valor copiado cuando no hay publicación del día', wb.add_format({'font_name': 'Arial', 'italic': True, 'font_color': '#666'}))
 
 
     ws.write(1, 0, "Fecha:", fmt_bold)
