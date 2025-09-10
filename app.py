@@ -733,6 +733,7 @@ if st.button("Generar Excel"):
     fmt_num6  = wb.add_format({'font_name': 'Arial', 'num_format': '0.000000'})
     fmt_wrap  = wb.add_format({'font_name': 'Arial', 'text_wrap': True})
     fmt_date_dm = wb.add_format({'font_name': 'Arial', 'num_format': 'dd "de" mmm'})
+    fmt_title   = wb.add_format({'font_name': 'Arial', 'font_size': 14, 'bold': True, 'font_color': '#0D2356', 'align':'center', 'valign':'vcenter'})
 
     fmt_all = wb.add_format({'font_name': 'Arial', 'font_name': 'Arial'})
     # Formatos adicionales
@@ -846,8 +847,8 @@ if st.button("Generar Excel"):
     except Exception:
         pass
     # --- /fallback ---
-    ws.merge_range('B1:G1', 'INDICADORES DE TIPO DE CAMBIO', fmt_title)
     ws = wb.add_worksheet("Indicadores")
+    ws.merge_range('B1:G1', 'INDICADORES DE TIPO DE CAMBIO', fmt_title)
     ws.set_column(0, 6, 16)
     # ULTIMA MODIFICACION
     try:
