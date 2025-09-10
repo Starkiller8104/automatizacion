@@ -377,6 +377,16 @@ else:
     st.title("📈 Indicadores (últimos 5 días) + Noticias")
     st.caption("Excel con tipos de cambio, noticias y gráficos.")
 
+
+# --- Aviso de FIX antes de las 12:00 (hora CDMX) ---
+try:
+    if datetime.now(CDMX).hour < 12:
+        st.caption("El valor mostrado corresponde al último dato publicado por Banxico. "
+                   "El FIX del día se publica alrededor de las 12:00 p.m.")
+except Exception:
+    pass
+
+
 if _logo_b64:
  
     st.sidebar.image(f"data:image/png;base64,{_logo_b64}", use_container_width=True)
