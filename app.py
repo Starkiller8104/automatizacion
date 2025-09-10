@@ -1223,14 +1223,16 @@ except Exception:
     ws.write(15, 0, "EURO.", fmt_bold)
     ws.write(16, 0, "Euro/Peso:")
     for i, v in enumerate(eur_vals):
-        ws.write(16, 1+i, v, fmt_num4_ffill if (eur_fflags[i]) 
-try:
-    for _r in (6, 8, 9, 12, 13, 16):
-        ws.conditional_format(_r, 1, _r, 6, {'type': 'icon_set', 'icon_style': '3_arrows_gray'})
-except Exception:
-    pass
-else fmt_num4)
-    # --- Leyenda FIX Banxico para EUR en H17 ---
+        ws.write(16, 1+i, v, fmt_num4_ffill if (eur_fflags[i]) else fmt_num4)
+
+    # Indicadores de variación (flechas grises) en filas clave B..G
+    try:
+        for _r in (6, 8, 9, 12, 13, 16):
+            ws.conditional_format(_r, 1, _r, 6, {'type': 'icon_set', 'icon_style': '3_arrows_gray'})
+    except Exception:
+        pass
+
+# --- Leyenda FIX Banxico para EUR en H17 ---
     try:
         need_legend_eur = False
         _today = today_cdmx()
