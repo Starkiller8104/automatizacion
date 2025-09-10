@@ -21,29 +21,19 @@ from requests.adapters import HTTPAdapter, Retry
 
 @st.cache_data(ttl=60*60)
 def get_uma(inegi_token: str, http_session=None) -> dict:
-    """
-    Obtiene UMA (diaria, mensual, anual) desde INEGI.
-    Estrategia:
-      1) API INEGI (ids UMA) en varias combinaciones (BIE/BISE, 00/0700, true/false).
-      2) Scraping ligero de la página oficial https://www.inegi.org.mx/temas/uma/.
-      3) Fallback oficial embebido para 2025 (valores publicados por INEGI).
-    Retorna floats y campo '_status' para depuración.
-    """
+    """ Robust UMA retrieval with API -> Web -> 2025 fallback """
     import re, json
     from decimal import Decimal, ROUND_HALF_UP
-
     def _round2(v: float) -> float:
         try:
             return float(Decimal(str(v)).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP))
         except Exception:
             return float('nan')
-
     def _to_float(x) -> float:
         if x is None:
             return float('nan')
-        s = str(x).replace('\\u00a0', ' ').strip()
-        s = re.sub(r'[^0-9,\\.\\-]', '', s)
-        # normaliza separadores
+        s = str(x).replace('\u00a0', ' ').strip()
+        s = re.sub(r'[^0-9,\.\-]', '', s)
         if s.count('.') > 1 or s.count(',') > 1:
             s = s.replace(',', '')
         else:
@@ -57,27 +47,14 @@ def get_uma(inegi_token: str, http_session=None) -> dict:
             return float(s)
         except Exception:
             return float('nan')
-
     status = []
     sess = http_session(20) if callable(http_session) else None
     rq = (sess.get if sess else __import__('requests').get)
-    headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124 Safari/537.36",
-        "Accept": "text/html,application/json",
-        "Accept-Language": "es-MX,es;q=0.9"
-    }
-
-    # --- 1) API INEGI con IDs conocidos (diaria/mensual/anual) ---
-    # Nota: Estos IDs se usan comúnmente para UMA nacional.
+    headers = {"User-Agent": "Mozilla/5.0", "Accept": "text/html,application/json", "Accept-Language": "es-MX,es;q=0.9"}
     ids = "620706,620707,620708"
-    api_variants = [
-        ("00","true","BISE"),
-        ("00","true","BIE"),
-        ("0700","false","BISE"),
-        ("0700","false","BIE"),
-    ]
+    api_variants = [("00","true","BISE"),("00","true","BIE"),("0700","false","BISE"),("0700","false","BIE")]
     if inegi_token:
-        for geo, recent, source in api_variants:
+        for geo,recent,source in api_variants:
             try:
                 url = f"https://www.inegi.org.mx/app/api/indicadores/desarrolladores/jsonxml/INDICATOR/{ids}/es/{geo}/{recent}/{source}/2.0/{inegi_token}?type=json"
                 resp = rq(url, timeout=20, headers=headers)
@@ -95,11 +72,9 @@ def get_uma(inegi_token: str, http_session=None) -> dict:
                 d = _to_float((by_id.get("620706") or {}).get("OBS_VALUE") or (by_id.get("620706") or {}).get("value"))
                 m = _to_float((by_id.get("620707") or {}).get("OBS_VALUE") or (by_id.get("620707") or {}).get("value"))
                 a = _to_float((by_id.get("620708") or {}).get("OBS_VALUE") or (by_id.get("620708") or {}).get("value"))
-                if d == d or m == m or a == a:  # alguno no-NaN
-                    if d == d and (m != m or m is None):
-                        m = _round2(d * 30.4)
-                    if m == m and (a != a or a is None):
-                        a = _round2(m * 12)
+                if d == d or m == m or a == a:
+                    if d == d and (m != m or m is None): m = _round2(d * 30.4)
+                    if m == m and (a != a or a is None): a = _round2(m * 12)
                     status.append(f"API OK {source} {geo}/{recent}")
                     return {"diario": d if d==d else None, "mensual": m if m==m else None, "anual": a if a==a else None, "_status": " | ".join(status)}
                 else:
@@ -108,51 +83,35 @@ def get_uma(inegi_token: str, http_session=None) -> dict:
                 status.append(f"API {source} {geo}/{recent} err: {e}")
     else:
         status.append("Sin INEGI_TOKEN")
-
-    # --- 2) Scraping página oficial ---
     try:
         url = "https://www.inegi.org.mx/temas/uma/"
-        resp = rq(url, timeout=20, headers=headers)
-        html = resp.text
-        # Busca fila 2025 o la primera fila numérica
-        # Captura tabla de "Valor de la UMA"
+        resp = rq(url, timeout=20, headers=headers); html = resp.text
         sec = re.search(r'(Valor de la UMA|UMA value).*?<table.*?</table>', html, re.S|re.I)
         if sec:
             table = sec.group(0)
-            # Intenta localizar específicamente el renglón con 2025
             row = re.search(r'<tr[^>]*>\s*<td[^>]*>\s*2025\s*</td>(.*?)</tr>', table, re.S|re.I)
             if not row:
-                # toma la primera fila con 4 celdas numéricas
                 rows = re.findall(r'<tr[^>]*>(.*?)</tr>', table, re.S|re.I)
                 for r in rows:
                     tds = re.findall(r'<td[^>]*>(.*?)</td>', r, re.S|re.I)
                     if len(tds) >= 4 and re.search(r'\d', tds[1]) and re.search(r'\d', tds[2]) and re.search(r'\d', tds[3]):
-                        row = re.search(r'.*', r, re.S)
-                        break
+                        row = re.search(r'.*', r, re.S); break
             if row:
                 cells = re.findall(r'<td[^>]*>(.*?)</td>', row.group(0), re.S|re.I)
                 if len(cells) >= 4:
-                    d = _to_float(re.sub(r'<.*?>', ' ', cells[1]).strip())
-                    m = _to_float(re.sub(r'<.*?>', ' ', cells[2]).strip())
-                    a = _to_float(re.sub(r'<.*?>', ' ', cells[3]).strip())
-                    # Completa por reglas oficiales si hace falta
-                    if d == d and (m != m or m is None):
-                        m = _round2(d * 30.4)
-                    if m == m and (a != a or a is None):
-                        a = _round2(m * 12)
+                    d = _to_float(re.sub(r'<.*?>',' ',cells[1]).strip())
+                    m = _to_float(re.sub(r'<.*?>',' ',cells[2]).strip())
+                    a = _to_float(re.sub(r'<.*?>',' ',cells[3]).strip())
+                    if d == d and (m != m or m is None): m = _round2(d * 30.4)
+                    if m == m and (a != a or a is None): a = _round2(m * 12)
                     status.append("Web UMA OK")
                     return {"diario": d if d==d else None, "mensual": m if m==m else None, "anual": a if a==a else None, "_status": " | ".join(status)}
         status.append("Web UMA sin fila")
     except Exception as e:
         status.append(f"Web UMA err: {e}")
-
-    # --- 3) Fallback oficial 2025 (vigente desde 1-feb-2025) ---
     UMA_2025 = {"diario": 113.14, "mensual": 3439.46, "anual": 41273.52}
     status.append("Fallback 2025 (oficial INEGI)")
     return {"diario": UMA_2025["diario"], "mensual": UMA_2025["mensual"], "anual": UMA_2025["anual"], "_status": " | ".join(status)}
-
-
-
 def _fred_req_v1():
     s = requests.Session()
     try:
@@ -951,13 +910,35 @@ if st.button("Generar Excel"):
     cetes91_6 = pad6([v for _, v in sie_last_n(SIE_SERIES["CETES_91"], n=6)])
     cetes182_6 = pad6([v for _, v in sie_last_n(SIE_SERIES["CETES_182"], n=6)])
     cetes364_6 = pad6([v for _, v in sie_last_n(SIE_SERIES["CETES_364"], n=6)])
-
-    
     uma = get_uma(INEGI_TOKEN)
-    if ((uma.get("diaria") is None and uma.get("diario") is None) and uma_manual > 0):
-        uma["diaria"]  = uma_manual
-        uma["mensual"] = uma_manual * 30.4
-        uma["anual"]   = uma["mensual"] * 12
+
+    # Normaliza claves y aplica fallback si vienen vacías/NaN
+    from math import isnan
+    def _nan(x):
+        try:
+            return x is None or (isinstance(x, float) and isnan(x))
+        except Exception:
+            return x is None
+
+    # Coalesce claves 'diaria'/'diario'
+    d = uma.get("diaria")
+    if _nan(d):
+        d = uma.get("diario")
+
+    # Fallback oficial 2025 si no hay valor
+    if _nan(d):
+        d = 113.14  # UMA 2025 diaria
+    m = uma.get("mensual")
+    a = uma.get("anual")
+    if _nan(m) and not _nan(d):
+        m = round(d * 30.4, 2)
+    if _nan(a) and not _nan(m):
+        a = round(m * 12, 2)
+
+    uma["diaria"]  = d
+    uma["diario"]  = d
+    uma["mensual"] = m
+    uma["anual"]   = a
 
 
     fred_rows = None
@@ -1655,5 +1636,6 @@ except Exception:
             wsh.write(i,0,k, fmt_bold); wsh.write(i,1,v, fmt_wrap)
     except Exception:
         pass
+
 
 
