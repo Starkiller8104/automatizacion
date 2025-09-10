@@ -1290,22 +1290,43 @@ if st.button("Generar Excel"):
         ws.write(34, 1+i, v2, fmt_pct2_ffill if (cetes182_f[i]) else fmt_pct2)
         v3 = (cetes364[i]/100.0) if (cetes364[i] is not None) else None
         ws.write(35, 1+i, v3, fmt_pct2_ffill if (cetes364_f[i]) else fmt_pct2)
+
     ws.write(37, 0, "UMA:", fmt_bold)
-    def _write_uma(r, label, val):
-        ws.write(r, 0, label)
+    # --- Escribir UMA como moneda en columnas B..G y leyenda en H ---
+    fmt_money_local = wb.add_format({'font_name': 'Arial', 'num_format': '$#,##0.00'})
+    def _write_uma_row(row, label, val):
+        ws.write(row, 0, label)
         try:
             from math import isnan
             v = float(val) if val is not None else None
             if v is not None and not isnan(v):
-                ws.write_number(r, 1, round(v, 2))
+                for c in range(1, 7):   # B..G
+                    ws.write_number(row, c, round(v, 2), fmt_money_local)
             else:
-                ws.write(r, 1, "")
+                for c in range(1, 7):
+                    ws.write(row, c, "")
         except Exception:
-            ws.write(r, 1, "")
-    
-    _write_uma(39, "Diario:", uma.get("diaria") or uma.get("diario"))
-    _write_uma(40, "Mensual:", uma.get("mensual"))
-    _write_uma(41, "Anual:", uma.get("anual"))
+            for c in range(1, 7):
+                ws.write(row, c, "")
+
+    d = uma.get("diaria") or uma.get("diario")
+    m = uma.get("mensual")
+    a = uma.get("anual")
+
+    _write_uma_row(39, "Diario:", d)
+    _write_uma_row(40, "Mensual:", m)
+    _write_uma_row(41, "Anual:",   a)
+
+    # Leyenda en columna H explicando el arrastre B→G
+    try:
+        note_txt = ("UMA: valor vigente anual publicado por INEGI. "
+                    "Se replica de B→G porque no cambia día a día; "
+                    "Mensual = Diaria × 30.4; Anual = Mensual × 12. Fuente: INEGI.")
+        ws.write(38, 7, note_txt, fmt_note)
+    except Exception:
+        pass
+
+
     
 
 
