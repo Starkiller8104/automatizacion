@@ -954,7 +954,7 @@ if st.button("Generar Excel"):
 
     
     uma = get_uma(INEGI_TOKEN)
-    if uma.get("diaria") is None and uma_manual > 0:
+    if ((uma.get("diaria") is None and uma.get("diario") is None) and uma_manual > 0):
         uma["diaria"]  = uma_manual
         uma["mensual"] = uma_manual * 30.4
         uma["anual"]   = uma["mensual"] * 12
@@ -1322,7 +1322,7 @@ if st.button("Generar Excel"):
         except Exception:
             ws.write(r, 1, "")
     
-    _write_uma(39, "Diario:", uma.get("diaria"))
+    _write_uma(39, "Diario:", uma.get("diaria") or uma.get("diario"))
     _write_uma(40, "Mensual:", uma.get("mensual"))
     _write_uma(41, "Anual:", uma.get("anual"))
     
