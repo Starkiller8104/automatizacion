@@ -377,16 +377,6 @@ else:
     st.title("📈 Indicadores (últimos 5 días) + Noticias")
     st.caption("Excel con tipos de cambio, noticias y gráficos.")
 
-
-# --- Aviso de FIX antes de las 12:00 (hora CDMX) ---
-try:
-    if datetime.now(CDMX).hour < 12:
-        st.caption("El valor mostrado corresponde al último dato publicado por Banxico. "
-                   "El FIX del día se publica alrededor de las 12:00 p.m.")
-except Exception:
-    pass
-
-
 if _logo_b64:
  
     st.sidebar.image(f"data:image/png;base64,{_logo_b64}", use_container_width=True)
@@ -752,6 +742,9 @@ if st.button("Generar Excel"):
     fmt_pct2      = wb.add_format({'font_name': 'Arial', 'num_format': '0.00%'})
     fmt_pct2_ffill= wb.add_format({'font_name': 'Arial', 'num_format': '0.00%', 'italic': True, 'font_color': '#666666'})
 
+    # Formato para leyendas (columna H)
+    fmt_note = wb.add_format({'font_name': 'Arial', 'font_size': 9, 'italic': True, 'font_color': '#666666', 'text_wrap': True})
+
     end = today_cdmx()
     # Últimos 6 días hábiles (lun-vie), incluyendo hoy si aplica
     header_dates_date = []
@@ -894,6 +887,20 @@ if st.button("Generar Excel"):
     ws.write(6, 0, "Dólar/Pesos:")
     for i, v in enumerate(fix_vals):
         ws.write(6, 1+i, v, fmt_num4_ffill if (fix_fflags[i]) else fmt_num4)
+
+# --- Aviso FIX Banxico en columna H si el último dato no es de hoy (feriado/fin de semana o antes del mediodía) ---
+try:
+    fix_fecha_str, _ = sie_latest(SIE_SERIES["USD_FIX"])
+    _d = parse_any_date(fix_fecha_str)
+    last_fix_date = _d.date() if _d else None
+    _today = today_cdmx()
+    if (last_fix_date is None) or (last_fix_date != _today):
+        _msg = ("El valor mostrado corresponde al último dato publicado por Banxico. "
+                "El FIX del día se publica alrededor de las 12:00 p.m."
+                f"{' Último dato: ' + last_fix_date.strftime('%d/%m/%Y') if last_fix_date else ''}")
+        ws.write(6, 7, _msg, fmt_note)
+except Exception:
+    pass
     ws.write(7, 0, "MONEX:")
 
     ws.write(8, 0, "Compra:")
