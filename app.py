@@ -1081,6 +1081,12 @@ if st.button("Generar Excel"):
     # --- /fallback ---
     ws = wb.add_worksheet("Indicadores")
     ws.merge_range('B1:G1', 'INDICADORES DE TIPO DE CAMBIO', fmt_title)
+    ws.set_row(0, 42)
+    try:
+        ws.write(0, 7, f'Última actualización: {now_ts()} (CDMX)', fmt_note)
+    except Exception:
+        pass
+
 ws.set_row(0, 42)
 try:
     ws.write(0, 7, f'Última actualización: {now_ts()} (CDMX)', fmt_note)
@@ -1106,15 +1112,15 @@ except Exception:
     ws.set_column(0, 0, 22)   # columna A (rótulos)
     ws.set_column(1, 7, 13)   # columnas B..H (fechas y sparklines)
     ws.freeze_panes(3, 1)
-try:
-    ws.set_landscape()
-    ws.set_paper(9)
-    ws.set_margins(0.3, 0.3, 0.4, 0.4)
-    ws.fit_to_pages(1, 0)
-    ws.repeat_rows(0, 2)
-    ws.center_horizontally()
-except Exception:
-    pass
+    try:
+        ws.set_landscape()
+        ws.set_paper(9)
+        ws.set_margins(0.3, 0.3, 0.4, 0.4)
+        ws.fit_to_pages(1, 0)
+        ws.repeat_rows(0, 2)
+        ws.center_horizontally()
+    except Exception:
+        pass
 
     # Leyenda para arrastres (ffill)
     ws.write(32, 7, '* Valor copiado cuando no hay publicación del día', wb.add_format({'font_name': 'Arial', 'italic': True, 'font_color': '#666'}))
