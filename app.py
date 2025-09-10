@@ -705,11 +705,35 @@ if st.button("Generar Excel"):
     cetes364_6 = pad6([v for _, v in sie_last_n(SIE_SERIES["CETES_364"], n=6)])
 
     
-    uma = get_uma(INEGI_TOKEN)
-    if uma.get("diaria") is None and uma_manual > 0:
-        uma["diaria"]  = uma_manual
-        uma["mensual"] = uma_manual * 30.4
-        uma["anual"]   = uma["mensual"] * 12
+    
+uma = get_uma(INEGI_TOKEN)
+# Relleno robusto: calcula campos faltantes con relaciones (30.4 días/mes ~ promedio, 12 meses/año)
+try:
+    d0 = uma.get("diaria"); m0 = uma.get("mensual"); a0 = uma.get("anual")
+    d = d0; m = m0; a = a0
+    if (d is not None) and (m is None):
+        m = d * 30.4
+    if (m is not None) and (a is None):
+        a = m * 12
+    if (m is None) and (a is not None):
+        m = a / 12
+    if (d is None) and (m is not None):
+        d = m / 30.4
+    derived = False
+    if (d is None) and (m is None) and (a is None) and (uma_manual > 0):
+        d = uma_manual
+        m = d * 30.4
+        a = m * 12
+        derived = True
+    if (d != d0) or (m != m0) or (a != a0):
+        derived = True if not derived else derived
+    uma["diaria"], uma["mensual"], uma["anual"] = d, m, a
+    uma["_derived"] = bool(derived)
+    if derived and not uma.get("_source"):
+        uma["_source"] = "derived"
+except Exception:
+    pass
+
 
 
     fred_rows = None
@@ -886,38 +910,39 @@ if st.button("Generar Excel"):
     ws.write(6, 0, "Dólar/Pesos:")
     for i, v in enumerate(fix_vals):
         ws.write(6, 1+i, v, fmt_num4_ffill if (fix_fflags[i]) else fmt_num4)
-    # --- Leyenda FIX Banxico para USD en H7 ---
+
+# --- Leyenda FIX Banxico para USD en H7 ---
+try:
+    need_legend = False
+    _today = today_cdmx()
     try:
-        need_legend = False
-        _today = today_cdmx()
-        try:
-            if isinstance(fix_fflags, (list, tuple)) and len(fix_fflags) > 0 and bool(fix_fflags[-1]):
-                need_legend = True
-        except Exception:
-            pass
-        _d = None
-        try:
-            fix_fecha_str, _ = sie_latest(SIE_SERIES["USD_FIX"])
-            _d = parse_any_date(fix_fecha_str)
-            if _d and _d.date() != _today:
-                need_legend = True
-        except Exception:
-            pass
-        if need_legend:
-            _msg = "El valor mostrado corresponde al último dato publicado por Banxico. El FIX del día se publica alrededor de las 12:00 p.m."
-            try:
-                if _d:
-                    _msg += " Último dato: " + _d.strftime("%d/%m/%Y")
-            except Exception:
-                pass
-            ws.write(6, 7, _msg, fmt_note)
-            try:
-                ws.set_column(7, 7, 40)
-                ws.set_row(6, 48)
-            except Exception:
-                pass
+        if isinstance(fix_fflags, (list, tuple)) and len(fix_fflags) > 0 and bool(fix_fflags[-1]):
+            need_legend = True
     except Exception:
         pass
+    _d = None
+    try:
+        fix_fecha_str, _ = sie_latest(SIE_SERIES["USD_FIX"])
+        _d = parse_any_date(fix_fecha_str)
+        if _d and _d.date() != _today:
+            need_legend = True
+    except Exception:
+        pass
+    if need_legend:
+        _msg = "El valor mostrado corresponde al último dato publicado por Banxico. El FIX del día se publica alrededor de las 12:00 p.m."
+        try:
+            if _d:
+                _msg += " Último dato: " + _d.strftime("%d/%m/%Y")
+        except Exception:
+            pass
+        ws.write(6, 7, _msg, fmt_note)
+        try:
+            ws.set_column(7, 7, 40)
+            ws.set_row(6, 48)
+        except Exception:
+            pass
+except Exception:
+    pass
 
     ws.write(7, 0, "MONEX:")
 
@@ -939,38 +964,39 @@ if st.button("Generar Excel"):
     ws.write(12, 0, "Yen Japonés/Peso:")
     for i, v in enumerate(jpy_vals):
         ws.write(12, 1+i, v, fmt_num6_ffill if (jpy_fflags[i]) else fmt_num6)
-    # --- Leyenda FIX Banxico para JPY en H13 ---
+
+# --- Leyenda FIX Banxico para JPY en H13 ---
+try:
+    need_legend_jpy = False
+    _today = today_cdmx()
     try:
-        need_legend_jpy = False
-        _today = today_cdmx()
-        try:
-            if isinstance(jpy_fflags, (list, tuple)) and len(jpy_fflags) > 0 and bool(jpy_fflags[-1]):
-                need_legend_jpy = True
-        except Exception:
-            pass
-        _dj = None
-        try:
-            jpy_fecha_str, _ = sie_latest(SIE_SERIES["JPY_MXN"])
-            _dj = parse_any_date(jpy_fecha_str)
-            if _dj and _dj.date() != _today:
-                need_legend_jpy = True
-        except Exception:
-            pass
-        if need_legend_jpy:
-            _msgj = "El valor mostrado corresponde al último dato publicado por Banxico. El FIX del día se publica alrededor de las 12:00 p.m."
-            try:
-                if _dj:
-                    _msgj += " Último dato: " + _dj.strftime("%d/%m/%Y")
-            except Exception:
-                pass
-            ws.write(12, 7, _msgj, fmt_note)
-            try:
-                ws.set_column(7, 7, 40)
-                ws.set_row(12, 48)
-            except Exception:
-                pass
+        if isinstance(jpy_fflags, (list, tuple)) and len(jpy_fflags) > 0 and bool(jpy_fflags[-1]):
+            need_legend_jpy = True
     except Exception:
         pass
+    _dj = None
+    try:
+        jpy_fecha_str, _ = sie_latest(SIE_SERIES["JPY_MXN"])
+        _dj = parse_any_date(jpy_fecha_str)
+        if _dj and _dj.date() != _today:
+            need_legend_jpy = True
+    except Exception:
+        pass
+    if need_legend_jpy:
+        _msgj = "El valor mostrado corresponde al último dato publicado por Banxico. El FIX del día se publica alrededor de las 12:00 p.m."
+        try:
+            if _dj:
+                _msgj += " Último dato: " + _dj.strftime("%d/%m/%Y")
+        except Exception:
+            pass
+        ws.write(12, 7, _msgj, fmt_note)
+        try:
+            ws.set_column(7, 7, 40)
+            ws.set_row(12, 48)
+        except Exception:
+            pass
+except Exception:
+    pass
 
     ws.write(13, 0, "Dólar/Yen Japonés:")
     for i, v in enumerate(usd_jpy):
@@ -980,38 +1006,39 @@ if st.button("Generar Excel"):
     ws.write(16, 0, "Euro/Peso:")
     for i, v in enumerate(eur_vals):
         ws.write(16, 1+i, v, fmt_num6_ffill if (eur_fflags[i]) else fmt_num6)
-    # --- Leyenda FIX Banxico para EUR en H17 ---
+
+# --- Leyenda FIX Banxico para EUR en H17 ---
+try:
+    need_legend_eur = False
+    _today = today_cdmx()
     try:
-        need_legend_eur = False
-        _today = today_cdmx()
-        try:
-            if isinstance(eur_fflags, (list, tuple)) and len(eur_fflags) > 0 and bool(eur_fflags[-1]):
-                need_legend_eur = True
-        except Exception:
-            pass
-        _de = None
-        try:
-            eur_fecha_str, _ = sie_latest(SIE_SERIES["EUR_MXN"])
-            _de = parse_any_date(eur_fecha_str)
-            if _de and _de.date() != _today:
-                need_legend_eur = True
-        except Exception:
-            pass
-        if need_legend_eur:
-            _msge = "El valor mostrado corresponde al último dato publicado por Banxico. El FIX del día se publica alrededor de las 12:00 p.m."
-            try:
-                if _de:
-                    _msge += " Último dato: " + _de.strftime("%d/%m/%Y")
-            except Exception:
-                pass
-            ws.write(16, 7, _msge, fmt_note)
-            try:
-                ws.set_column(7, 7, 40)
-                ws.set_row(16, 48)
-            except Exception:
-                pass
+        if isinstance(eur_fflags, (list, tuple)) and len(eur_fflags) > 0 and bool(eur_fflags[-1]):
+            need_legend_eur = True
     except Exception:
         pass
+    _de = None
+    try:
+        eur_fecha_str, _ = sie_latest(SIE_SERIES["EUR_MXN"])
+        _de = parse_any_date(eur_fecha_str)
+        if _de and _de.date() != _today:
+            need_legend_eur = True
+    except Exception:
+        pass
+    if need_legend_eur:
+        _msge = "El valor mostrado corresponde al último dato publicado por Banxico. El FIX del día se publica alrededor de las 12:00 p.m."
+        try:
+            if _de:
+                _msge += " Último dato: " + _de.strftime("%d/%m/%Y")
+        except Exception:
+            pass
+        ws.write(16, 7, _msge, fmt_note)
+        try:
+            ws.set_column(7, 7, 40)
+            ws.set_row(16, 48)
+        except Exception:
+            pass
+except Exception:
+    pass
 
     ws.write(17, 0, "Euro/Dólar:")
     for i, v in enumerate(eur_usd):
@@ -1062,9 +1089,30 @@ if st.button("Generar Excel"):
         v3 = (cetes364[i]/100.0) if (cetes364[i] is not None) else None
         ws.write(35, 1+i, v3, fmt_pct2_ffill if (cetes364_f[i]) else fmt_pct2)
     ws.write(37, 0, "UMA:", fmt_bold)
+    ws.write(38, 0, "Fecha (INEGI):"); ws.write(38, 1, uma.get("fecha"))
     ws.write(39, 0, "Diario:");  ws.write(39, 1, uma.get("diaria"))
     ws.write(40, 0, "Mensual:"); ws.write(40, 1, uma.get("mensual"))
     ws.write(41, 0, "Anual:");   ws.write(41, 1, uma.get("anual"))
+
+# --- Leyenda UMA en H40 (fila 39, col H) si valores vienen derivados o con error de INEGI ---
+try:
+    _uma_msg = None
+    _status = uma.get("_status")
+    _derived = bool(uma.get("_derived"))
+    if _status and str(_status).lower().strip() != "ok":
+        _uma_msg = "UMA estimada por indisponibilidad del servicio de INEGI."
+    elif _derived:
+        _uma_msg = "Alguno(s) valores de UMA fueron estimados a partir de otra periodicidad."
+    if _uma_msg:
+        ws.write(39, 7, _uma_msg, fmt_note)  # H40
+        try:
+            ws.set_column(7, 7, 40)
+            ws.set_row(39, 48)
+        except Exception:
+            pass
+except Exception:
+    pass
+
 
 do_raw = globals().get('do_raw', True)
 if do_raw and ('wb' in globals()):
