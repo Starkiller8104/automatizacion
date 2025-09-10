@@ -741,10 +741,9 @@ if st.button("Generar Excel"):
     fmt_num6_ffill = wb.add_format({'font_name': 'Arial', 'num_format': '0.000000', 'italic': True, 'font_color': '#666666'})
     fmt_pct2      = wb.add_format({'font_name': 'Arial', 'num_format': '0.00%'})
     fmt_pct2_ffill= wb.add_format({'font_name': 'Arial', 'num_format': '0.00%', 'italic': True, 'font_color': '#666666'})
-
-    
     # Formato para leyendas (columna H)
     fmt_note = wb.add_format({'font_name': 'Arial', 'font_size': 9, 'italic': True, 'font_color': '#666666', 'text_wrap': True})
+
     end = today_cdmx()
     # Últimos 6 días hábiles (lun-vie), incluyendo hoy si aplica
     header_dates_date = []
@@ -887,50 +886,6 @@ if st.button("Generar Excel"):
     ws.write(6, 0, "Dólar/Pesos:")
     for i, v in enumerate(fix_vals):
         ws.write(6, 1+i, v, fmt_num4_ffill if (fix_fflags[i]) else fmt_num4)
-
-
-    # --- Leyenda FIX Banxico en H7 (col 7, fila 6) si aplica ---
-    try:
-        need_legend = False
-        _today = today_cdmx()
-        # 1) Antes del mediodía (CDMX)
-        try:
-            if datetime.now(CDMX).hour < 12:
-                need_legend = True
-        except Exception:
-            pass
-        # 2) Si el último punto visible en el encabezado fue arrastrado (ffill) para hoy
-        try:
-            if isinstance(fix_fflags, (list, tuple)) and len(fix_fflags) > 0 and bool(fix_fflags[-1]):
-                need_legend = True
-        except Exception:
-            pass
-        # 3) Si el último dato publicado por Banxico no es de hoy
-        _d = None
-        try:
-            fix_fecha_str, _ = sie_latest(SIE_SERIES["USD_FIX"])
-            _d = parse_any_date(fix_fecha_str)
-            if _d and _d.date() != _today:
-                need_legend = True
-        except Exception:
-            pass
-
-        if need_legend:
-            _msg = "El valor mostrado corresponde al último dato publicado por Banxico. El FIX del día se publica alrededor de las 12:00 p.m."
-            try:
-                if _d:
-                    _msg += " Último dato: " + _d.strftime("%d/%m/%Y")
-            except Exception:
-                pass
-            ws.write(6, 7, _msg, fmt_note)
-            try:
-                # Asegurar que se vea completo
-                ws.set_column(7, 7, 40)  # Ancho columna H
-                ws.set_row(6, 48)        # Altura fila 7
-            except Exception:
-                pass
-    except Exception:
-        pass
     ws.write(7, 0, "MONEX:")
 
     ws.write(8, 0, "Compra:")
@@ -951,44 +906,43 @@ if st.button("Generar Excel"):
     ws.write(12, 0, "Yen Japonés/Peso:")
     for i, v in enumerate(jpy_vals):
         ws.write(12, 1+i, v, fmt_num6_ffill if (jpy_fflags[i]) else fmt_num6)
-
-# --- Leyenda FIX Banxico para JPY en H13 ---
-try:
-    need_legend_jpy = False
-    _today = today_cdmx()
+    # --- Leyenda FIX Banxico para JPY en H13 ---
     try:
-        if datetime.now(CDMX).hour < 12:
-            need_legend_jpy = True
-    except Exception:
-        pass
-    try:
-        if isinstance(jpy_fflags, (list, tuple)) and len(jpy_fflags) > 0 and bool(jpy_fflags[-1]):
-            need_legend_jpy = True
-    except Exception:
-        pass
-    _dj = None
-    try:
-        jpy_fecha_str, _ = sie_latest(SIE_SERIES["JPY_MXN"])
-        _dj = parse_any_date(jpy_fecha_str)
-        if _dj and _dj.date() != _today:
-            need_legend_jpy = True
-    except Exception:
-        pass
-    if need_legend_jpy:
-        _msgj = "El valor mostrado corresponde al último dato publicado por Banxico. El FIX del día se publica alrededor de las 12:00 p.m."
+        need_legend_jpy = False
+        _today = today_cdmx()
         try:
-            if _dj:
-                _msgj += " Último dato: " + _dj.strftime("%d/%m/%Y")
+            if datetime.now(CDMX).hour < 12:
+                need_legend_jpy = True
         except Exception:
             pass
-        ws.write(12, 7, _msgj, fmt_note)
         try:
-            ws.set_column(7, 7, 40)
-            ws.set_row(12, 48)
+            if isinstance(jpy_fflags, (list, tuple)) and len(jpy_fflags) > 0 and bool(jpy_fflags[-1]):
+                need_legend_jpy = True
         except Exception:
             pass
-except Exception:
-    pass
+        _dj = None
+        try:
+            jpy_fecha_str, _ = sie_latest(SIE_SERIES["JPY_MXN"])
+            _dj = parse_any_date(jpy_fecha_str)
+            if _dj and _dj.date() != _today:
+                need_legend_jpy = True
+        except Exception:
+            pass
+        if need_legend_jpy:
+            _msgj = "El valor mostrado corresponde al último dato publicado por Banxico. El FIX del día se publica alrededor de las 12:00 p.m."
+            try:
+                if _dj:
+                    _msgj += " Último dato: " + _dj.strftime("%d/%m/%Y")
+            except Exception:
+                pass
+            ws.write(12, 7, _msgj, fmt_note)
+            try:
+                ws.set_column(7, 7, 40)
+                ws.set_row(12, 48)
+            except Exception:
+                pass
+    except Exception:
+        pass
 
     ws.write(13, 0, "Dólar/Yen Japonés:")
     for i, v in enumerate(usd_jpy):
@@ -998,44 +952,43 @@ except Exception:
     ws.write(16, 0, "Euro/Peso:")
     for i, v in enumerate(eur_vals):
         ws.write(16, 1+i, v, fmt_num6_ffill if (eur_fflags[i]) else fmt_num6)
-
-# --- Leyenda FIX Banxico para EUR en H17 ---
-try:
-    need_legend_eur = False
-    _today = today_cdmx()
+    # --- Leyenda FIX Banxico para EUR en H17 ---
     try:
-        if datetime.now(CDMX).hour < 12:
-            need_legend_eur = True
-    except Exception:
-        pass
-    try:
-        if isinstance(eur_fflags, (list, tuple)) and len(eur_fflags) > 0 and bool(eur_fflags[-1]):
-            need_legend_eur = True
-    except Exception:
-        pass
-    _de = None
-    try:
-        eur_fecha_str, _ = sie_latest(SIE_SERIES["EUR_MXN"])
-        _de = parse_any_date(eur_fecha_str)
-        if _de and _de.date() != _today:
-            need_legend_eur = True
-    except Exception:
-        pass
-    if need_legend_eur:
-        _msge = "El valor mostrado corresponde al último dato publicado por Banxico. El FIX del día se publica alrededor de las 12:00 p.m."
+        need_legend_eur = False
+        _today = today_cdmx()
         try:
-            if _de:
-                _msge += " Último dato: " + _de.strftime("%d/%m/%Y")
+            if datetime.now(CDMX).hour < 12:
+                need_legend_eur = True
         except Exception:
             pass
-        ws.write(16, 7, _msge, fmt_note)
         try:
-            ws.set_column(7, 7, 40)
-            ws.set_row(16, 48)
+            if isinstance(eur_fflags, (list, tuple)) and len(eur_fflags) > 0 and bool(eur_fflags[-1]):
+                need_legend_eur = True
         except Exception:
             pass
-except Exception:
-    pass
+        _de = None
+        try:
+            eur_fecha_str, _ = sie_latest(SIE_SERIES["EUR_MXN"])
+            _de = parse_any_date(eur_fecha_str)
+            if _de and _de.date() != _today:
+                need_legend_eur = True
+        except Exception:
+            pass
+        if need_legend_eur:
+            _msge = "El valor mostrado corresponde al último dato publicado por Banxico. El FIX del día se publica alrededor de las 12:00 p.m."
+            try:
+                if _de:
+                    _msge += " Último dato: " + _de.strftime("%d/%m/%Y")
+            except Exception:
+                pass
+            ws.write(16, 7, _msge, fmt_note)
+            try:
+                ws.set_column(7, 7, 40)
+                ws.set_row(16, 48)
+            except Exception:
+                pass
+    except Exception:
+        pass
 
     ws.write(17, 0, "Euro/Dólar:")
     for i, v in enumerate(eur_usd):
