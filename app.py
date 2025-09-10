@@ -888,48 +888,49 @@ end = today_cdmx()
     for i, v in enumerate(fix_vals):
         ws.write(6, 1+i, v, fmt_num4_ffill if (fix_fflags[i]) else fmt_num4)
 
-# --- Leyenda FIX Banxico en H7 (col 7, fila 6) si aplica ---
-try:
-    need_legend = False
-    _today = today_cdmx()
-    # 1) Antes del mediodía (CDMX)
-    try:
-        if datetime.now(CDMX).hour < 12:
-            need_legend = True
-    except Exception:
-        pass
-    # 2) Si el último punto visibile en el encabezado fue arrastrado (ffill) para hoy
-    try:
-        if isinstance(fix_fflags, (list, tuple)) and len(fix_fflags) > 0 and bool(fix_fflags[-1]):
-            need_legend = True
-    except Exception:
-        pass
-    # 3) Si el último dato publicado por Banxico no es de hoy
-    _d = None
-    try:
-        fix_fecha_str, _ = sie_latest(SIE_SERIES["USD_FIX"])
-        _d = parse_any_date(fix_fecha_str)
-        if _d and _d.date() != _today:
-            need_legend = True
-    except Exception:
-        pass
 
-    if need_legend:
-        _msg = "El valor mostrado corresponde al último dato publicado por Banxico. El FIX del día se publica alrededor de las 12:00 p.m."
+    # --- Leyenda FIX Banxico en H7 (col 7, fila 6) si aplica ---
+    try:
+        need_legend = False
+        _today = today_cdmx()
+        # 1) Antes del mediodía (CDMX)
         try:
-            if _d:
-                _msg += " Último dato: " + _d.strftime("%d/%m/%Y")
+            if datetime.now(CDMX).hour < 12:
+                need_legend = True
         except Exception:
             pass
-        ws.write(6, 7, _msg, fmt_note)
+        # 2) Si el último punto visible en el encabezado fue arrastrado (ffill) para hoy
         try:
-            # Asegurar que se vea completo
-            ws.set_column(7, 7, 40)  # Ancho columna H
-            ws.set_row(6, 48)        # Altura fila 7
+            if isinstance(fix_fflags, (list, tuple)) and len(fix_fflags) > 0 and bool(fix_fflags[-1]):
+                need_legend = True
         except Exception:
             pass
-except Exception:
-    pass
+        # 3) Si el último dato publicado por Banxico no es de hoy
+        _d = None
+        try:
+            fix_fecha_str, _ = sie_latest(SIE_SERIES["USD_FIX"])
+            _d = parse_any_date(fix_fecha_str)
+            if _d and _d.date() != _today:
+                need_legend = True
+        except Exception:
+            pass
+
+        if need_legend:
+            _msg = "El valor mostrado corresponde al último dato publicado por Banxico. El FIX del día se publica alrededor de las 12:00 p.m."
+            try:
+                if _d:
+                    _msg += " Último dato: " + _d.strftime("%d/%m/%Y")
+            except Exception:
+                pass
+            ws.write(6, 7, _msg, fmt_note)
+            try:
+                # Asegurar que se vea completo
+                ws.set_column(7, 7, 40)  # Ancho columna H
+                ws.set_row(6, 48)        # Altura fila 7
+            except Exception:
+                pass
+    except Exception:
+        pass
     ws.write(7, 0, "MONEX:")
 
     ws.write(8, 0, "Compra:")
