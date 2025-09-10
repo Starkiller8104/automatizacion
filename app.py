@@ -847,9 +847,13 @@ if st.button("Generar Excel"):
     # --- /fallback ---
     ws = wb.add_worksheet("Indicadores")
     ws.set_column(0, 6, 16)
-    # Branding y layout
+    # ULTIMA MODIFICACION
     try:
-        ws.insert_image('A1', 'logo.png')
+        ws.insert_image(
+        'A1',
+        'logo.png',
+        {'x_scale': 0.35, 'y_scale': 0.35}
+        )
     except Exception:
         pass
     try:
