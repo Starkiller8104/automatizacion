@@ -52,6 +52,7 @@ def _fred_fetch_v1(series_id: str, start: str, end: str, api_key: str):
 def _fred_write_v1(wb, series_dict, sheet_name="FRED_v2"):
     ws = wb.add_worksheet(sheet_name)
     fmt_bold = wb.add_format({'font_name': 'Arial', "bold": True, "align": "center"})
+    fmt_title   = wb.add_format({'font_name': 'Arial', 'font_size': 14, 'bold': True, 'font_color': '#0D2356', 'align':'center', 'valign':'vcenter'})
     fmt_date = wb.add_format({'font_name': 'Arial', "num_format": "yyyy-mm-dd"})
     fmt_num  = wb.add_format({'font_name': 'Arial', "num_format": "#,##0.0000"})
     headers = ["Fecha"] + list(series_dict.keys())
@@ -845,6 +846,7 @@ if st.button("Generar Excel"):
     except Exception:
         pass
     # --- /fallback ---
+    ws.merge_range('B1:G1', 'INDICADORES DE TIPO DE CAMBIO', fmt_title)
     ws = wb.add_worksheet("Indicadores")
     ws.set_column(0, 6, 16)
     # ULTIMA MODIFICACION
