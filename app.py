@@ -906,216 +906,216 @@ except Exception:
         ws.write_datetime(1, 1+i, _dt(d.year, d.month, d.day), fmt_date_dm)
 
 
-ws.write(3, 0, "TIPOS DE CAMBIO:", fmt_bold)
+    ws.write(3, 0, "TIPOS DE CAMBIO:", fmt_bold)
 
-# --- USD ---
-ws.write(5, 0, "DÓLAR AMERICANO.", fmt_bold)
-ws.write(6, 0, "Dólar/Pesos:")
-for i, v in enumerate(fix_vals):
-    ws.write(6, 1+i, v, fmt_num4_ffill if (fix_fflags[i]) else fmt_num4)
+    # --- USD ---
+    ws.write(5, 0, "DÓLAR AMERICANO.", fmt_bold)
+    ws.write(6, 0, "Dólar/Pesos:")
+    for i, v in enumerate(fix_vals):
+        ws.write(6, 1+i, v, fmt_num4_ffill if (fix_fflags[i]) else fmt_num4)
 
-# Leyenda USD (H7)
-try:
-    need_legend = False
-    _today = today_cdmx()
+    # Leyenda USD (H7)
     try:
-        if isinstance(fix_fflags, (list, tuple)) and len(fix_fflags) > 0 and bool(fix_fflags[-1]):
-            need_legend = True
-    except Exception:
-        pass
-    _d = None
-    try:
-        fix_fecha_str, _ = sie_latest(SIE_SERIES["USD_FIX"])
-        _d = parse_any_date(fix_fecha_str)
-        if _d and _d.date() != _today:
-            need_legend = True
-    except Exception:
-        pass
-    if need_legend:
-        _msg = "El valor mostrado corresponde al último dato publicado por Banxico. El FIX del día se publica alrededor de las 12:00 p.m."
+        need_legend = False
+        _today = today_cdmx()
         try:
-            if _d:
-                _msg += " Último dato: " + _d.strftime("%d/%m/%Y")
+            if isinstance(fix_fflags, (list, tuple)) and len(fix_fflags) > 0 and bool(fix_fflags[-1]):
+                need_legend = True
         except Exception:
             pass
-        ws.write(6, 7, _msg, fmt_note)
+        _d = None
         try:
-            ws.set_column(7, 7, 40)
-            ws.set_row(6, 48)
+            fix_fecha_str, _ = sie_latest(SIE_SERIES["USD_FIX"])
+            _d = parse_any_date(fix_fecha_str)
+            if _d and _d.date() != _today:
+                need_legend = True
         except Exception:
             pass
-except Exception:
-    pass
-
-# MONEX
-ws.write(7, 0, "MONEX:")
-ws.write(8, 0, "Compra:")
-for i, v in enumerate(compra):
-    ws.write(8, 1+i, v, fmt_num6)
-ws.write(9, 0, "Venta:")
-for i, v in enumerate(venta):
-    ws.write(9, 1+i, v, fmt_num6)
-# Asegura explícitamente las celdas G9/G10 (columna 6, fila 8 y 9)
-try:
-    if compra: ws.write(8, 6, compra[-1], fmt_num6)
-    if venta:  ws.write(9, 6, venta[-1],  fmt_num6)
-except Exception:
-    pass
-
-# --- JPY ---
-ws.write(11, 0, "YEN JAPONÉS.", fmt_bold)
-ws.write(12, 0, "Yen Japonés/Peso:")
-for i, v in enumerate(jpy_vals):
-    ws.write(12, 1+i, v, fmt_num6_ffill if (jpy_fflags[i]) else fmt_num6)
-
-# Leyenda JPY (H13)
-try:
-    need_legend_jpy = False
-    _today = today_cdmx()
-    try:
-        if isinstance(jpy_fflags, (list, tuple)) and len(jpy_fflags) > 0 and bool(jpy_fflags[-1]):
-            need_legend_jpy = True
-    except Exception:
-        pass
-    _dj = None
-    try:
-        jpy_fecha_str, _ = sie_latest(SIE_SERIES["JPY_MXN"])
-        _dj = parse_any_date(jpy_fecha_str)
-        if _dj and _dj.date() != _today:
-            need_legend_jpy = True
-    except Exception:
-        pass
-    if need_legend_jpy:
-        _msgj = "El valor mostrado corresponde al último dato publicado por Banxico. El FIX del día se publica alrededor de las 12:00 p.m."
-        try:
-            if _dj:
-                _msgj += " Último dato: " + _dj.strftime("%d/%m/%Y")
-        except Exception:
-            pass
-        ws.write(12, 7, _msgj, fmt_note)
-        try:
-            ws.set_column(7, 7, 40)
-            ws.set_row(12, 48)
-        except Exception:
-            pass
-except Exception:
-    pass
-
-ws.write(13, 0, "Dólar/Yen Japonés:")
-for i, v in enumerate(usd_jpy):
-    ws.write(13, 1+i, v, fmt_num6)
-
-# --- EUR ---
-ws.write(15, 0, "EURO.", fmt_bold)
-ws.write(16, 0, "Euro/Peso:")
-for i, v in enumerate(eur_vals):
-    ws.write(16, 1+i, v, fmt_num6_ffill if (eur_fflags[i]) else fmt_num6)
-
-# Leyenda EUR (H17)
-try:
-    need_legend_eur = False
-    _today = today_cdmx()
-    try:
-        if isinstance(eur_fflags, (list, tuple)) and len(eur_fflags) > 0 and bool(eur_fflags[-1]):
-            need_legend_eur = True
-    except Exception:
-        pass
-    _de = None
-    try:
-        eur_fecha_str, _ = sie_latest(SIE_SERIES["EUR_MXN"])
-        _de = parse_any_date(eur_fecha_str)
-        if _de and _de.date() != _today:
-            need_legend_eur = True
-    except Exception:
-        pass
-    if need_legend_eur:
-        _msge = "El valor mostrado corresponde al último dato publicado por Banxico. El FIX del día se publica alrededor de las 12:00 p.m."
-        try:
-            if _de:
-                _msge += " Último dato: " + _de.strftime("%d/%m/%Y")
-        except Exception:
-            pass
-        ws.write(16, 7, _msge, fmt_note)
-        try:
-            ws.set_column(7, 7, 40)
-            ws.set_row(16, 48)
-        except Exception:
-            pass
-except Exception:
-    pass
-
-ws.write(17, 0, "Euro/Dólar:")
-for i, v in enumerate(eur_usd):
-    ws.write(17, 1+i, v, fmt_num6)
-
-    ws.write(19, 0, "UDIS:", fmt_bold)
-    ws.write(21, 0, "UDIS: ")
-    # Trae rango suficiente para cubrir el span de header_dates (días hábiles)
-    udi_start = (header_dates_date[0] - timedelta(days=30)).isoformat()
-    udi_end   = header_dates_date[-1].isoformat()
-    udi_obs   = sie_range(SIE_SERIES["UDIS"], udi_start, udi_end)
-    m_udis_r  = {}
-    for o in udi_obs:
-        _f = parse_any_date(o.get("fecha"))
-        _v = try_float(o.get("dato"))
-        if _f and (_v is not None):
-            m_udis_r[_f.date().isoformat()] = _v
-    udis_vals, udis_fflags = _ffill_with_flags(m_udis_r, header_dates)
-    for i, v in enumerate(udis_vals):
-        ws.write(21, 1+i, v, fmt_num6_ffill if (udis_fflags[i]) else fmt_num6)
-
-    ws.write(23, 0, "TASAS TIIE:", fmt_bold)
-    ws.write(25, 0, "TIIE objetivo:")
-    ws.write(26, 0, "TIIE 28 Días:")
-    ws.write(27, 0, "TIIE 91 Días:")
-    ws.write(28, 0, "TIIE 182 Días:")
-    for i in range(6):
-        vobj = (tiie_obj[i]/100.0) if (tiie_obj[i] is not None) else None
-        ws.write(25, 1+i, vobj, fmt_pct2_ffill if (tiie_obj_f[i]) else fmt_pct2)
-        v28 = (tiie28[i]/100.0) if (tiie28[i] is not None) else None
-        ws.write(26, 1+i, v28, fmt_pct2_ffill if (tiie28_f[i]) else fmt_pct2)
-        v91 = (tiie91[i]/100.0) if (tiie91[i] is not None) else None
-        ws.write(27, 1+i, v91, fmt_pct2_ffill if (tiie91_f[i]) else fmt_pct2)
-        v182 = (tiie182[i]/100.0) if (tiie182[i] is not None) else None
-        ws.write(28, 1+i, v182, fmt_pct2_ffill if (tiie182_f[i]) else fmt_pct2)
-    ws.write(30, 0, "CETES:", fmt_bold)
-    ws.write(32, 0, "CETES 28 Días:")
-    ws.write(33, 0, "CETES 91 Días:")
-    ws.write(34, 0, "CETES 182 Días:")
-    ws.write(35, 0, "CETES 364 Días:")
-    for i in range(6):
-        v0 = (cetes28[i]/100.0) if (cetes28[i] is not None) else None
-        ws.write(32, 1+i, v0, fmt_pct2_ffill if (cetes28_f[i]) else fmt_pct2)
-        v1 = (cetes91[i]/100.0) if (cetes91[i] is not None) else None
-        ws.write(33, 1+i, v1, fmt_pct2_ffill if (cetes91_f[i]) else fmt_pct2)
-        v2 = (cetes182[i]/100.0) if (cetes182[i] is not None) else None
-        ws.write(34, 1+i, v2, fmt_pct2_ffill if (cetes182_f[i]) else fmt_pct2)
-        v3 = (cetes364[i]/100.0) if (cetes364[i] is not None) else None
-        ws.write(35, 1+i, v3, fmt_pct2_ffill if (cetes364_f[i]) else fmt_pct2)
-    ws.write(37, 0, "UMA:", fmt_bold)
-    ws.write(38, 0, "Fecha (INEGI):"); ws.write(38, 1, uma.get("fecha"))
-    ws.write(39, 0, "Diario:");  ws.write(39, 1, uma.get("diaria"))
-    ws.write(40, 0, "Mensual:"); ws.write(40, 1, uma.get("mensual"))
-    ws.write(41, 0, "Anual:");   ws.write(41, 1, uma.get("anual"))
-
-    # --- Leyenda UMA en H40 (fila 39, col H) si valores vienen derivados o con error de INEGI ---
-    try:
-        _uma_msg = None
-        _status = uma.get("_status")
-        _derived = bool(uma.get("_derived"))
-        if _status and str(_status).lower().strip() != "ok":
-            _uma_msg = "UMA estimada por indisponibilidad del servicio de INEGI."
-        elif _derived:
-            _uma_msg = "Alguno(s) valores de UMA fueron estimados a partir de otra periodicidad."
-        if _uma_msg:
-            ws.write(39, 7, _uma_msg, fmt_note)  # H40
+        if need_legend:
+            _msg = "El valor mostrado corresponde al último dato publicado por Banxico. El FIX del día se publica alrededor de las 12:00 p.m."
+            try:
+                if _d:
+                    _msg += " Último dato: " + _d.strftime("%d/%m/%Y")
+            except Exception:
+                pass
+            ws.write(6, 7, _msg, fmt_note)
             try:
                 ws.set_column(7, 7, 40)
-                ws.set_row(39, 48)
+                ws.set_row(6, 48)
             except Exception:
                 pass
     except Exception:
         pass
+
+    # MONEX
+    ws.write(7, 0, "MONEX:")
+    ws.write(8, 0, "Compra:")
+    for i, v in enumerate(compra):
+        ws.write(8, 1+i, v, fmt_num6)
+    ws.write(9, 0, "Venta:")
+    for i, v in enumerate(venta):
+        ws.write(9, 1+i, v, fmt_num6)
+    # Asegura explícitamente las celdas G9/G10 (columna 6, fila 8 y 9)
+    try:
+        if compra: ws.write(8, 6, compra[-1], fmt_num6)
+        if venta:  ws.write(9, 6, venta[-1],  fmt_num6)
+    except Exception:
+        pass
+
+    # --- JPY ---
+    ws.write(11, 0, "YEN JAPONÉS.", fmt_bold)
+    ws.write(12, 0, "Yen Japonés/Peso:")
+    for i, v in enumerate(jpy_vals):
+        ws.write(12, 1+i, v, fmt_num6_ffill if (jpy_fflags[i]) else fmt_num6)
+
+    # Leyenda JPY (H13)
+    try:
+        need_legend_jpy = False
+        _today = today_cdmx()
+        try:
+            if isinstance(jpy_fflags, (list, tuple)) and len(jpy_fflags) > 0 and bool(jpy_fflags[-1]):
+                need_legend_jpy = True
+        except Exception:
+            pass
+        _dj = None
+        try:
+            jpy_fecha_str, _ = sie_latest(SIE_SERIES["JPY_MXN"])
+            _dj = parse_any_date(jpy_fecha_str)
+            if _dj and _dj.date() != _today:
+                need_legend_jpy = True
+        except Exception:
+            pass
+        if need_legend_jpy:
+            _msgj = "El valor mostrado corresponde al último dato publicado por Banxico. El FIX del día se publica alrededor de las 12:00 p.m."
+            try:
+                if _dj:
+                    _msgj += " Último dato: " + _dj.strftime("%d/%m/%Y")
+            except Exception:
+                pass
+            ws.write(12, 7, _msgj, fmt_note)
+            try:
+                ws.set_column(7, 7, 40)
+                ws.set_row(12, 48)
+            except Exception:
+                pass
+    except Exception:
+        pass
+
+    ws.write(13, 0, "Dólar/Yen Japonés:")
+    for i, v in enumerate(usd_jpy):
+        ws.write(13, 1+i, v, fmt_num6)
+
+    # --- EUR ---
+    ws.write(15, 0, "EURO.", fmt_bold)
+    ws.write(16, 0, "Euro/Peso:")
+    for i, v in enumerate(eur_vals):
+        ws.write(16, 1+i, v, fmt_num6_ffill if (eur_fflags[i]) else fmt_num6)
+
+    # Leyenda EUR (H17)
+    try:
+        need_legend_eur = False
+        _today = today_cdmx()
+        try:
+            if isinstance(eur_fflags, (list, tuple)) and len(eur_fflags) > 0 and bool(eur_fflags[-1]):
+                need_legend_eur = True
+        except Exception:
+            pass
+        _de = None
+        try:
+            eur_fecha_str, _ = sie_latest(SIE_SERIES["EUR_MXN"])
+            _de = parse_any_date(eur_fecha_str)
+            if _de and _de.date() != _today:
+                need_legend_eur = True
+        except Exception:
+            pass
+        if need_legend_eur:
+            _msge = "El valor mostrado corresponde al último dato publicado por Banxico. El FIX del día se publica alrededor de las 12:00 p.m."
+            try:
+                if _de:
+                    _msge += " Último dato: " + _de.strftime("%d/%m/%Y")
+            except Exception:
+                pass
+            ws.write(16, 7, _msge, fmt_note)
+            try:
+                ws.set_column(7, 7, 40)
+                ws.set_row(16, 48)
+            except Exception:
+                pass
+    except Exception:
+        pass
+
+    ws.write(17, 0, "Euro/Dólar:")
+    for i, v in enumerate(eur_usd):
+        ws.write(17, 1+i, v, fmt_num6)
+
+        ws.write(19, 0, "UDIS:", fmt_bold)
+        ws.write(21, 0, "UDIS: ")
+        # Trae rango suficiente para cubrir el span de header_dates (días hábiles)
+        udi_start = (header_dates_date[0] - timedelta(days=30)).isoformat()
+        udi_end   = header_dates_date[-1].isoformat()
+        udi_obs   = sie_range(SIE_SERIES["UDIS"], udi_start, udi_end)
+        m_udis_r  = {}
+        for o in udi_obs:
+            _f = parse_any_date(o.get("fecha"))
+            _v = try_float(o.get("dato"))
+            if _f and (_v is not None):
+                m_udis_r[_f.date().isoformat()] = _v
+        udis_vals, udis_fflags = _ffill_with_flags(m_udis_r, header_dates)
+        for i, v in enumerate(udis_vals):
+            ws.write(21, 1+i, v, fmt_num6_ffill if (udis_fflags[i]) else fmt_num6)
+
+        ws.write(23, 0, "TASAS TIIE:", fmt_bold)
+        ws.write(25, 0, "TIIE objetivo:")
+        ws.write(26, 0, "TIIE 28 Días:")
+        ws.write(27, 0, "TIIE 91 Días:")
+        ws.write(28, 0, "TIIE 182 Días:")
+        for i in range(6):
+            vobj = (tiie_obj[i]/100.0) if (tiie_obj[i] is not None) else None
+            ws.write(25, 1+i, vobj, fmt_pct2_ffill if (tiie_obj_f[i]) else fmt_pct2)
+            v28 = (tiie28[i]/100.0) if (tiie28[i] is not None) else None
+            ws.write(26, 1+i, v28, fmt_pct2_ffill if (tiie28_f[i]) else fmt_pct2)
+            v91 = (tiie91[i]/100.0) if (tiie91[i] is not None) else None
+            ws.write(27, 1+i, v91, fmt_pct2_ffill if (tiie91_f[i]) else fmt_pct2)
+            v182 = (tiie182[i]/100.0) if (tiie182[i] is not None) else None
+            ws.write(28, 1+i, v182, fmt_pct2_ffill if (tiie182_f[i]) else fmt_pct2)
+        ws.write(30, 0, "CETES:", fmt_bold)
+        ws.write(32, 0, "CETES 28 Días:")
+        ws.write(33, 0, "CETES 91 Días:")
+        ws.write(34, 0, "CETES 182 Días:")
+        ws.write(35, 0, "CETES 364 Días:")
+        for i in range(6):
+            v0 = (cetes28[i]/100.0) if (cetes28[i] is not None) else None
+            ws.write(32, 1+i, v0, fmt_pct2_ffill if (cetes28_f[i]) else fmt_pct2)
+            v1 = (cetes91[i]/100.0) if (cetes91[i] is not None) else None
+            ws.write(33, 1+i, v1, fmt_pct2_ffill if (cetes91_f[i]) else fmt_pct2)
+            v2 = (cetes182[i]/100.0) if (cetes182[i] is not None) else None
+            ws.write(34, 1+i, v2, fmt_pct2_ffill if (cetes182_f[i]) else fmt_pct2)
+            v3 = (cetes364[i]/100.0) if (cetes364[i] is not None) else None
+            ws.write(35, 1+i, v3, fmt_pct2_ffill if (cetes364_f[i]) else fmt_pct2)
+        ws.write(37, 0, "UMA:", fmt_bold)
+        ws.write(38, 0, "Fecha (INEGI):"); ws.write(38, 1, uma.get("fecha"))
+        ws.write(39, 0, "Diario:");  ws.write(39, 1, uma.get("diaria"))
+        ws.write(40, 0, "Mensual:"); ws.write(40, 1, uma.get("mensual"))
+        ws.write(41, 0, "Anual:");   ws.write(41, 1, uma.get("anual"))
+
+        # --- Leyenda UMA en H40 (fila 39, col H) si valores vienen derivados o con error de INEGI ---
+        try:
+            _uma_msg = None
+            _status = uma.get("_status")
+            _derived = bool(uma.get("_derived"))
+            if _status and str(_status).lower().strip() != "ok":
+                _uma_msg = "UMA estimada por indisponibilidad del servicio de INEGI."
+            elif _derived:
+                _uma_msg = "Alguno(s) valores de UMA fueron estimados a partir de otra periodicidad."
+            if _uma_msg:
+                ws.write(39, 7, _uma_msg, fmt_note)  # H40
+                try:
+                    ws.set_column(7, 7, 40)
+                    ws.set_row(39, 48)
+                except Exception:
+                    pass
+        except Exception:
+            pass
 
 
 do_raw = globals().get('do_raw', True)
