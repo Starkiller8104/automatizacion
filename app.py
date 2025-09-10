@@ -19,6 +19,140 @@ from openpyxl import Workbook
 from openpyxl.styles import Alignment, Font, PatternFill
 from requests.adapters import HTTPAdapter, Retry
 
+@st.cache_data(ttl=60*60)
+def get_uma(inegi_token: str, http_session=None) -> dict:
+    """
+    Obtiene UMA (diaria, mensual, anual) desde INEGI.
+    Estrategia:
+      1) API INEGI (ids UMA) en varias combinaciones (BIE/BISE, 00/0700, true/false).
+      2) Scraping ligero de la página oficial https://www.inegi.org.mx/temas/uma/.
+      3) Fallback oficial embebido para 2025 (valores publicados por INEGI).
+    Retorna floats y campo '_status' para depuración.
+    """
+    import re, json
+    from decimal import Decimal, ROUND_HALF_UP
+
+    def _round2(v: float) -> float:
+        try:
+            return float(Decimal(str(v)).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP))
+        except Exception:
+            return float('nan')
+
+    def _to_float(x) -> float:
+        if x is None:
+            return float('nan')
+        s = str(x).replace('\\u00a0', ' ').strip()
+        s = re.sub(r'[^0-9,\\.\\-]', '', s)
+        # normaliza separadores
+        if s.count('.') > 1 or s.count(',') > 1:
+            s = s.replace(',', '')
+        else:
+            if ',' in s and '.' in s and s.rfind(',') > s.rfind('.'):
+                s = s.replace('.', '').replace(',', '.')
+            elif ',' in s and '.' not in s:
+                s = s.replace(',', '.')
+            else:
+                s = s.replace(',', '')
+        try:
+            return float(s)
+        except Exception:
+            return float('nan')
+
+    status = []
+    sess = http_session(20) if callable(http_session) else None
+    rq = (sess.get if sess else __import__('requests').get)
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124 Safari/537.36",
+        "Accept": "text/html,application/json",
+        "Accept-Language": "es-MX,es;q=0.9"
+    }
+
+    # --- 1) API INEGI con IDs conocidos (diaria/mensual/anual) ---
+    # Nota: Estos IDs se usan comúnmente para UMA nacional.
+    ids = "620706,620707,620708"
+    api_variants = [
+        ("00","true","BISE"),
+        ("00","true","BIE"),
+        ("0700","false","BISE"),
+        ("0700","false","BIE"),
+    ]
+    if inegi_token:
+        for geo, recent, source in api_variants:
+            try:
+                url = f"https://www.inegi.org.mx/app/api/indicadores/desarrolladores/jsonxml/INDICATOR/{ids}/es/{geo}/{recent}/{source}/2.0/{inegi_token}?type=json"
+                resp = rq(url, timeout=20, headers=headers)
+                if resp.status_code != 200:
+                    status.append(f"API {source} {geo}/{recent} HTTP {resp.status_code}")
+                    continue
+                data = resp.json()
+                series = data.get("Series") or data.get("series") or []
+                by_id = {}
+                for s in series:
+                    sid = (s.get("INDICATOR") or s.get("indicator") or s.get("INDICADOR") or "").strip()
+                    obs = s.get("OBSERVATIONS") or s.get("observations") or []
+                    if obs:
+                        by_id[sid] = obs[-1]
+                d = _to_float((by_id.get("620706") or {}).get("OBS_VALUE") or (by_id.get("620706") or {}).get("value"))
+                m = _to_float((by_id.get("620707") or {}).get("OBS_VALUE") or (by_id.get("620707") or {}).get("value"))
+                a = _to_float((by_id.get("620708") or {}).get("OBS_VALUE") or (by_id.get("620708") or {}).get("value"))
+                if d == d or m == m or a == a:  # alguno no-NaN
+                    if d == d and (m != m or m is None):
+                        m = _round2(d * 30.4)
+                    if m == m and (a != a or a is None):
+                        a = _round2(m * 12)
+                    status.append(f"API OK {source} {geo}/{recent}")
+                    return {"diario": d if d==d else None, "mensual": m if m==m else None, "anual": a if a==a else None, "_status": " | ".join(status)}
+                else:
+                    status.append(f"API {source} {geo}/{recent} sin datos")
+            except Exception as e:
+                status.append(f"API {source} {geo}/{recent} err: {e}")
+    else:
+        status.append("Sin INEGI_TOKEN")
+
+    # --- 2) Scraping página oficial ---
+    try:
+        url = "https://www.inegi.org.mx/temas/uma/"
+        resp = rq(url, timeout=20, headers=headers)
+        html = resp.text
+        # Busca fila 2025 o la primera fila numérica
+        # Captura tabla de "Valor de la UMA"
+        sec = re.search(r'(Valor de la UMA|UMA value).*?<table.*?</table>', html, re.S|re.I)
+        if sec:
+            table = sec.group(0)
+            # Intenta localizar específicamente el renglón con 2025
+            row = re.search(r'<tr[^>]*>\s*<td[^>]*>\s*2025\s*</td>(.*?)</tr>', table, re.S|re.I)
+            if not row:
+                # toma la primera fila con 4 celdas numéricas
+                rows = re.findall(r'<tr[^>]*>(.*?)</tr>', table, re.S|re.I)
+                for r in rows:
+                    tds = re.findall(r'<td[^>]*>(.*?)</td>', r, re.S|re.I)
+                    if len(tds) >= 4 and re.search(r'\d', tds[1]) and re.search(r'\d', tds[2]) and re.search(r'\d', tds[3]):
+                        row = re.search(r'.*', r, re.S)
+                        break
+            if row:
+                cells = re.findall(r'<td[^>]*>(.*?)</td>', row.group(0), re.S|re.I)
+                if len(cells) >= 4:
+                    d = _to_float(re.sub(r'<.*?>', ' ', cells[1]).strip())
+                    m = _to_float(re.sub(r'<.*?>', ' ', cells[2]).strip())
+                    a = _to_float(re.sub(r'<.*?>', ' ', cells[3]).strip())
+                    # Completa por reglas oficiales si hace falta
+                    if d == d and (m != m or m is None):
+                        m = _round2(d * 30.4)
+                    if m == m and (a != a or a is None):
+                        a = _round2(m * 12)
+                    status.append("Web UMA OK")
+                    return {"diario": d if d==d else None, "mensual": m if m==m else None, "anual": a if a==a else None, "_status": " | ".join(status)}
+        status.append("Web UMA sin fila")
+    except Exception as e:
+        status.append(f"Web UMA err: {e}")
+
+    # --- 3) Fallback oficial 2025 (vigente desde 1-feb-2025) ---
+    UMA_2025 = {"diario": 113.14, "mensual": 3439.46, "anual": 41273.52}
+    status.append("Fallback 2025 (oficial INEGI)")
+    return {"diario": UMA_2025["diario"], "mensual": UMA_2025["mensual"], "anual": UMA_2025["anual"], "_status": " | ".join(status)}
+
+
+
 def _fred_req_v1():
     s = requests.Session()
     try:
@@ -1507,6 +1641,4 @@ except Exception:
             wsh.write(i,0,k, fmt_bold); wsh.write(i,1,v, fmt_wrap)
     except Exception:
         pass
-
-
 
