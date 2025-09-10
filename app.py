@@ -745,7 +745,7 @@ if st.button("Generar Excel"):
     
     # Formato para leyendas (columna H)
     fmt_note = wb.add_format({'font_name': 'Arial', 'font_size': 9, 'italic': True, 'font_color': '#666666', 'text_wrap': True})
-end = today_cdmx()
+    end = today_cdmx()
     # Últimos 6 días hábiles (lun-vie), incluyendo hoy si aplica
     header_dates_date = []
     d = end
