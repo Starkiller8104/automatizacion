@@ -958,7 +958,7 @@ if st.button("Generar Excel"):
 
     fmt_bold  = wb.add_format({'font_name': 'Arial', 'bold': True})
     fmt_hdr   = wb.add_format({'font_name': 'Arial', 'bold': True, 'bg_color': '#F2F2F2', 'align':'center'})
-fmt_section = wb.add_format({'font_name': 'Arial', 'bold': True, 'bg_color': '#F2F2F2'})
+    fmt_section = wb.add_format({'font_name': 'Arial', 'bold': True, 'bg_color': '#F2F2F2'})
     fmt_num4  = wb.add_format({'font_name': 'Arial', 'num_format': '0.0000'})
     fmt_num6  = wb.add_format({'font_name': 'Arial', 'num_format': '0.000000'})
     fmt_wrap  = wb.add_format({'font_name': 'Arial', 'text_wrap': True})
