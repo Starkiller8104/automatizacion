@@ -958,6 +958,7 @@ if st.button("Generar Excel"):
 
     fmt_bold  = wb.add_format({'font_name': 'Arial', 'bold': True})
     fmt_hdr   = wb.add_format({'font_name': 'Arial', 'bold': True, 'bg_color': '#F2F2F2', 'align':'center'})
+fmt_section = wb.add_format({'font_name': 'Arial', 'bold': True, 'bg_color': '#F2F2F2'})
     fmt_num4  = wb.add_format({'font_name': 'Arial', 'num_format': '0.0000'})
     fmt_num6  = wb.add_format({'font_name': 'Arial', 'num_format': '0.000000'})
     fmt_wrap  = wb.add_format({'font_name': 'Arial', 'text_wrap': True})
@@ -1080,6 +1081,11 @@ if st.button("Generar Excel"):
     # --- /fallback ---
     ws = wb.add_worksheet("Indicadores")
     ws.merge_range('B1:G1', 'INDICADORES DE TIPO DE CAMBIO', fmt_title)
+ws.set_row(0, 42)
+try:
+    ws.write(0, 7, f'Última actualización: {now_ts()} (CDMX)', fmt_note)
+except Exception:
+    pass
     ws.set_column(0, 6, 16)
     # ULTIMA MODIFICACION
     try:
@@ -1099,7 +1105,16 @@ if st.button("Generar Excel"):
     # Claridad inmediata: anchos y congelar encabezado (hasta B3)
     ws.set_column(0, 0, 22)   # columna A (rótulos)
     ws.set_column(1, 7, 13)   # columnas B..H (fechas y sparklines)
-    ws.freeze_panes(2, 1)
+    ws.freeze_panes(3, 1)
+try:
+    ws.set_landscape()
+    ws.set_paper(9)
+    ws.set_margins(0.3, 0.3, 0.4, 0.4)
+    ws.fit_to_pages(1, 0)
+    ws.repeat_rows(0, 2)
+    ws.center_horizontally()
+except Exception:
+    pass
 
     # Leyenda para arrastres (ffill)
     ws.write(32, 7, '* Valor copiado cuando no hay publicación del día', wb.add_format({'font_name': 'Arial', 'italic': True, 'font_color': '#666'}))
@@ -1110,7 +1125,7 @@ if st.button("Generar Excel"):
     for i, d in enumerate(header_dates_date):
         ws.write_datetime(1, 1+i, _dt(d.year, d.month, d.day), fmt_date_dm)
 
-    ws.write(3, 0, "TIPOS DE CAMBIO:", fmt_bold)
+    ws.write(3, 0, "TIPOS DE CAMBIO:", fmt_section)
     ws.write(5, 0, "DÓLAR AMERICANO.", fmt_bold)
     ws.write(6, 0, "Dólar/Pesos:")
     for i, v in enumerate(fix_vals):
@@ -1152,14 +1167,14 @@ if st.button("Generar Excel"):
 
     ws.write(8, 0, "Compra:")
     for i, v in enumerate(compra):
-        ws.write(8, 1+i, v, fmt_num6)
+        ws.write(8, 1+i, v, fmt_num4)
     ws.write(9, 0, "Venta:")
     for i, v in enumerate(venta):
-        ws.write(9, 1+i, v, fmt_num6)
+        ws.write(9, 1+i, v, fmt_num4)
     # Asegura explícitamente las celdas G9/G10 (columna 6, fila 8 y 9)
     try:
-        if compra: ws.write(8, 6, compra[-1], fmt_num6)
-        if venta:  ws.write(9, 6, venta[-1],  fmt_num6)
+        if compra: ws.write(8, 6, compra[-1], fmt_num4)
+        if venta:  ws.write(9, 6, venta[-1],  fmt_num4)
     except Exception:
         pass
 
@@ -1167,7 +1182,7 @@ if st.button("Generar Excel"):
     ws.write(11, 0, "YEN JAPONÉS.", fmt_bold)
     ws.write(12, 0, "Yen Japonés/Peso:")
     for i, v in enumerate(jpy_vals):
-        ws.write(12, 1+i, v, fmt_num6_ffill if (jpy_fflags[i]) else fmt_num6)
+        ws.write(12, 1+i, v, fmt_num4_ffill if (jpy_fflags[i]) else fmt_num4)
     # --- Leyenda FIX Banxico para JPY en H13 ---
     try:
         need_legend_jpy = False
@@ -1203,12 +1218,18 @@ if st.button("Generar Excel"):
 
     ws.write(13, 0, "Dólar/Yen Japonés:")
     for i, v in enumerate(usd_jpy):
-        ws.write(13, 1+i, v, fmt_num6)
+        ws.write(13, 1+i, v, fmt_num4)
 
     ws.write(15, 0, "EURO.", fmt_bold)
     ws.write(16, 0, "Euro/Peso:")
     for i, v in enumerate(eur_vals):
-        ws.write(16, 1+i, v, fmt_num6_ffill if (eur_fflags[i]) else fmt_num6)
+        ws.write(16, 1+i, v, fmt_num4_ffill if (eur_fflags[i]) 
+try:
+    for _r in (6, 8, 9, 12, 13, 16):
+        ws.conditional_format(_r, 1, _r, 6, {'type': 'icon_set', 'icon_style': '3_arrows_gray'})
+except Exception:
+    pass
+else fmt_num4)
     # --- Leyenda FIX Banxico para EUR en H17 ---
     try:
         need_legend_eur = False
@@ -1262,7 +1283,7 @@ if st.button("Generar Excel"):
     for i, v in enumerate(udis_vals):
         ws.write(21, 1+i, v, fmt_num6_ffill if (udis_fflags[i]) else fmt_num6)
 
-    ws.write(23, 0, "TASAS TIIE:", fmt_bold)
+    ws.write(23, 0, "TASAS TIIE:", fmt_section)
     ws.write(25, 0, "TIIE objetivo:")
     ws.write(26, 0, "TIIE 28 Días:")
     ws.write(27, 0, "TIIE 91 Días:")
@@ -1276,7 +1297,7 @@ if st.button("Generar Excel"):
         ws.write(27, 1+i, v91, fmt_pct2_ffill if (tiie91_f[i]) else fmt_pct2)
         v182 = (tiie182[i]/100.0) if (tiie182[i] is not None) else None
         ws.write(28, 1+i, v182, fmt_pct2_ffill if (tiie182_f[i]) else fmt_pct2)
-    ws.write(30, 0, "CETES:", fmt_bold)
+    ws.write(30, 0, "CETES:", fmt_section)
     ws.write(32, 0, "CETES 28 Días:")
     ws.write(33, 0, "CETES 91 Días:")
     ws.write(34, 0, "CETES 182 Días:")
@@ -1291,7 +1312,7 @@ if st.button("Generar Excel"):
         v3 = (cetes364[i]/100.0) if (cetes364[i] is not None) else None
         ws.write(35, 1+i, v3, fmt_pct2_ffill if (cetes364_f[i]) else fmt_pct2)
 
-    ws.write(37, 0, "UMA:", fmt_bold)
+    ws.write(37, 0, "UMA:", fmt_section)
     # --- Escribir UMA como moneda en columnas B..G y leyenda en H ---
     fmt_money_local = wb.add_format({'font_name': 'Arial', 'num_format': '$#,##0.00'})
     def _write_uma_row(row, label, val):
@@ -1325,7 +1346,7 @@ if st.button("Generar Excel"):
         fmt_legend = wb.add_format({
             'font_name': 'Arial', 'font_size': 9, 'italic': True,
             'text_wrap': True, 'align': 'left', 'valign': 'top',
-            'border': 1, 'border_color': '#C0C0C0', 'bg_color': '#F9F9F9'
+            'bg_color': '#F9F9F9'
         })
         ws.set_column(7, 7, 34)
         ws.merge_range(39, 7, 41, 7, note_txt, fmt_legend)
