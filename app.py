@@ -905,13 +905,16 @@ except Exception:
     for i, d in enumerate(header_dates_date):
         ws.write_datetime(1, 1+i, _dt(d.year, d.month, d.day), fmt_date_dm)
 
-    ws.write(3, 0, "TIPOS DE CAMBIO:", fmt_bold)
-    ws.write(5, 0, "DÓLAR AMERICANO.", fmt_bold)
-    ws.write(6, 0, "Dólar/Pesos:")
-    for i, v in enumerate(fix_vals):
-        ws.write(6, 1+i, v, fmt_num4_ffill if (fix_fflags[i]) else fmt_num4)
 
-# --- Leyenda FIX Banxico para USD en H7 ---
+ws.write(3, 0, "TIPOS DE CAMBIO:", fmt_bold)
+
+# --- USD ---
+ws.write(5, 0, "DÓLAR AMERICANO.", fmt_bold)
+ws.write(6, 0, "Dólar/Pesos:")
+for i, v in enumerate(fix_vals):
+    ws.write(6, 1+i, v, fmt_num4_ffill if (fix_fflags[i]) else fmt_num4)
+
+# Leyenda USD (H7)
 try:
     need_legend = False
     _today = today_cdmx()
@@ -944,28 +947,28 @@ try:
 except Exception:
     pass
 
-    ws.write(7, 0, "MONEX:")
+# MONEX
+ws.write(7, 0, "MONEX:")
+ws.write(8, 0, "Compra:")
+for i, v in enumerate(compra):
+    ws.write(8, 1+i, v, fmt_num6)
+ws.write(9, 0, "Venta:")
+for i, v in enumerate(venta):
+    ws.write(9, 1+i, v, fmt_num6)
+# Asegura explícitamente las celdas G9/G10 (columna 6, fila 8 y 9)
+try:
+    if compra: ws.write(8, 6, compra[-1], fmt_num6)
+    if venta:  ws.write(9, 6, venta[-1],  fmt_num6)
+except Exception:
+    pass
 
-    ws.write(8, 0, "Compra:")
-    for i, v in enumerate(compra):
-        ws.write(8, 1+i, v, fmt_num6)
-    ws.write(9, 0, "Venta:")
-    for i, v in enumerate(venta):
-        ws.write(9, 1+i, v, fmt_num6)
-    # Asegura explícitamente las celdas G9/G10 (columna 6, fila 8 y 9)
-    try:
-        if compra: ws.write(8, 6, compra[-1], fmt_num6)
-        if venta:  ws.write(9, 6, venta[-1],  fmt_num6)
-    except Exception:
-        pass
+# --- JPY ---
+ws.write(11, 0, "YEN JAPONÉS.", fmt_bold)
+ws.write(12, 0, "Yen Japonés/Peso:")
+for i, v in enumerate(jpy_vals):
+    ws.write(12, 1+i, v, fmt_num6_ffill if (jpy_fflags[i]) else fmt_num6)
 
-
-    ws.write(11, 0, "YEN JAPONÉS.", fmt_bold)
-    ws.write(12, 0, "Yen Japonés/Peso:")
-    for i, v in enumerate(jpy_vals):
-        ws.write(12, 1+i, v, fmt_num6_ffill if (jpy_fflags[i]) else fmt_num6)
-
-# --- Leyenda FIX Banxico para JPY en H13 ---
+# Leyenda JPY (H13)
 try:
     need_legend_jpy = False
     _today = today_cdmx()
@@ -998,16 +1001,17 @@ try:
 except Exception:
     pass
 
-    ws.write(13, 0, "Dólar/Yen Japonés:")
-    for i, v in enumerate(usd_jpy):
-        ws.write(13, 1+i, v, fmt_num6)
+ws.write(13, 0, "Dólar/Yen Japonés:")
+for i, v in enumerate(usd_jpy):
+    ws.write(13, 1+i, v, fmt_num6)
 
-    ws.write(15, 0, "EURO.", fmt_bold)
-    ws.write(16, 0, "Euro/Peso:")
-    for i, v in enumerate(eur_vals):
-        ws.write(16, 1+i, v, fmt_num6_ffill if (eur_fflags[i]) else fmt_num6)
+# --- EUR ---
+ws.write(15, 0, "EURO.", fmt_bold)
+ws.write(16, 0, "Euro/Peso:")
+for i, v in enumerate(eur_vals):
+    ws.write(16, 1+i, v, fmt_num6_ffill if (eur_fflags[i]) else fmt_num6)
 
-# --- Leyenda FIX Banxico para EUR en H17 ---
+# Leyenda EUR (H17)
 try:
     need_legend_eur = False
     _today = today_cdmx()
@@ -1040,9 +1044,9 @@ try:
 except Exception:
     pass
 
-    ws.write(17, 0, "Euro/Dólar:")
-    for i, v in enumerate(eur_usd):
-        ws.write(17, 1+i, v, fmt_num6)
+ws.write(17, 0, "Euro/Dólar:")
+for i, v in enumerate(eur_usd):
+    ws.write(17, 1+i, v, fmt_num6)
 
     ws.write(19, 0, "UDIS:", fmt_bold)
     ws.write(21, 0, "UDIS: ")
@@ -1094,24 +1098,24 @@ except Exception:
     ws.write(40, 0, "Mensual:"); ws.write(40, 1, uma.get("mensual"))
     ws.write(41, 0, "Anual:");   ws.write(41, 1, uma.get("anual"))
 
-# --- Leyenda UMA en H40 (fila 39, col H) si valores vienen derivados o con error de INEGI ---
-try:
-    _uma_msg = None
-    _status = uma.get("_status")
-    _derived = bool(uma.get("_derived"))
-    if _status and str(_status).lower().strip() != "ok":
-        _uma_msg = "UMA estimada por indisponibilidad del servicio de INEGI."
-    elif _derived:
-        _uma_msg = "Alguno(s) valores de UMA fueron estimados a partir de otra periodicidad."
-    if _uma_msg:
-        ws.write(39, 7, _uma_msg, fmt_note)  # H40
-        try:
-            ws.set_column(7, 7, 40)
-            ws.set_row(39, 48)
-        except Exception:
-            pass
-except Exception:
-    pass
+    # --- Leyenda UMA en H40 (fila 39, col H) si valores vienen derivados o con error de INEGI ---
+    try:
+        _uma_msg = None
+        _status = uma.get("_status")
+        _derived = bool(uma.get("_derived"))
+        if _status and str(_status).lower().strip() != "ok":
+            _uma_msg = "UMA estimada por indisponibilidad del servicio de INEGI."
+        elif _derived:
+            _uma_msg = "Alguno(s) valores de UMA fueron estimados a partir de otra periodicidad."
+        if _uma_msg:
+            ws.write(39, 7, _uma_msg, fmt_note)  # H40
+            try:
+                ws.set_column(7, 7, 40)
+                ws.set_row(39, 48)
+            except Exception:
+                pass
+    except Exception:
+        pass
 
 
 do_raw = globals().get('do_raw', True)
