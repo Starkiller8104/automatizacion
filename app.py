@@ -906,6 +906,47 @@ except Exception:
         ws.write_datetime(1, 1+i, _dt(d.year, d.month, d.day), fmt_date_dm)
 
 
+
+
+
+    # --- Preparar series para TIPOS DE CAMBIO ---
+    try:
+        fix_vals = fix6
+    except NameError:
+        fix_vals = []
+    try:
+        jpy_vals = jpy6
+    except NameError:
+        jpy_vals = []
+    try:
+        eur_vals = eur6
+    except NameError:
+        eur_vals = []
+
+    # Flags de ffill (si no tenemos forma de detectarlo, asumimos False)
+    fix_fflags = [False] * (len(fix_vals) or 6)
+    jpy_fflags = [False] * (len(jpy_vals) or 6)
+    eur_fflags = [False] * (len(eur_vals) or 6)
+
+    # Derivados: USD/JPY y EUR/USD cuando existan ambas series
+    try:
+        usd_jpy = [(fx / jy) if (fx is not None and jy is not None and jy != 0) else None
+                   for fx, jy in zip(fix_vals, jpy_vals)]
+    except Exception:
+        usd_jpy = [None] * max(len(fix_vals), len(jpy_vals), 6)
+
+    try:
+        eur_usd = [(eu / fx) if (eu is not None and fx is not None and fx != 0) else None
+                   for eu, fx in zip(eur_vals, fix_vals)]
+    except Exception:
+        eur_usd = [None] * max(len(eur_vals), len(fix_vals), 6)
+
+    # MONEX placeholders si no hay datos
+    if 'compra' not in globals():
+        compra = [None] * (len(fix_vals) or 6)
+    if 'venta' not in globals():
+        venta = [None] * (len(fix_vals) or 6)
+
     ws.write(3, 0, "TIPOS DE CAMBIO:", fmt_bold)
 
     # --- USD ---
