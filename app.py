@@ -544,18 +544,35 @@ def get_uma(inegi_token: str):
     UMA nacional: 620706 (diaria), 620707 (mensual), 620708 (anual)
     Retorna: {'fecha','diaria','mensual','anual','_status','_source'}
     """
+    import re as _re
     base = "https://www.inegi.org.mx/app/api/indicadores/desarrolladores/jsonxml/INDICATOR"
     ids = "620706,620707,620708"
+    # Probar variantes comunes (BISE/BIE) y geocódigos (0700 = Nacional, 00 también aparece en ejemplos)
     urls = [
+        f"{base}/{ids}/es/0700/false/BISE/2.0/{inegi_token}?type=json",
+        f"{base}/{ids}/es/0700/false/BIE/2.0/{inegi_token}?type=json",
         f"{base}/{ids}/es/00/true/BISE/2.0/{inegi_token}?type=json",
-        f"{base}/{ids}/es/00/true/BIE/2.0/{inegi_token}?type=json",  
+        f"{base}/{ids}/es/00/true/BIE/2.0/{inegi_token}?type=json",
     ]
 
     def _num(x):
-        try:
-            return float(str(x).replace(",", ""))
-        except:
+        if x is None:
             return None
+        s = str(x).strip()
+        s = s.replace(",", "")                 # quitar separador de miles
+        s = _re.sub(r"[^0-9.\-]", "", s)       # quitar $, espacios duros, etc.
+        try:
+            return float(s)
+        except Exception:
+            return None
+
+    def _last_obs(s):
+        if not isinstance(s, dict):
+            return None
+        obs = s.get("OBSERVATIONS") or s.get("observations") or []
+        if not obs:
+            return None
+        return obs[-1]
 
     last_err = None
     for u in urls:
@@ -567,37 +584,51 @@ def get_uma(inegi_token: str):
             data = r.json()
             series = data.get("Series") or data.get("series") or []
             if not series:
-                last_err = "Sin 'Series'"; continue
+                last_err = "Sin 'Series'"
+                continue
 
-            def last_obs(s):
-                obs = s.get("OBSERVATIONS") or s.get("observations") or []
-                return obs[-1] if obs else None
+            # Mapear por ID para no depender del orden
+            by_id = {}
+            for s in series:
+                sid = (s.get("INDICATOR") or s.get("indicator") or s.get("INDICADOR") or "").strip()
+                by_id[sid] = _last_obs(s)
 
-            d_obs = last_obs(series[0]); m_obs = last_obs(series[1]) if len(series)>1 else None
-            a_obs = last_obs(series[2]) if len(series)>2 else None
+            d_obs = by_id.get("620706")  # diaria
+            m_obs = by_id.get("620707")  # mensual
+            a_obs = by_id.get("620708")  # anual
 
             def get_v(o):
-                if not o: return None
+                if not o:
+                    return None
                 return _num(o.get("OBS_VALUE") or o.get("value"))
-            def get_f(o):
-                if not o: return None
-                return o.get("TIME_PERIOD") or o.get("periodo") or o.get("time_period") or o.get("fecha")
 
-            return {
-                "fecha": get_f(d_obs) or get_f(m_obs) or get_f(a_obs),
+            def get_f(o):
+                if not o:
+                    return None
+                return (o.get("TIME_PERIOD") or o.get("periodo") or
+                        o.get("time_period") or o.get("fecha"))
+
+            out = {
+                "fecha":   get_f(d_obs) or get_f(m_obs) or get_f(a_obs),
                 "diaria":  get_v(d_obs),
                 "mensual": get_v(m_obs),
                 "anual":   get_v(a_obs),
                 "_status": "ok",
                 "_source": "INEGI",
             }
+            # Asegura que al menos un valor venga con dato
+            if out["diaria"] is not None or out["mensual"] is not None or out["anual"] is not None:
+                return out
+            else:
+                last_err = "Valores vacíos en respuesta"
         except Exception as e:
             last_err = str(e)
             continue
 
-    return {"fecha": None, "diaria": None, "mensual": None, "anual": None,
-            "_status": f"err: {last_err}", "_source": "fallback"}
-
+    return {
+        "fecha": None, "diaria": None, "mensual": None, "anual": None,
+        "_status": f"err: {last_err}", "_source": "fallback"
+    }
 def _probe(fn, ok_condition):
     t0 = time.time()
     try:
@@ -1393,4 +1424,5 @@ except Exception:
             wsh.write(i,0,k, fmt_bold); wsh.write(i,1,v, fmt_wrap)
     except Exception:
         pass
+
 
