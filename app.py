@@ -1310,22 +1310,23 @@ if st.button("Generar Excel"):
         v3 = (cetes364[i]/100.0) if (cetes364[i] is not None) else None
         ws.write(35, 1+i, v3, fmt_pct2_ffill if (cetes364_f[i]) else fmt_pct2)
     ws.write(37, 0, "UMA:", fmt_bold)
-def _write_uma(r, label, val):
-    ws.write(r, 0, label)
-    try:
-        from math import isnan
-        v = float(val) if val is not None else None
-        if v is not None and not isnan(v):
-            # escribe como número para evitar que Excel lo trate como texto
-            ws.write_number(r, 1, round(v, 2))
-        else:
+    def _write_uma(r, label, val):
+        ws.write(r, 0, label)
+        try:
+            from math import isnan
+            v = float(val) if val is not None else None
+            if v is not None and not isnan(v):
+                ws.write_number(r, 1, round(v, 2))
+            else:
+                ws.write(r, 1, "")
+        except Exception:
             ws.write(r, 1, "")
-    except Exception:
-        ws.write(r, 1, "")
+    
+    _write_uma(39, "Diario:", uma.get("diaria"))
+    _write_uma(40, "Mensual:", uma.get("mensual"))
+    _write_uma(41, "Anual:", uma.get("anual"))
+    
 
-_write_uma(39, "Diario:", uma.get("diaria"))
-_write_uma(40, "Mensual:", uma.get("mensual"))
-_write_uma(41, "Anual:", uma.get("anual"))
 
 do_raw = globals().get('do_raw', True)
 if do_raw and ('wb' in globals()):
