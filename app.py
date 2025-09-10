@@ -891,11 +891,6 @@ if st.button("Generar Excel"):
         need_legend = False
         _today = today_cdmx()
         try:
-            if datetime.now(CDMX).hour < 12:
-                need_legend = True
-        except Exception:
-            pass
-        try:
             if isinstance(fix_fflags, (list, tuple)) and len(fix_fflags) > 0 and bool(fix_fflags[-1]):
                 need_legend = True
         except Exception:
@@ -949,11 +944,6 @@ if st.button("Generar Excel"):
         need_legend_jpy = False
         _today = today_cdmx()
         try:
-            if datetime.now(CDMX).hour < 12:
-                need_legend_jpy = True
-        except Exception:
-            pass
-        try:
             if isinstance(jpy_fflags, (list, tuple)) and len(jpy_fflags) > 0 and bool(jpy_fflags[-1]):
                 need_legend_jpy = True
         except Exception:
@@ -994,11 +984,6 @@ if st.button("Generar Excel"):
     try:
         need_legend_eur = False
         _today = today_cdmx()
-        try:
-            if datetime.now(CDMX).hour < 12:
-                need_legend_eur = True
-        except Exception:
-            pass
         try:
             if isinstance(eur_fflags, (list, tuple)) and len(eur_fflags) > 0 and bool(eur_fflags[-1]):
                 need_legend_eur = True
