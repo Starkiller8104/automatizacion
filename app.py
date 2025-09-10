@@ -1322,7 +1322,13 @@ if st.button("Generar Excel"):
         note_txt = ("UMA: valor vigente anual publicado por INEGI. "
                     "Se replica de B→G porque no cambia día a día; "
                     "Mensual = Diaria × 30.4; Anual = Mensual × 12. Fuente: INEGI.")
-        ws.write(38, 7, note_txt, fmt_note)
+        fmt_legend = wb.add_format({
+            'font_name': 'Arial', 'font_size': 9, 'italic': True,
+            'text_wrap': True, 'align': 'left', 'valign': 'top',
+            'border': 1, 'border_color': '#C0C0C0', 'bg_color': '#F9F9F9'
+        })
+        ws.set_column(7, 7, 34)
+        ws.merge_range(39, 7, 41, 7, note_txt, fmt_legend)
     except Exception:
         pass
 
