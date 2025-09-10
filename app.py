@@ -1087,11 +1087,6 @@ if st.button("Generar Excel"):
     except Exception:
         pass
 
-ws.set_row(0, 42)
-try:
-    ws.write(0, 7, f'Última actualización: {now_ts()} (CDMX)', fmt_note)
-except Exception:
-    pass
     ws.set_column(0, 6, 16)
     # ULTIMA MODIFICACION
     try:
@@ -1692,6 +1687,5 @@ except Exception:
             wsh.write(i,0,k, fmt_bold); wsh.write(i,1,v, fmt_wrap)
     except Exception:
         pass
-
 
 
