@@ -1365,7 +1365,7 @@ if st.button("Generar Excel"):
     ws.write(44, 2, "TASA DE INTERES", fmt_hdr)
 
     from datetime import date as _date
-    _today = today_cdmx().date()
+    _today = today_cdmx()
     _year  = _today.year
     _meses = [
         (12, "Diciembre"), (11, "Noviembre"), (10, "Octubre"), (9, "Septiembre"),
@@ -1790,14 +1790,6 @@ except Exception:
             wsh.write(i,0,k, fmt_bold); wsh.write(i,1,v, fmt_wrap)
     except Exception:
         pass
-
-
-
-
-
-
-
-
 
 
 
