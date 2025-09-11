@@ -1363,6 +1363,8 @@ if st.button("Generar Excel"):
     ws.write(44, 0, "MES", fmt_hdr)
     ws.write(44, 1, "INFLACIÓN", fmt_hdr)
     ws.write(44, 2, "TASA DE INTERES", fmt_hdr)
+    ws.set_column(2, 2, 22)  # Columna C más ancha para el título
+
 
     from datetime import date as _date
     _today = today_cdmx()
@@ -1393,6 +1395,19 @@ if st.button("Generar Excel"):
 
     m_cpi = _last_per_month(cpi_obs)
     m_fed = _last_per_month(ff_obs)
+    # Si no hay dato de inflación para el mes en curso, mostramos leyenda en D46
+    try:
+        _m_actual = _today.month
+        if m_cpi.get(_m_actual) is None:
+            # Formato de nota discreta
+            try:
+                fmt_note = wb.add_format({'font_size': 8, 'italic': True, 'font_color': '#666666', 'text_wrap': True})
+            except Exception:
+                fmt_note = fmt_pct2
+            ws.write(45, 3, "Nota: El dato de inflación del mes en curso aún no está publicado en FRED; se actualizará tras el reporte oficial (BLS).", fmt_note)
+    except Exception:
+        pass
+
 
     base_row = 45  # Excel 46..57
     for i, (mes_num, mes_nom) in enumerate(_meses):
@@ -1780,6 +1795,10 @@ except Exception:
             wsh.write(i,0,k, fmt_bold); wsh.write(i,1,v, fmt_wrap)
     except Exception:
         pass
+
+
+
+
 
 
 
