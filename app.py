@@ -1272,10 +1272,10 @@ if st.button("Generar Excel"):
     # Indicadores con triángulos en columna H (verde cuando baja)
     # Prepara formatos
     try:
-        fmt_tri_base   = wb.add_format({'font_size': 12, 'bold': True, 'align': 'center'})
-        fmt_tri_green  = wb.add_format({'font_size': 12, 'bold': True, 'align': 'center', 'font_color': '#008A00'})
-        fmt_tri_red    = wb.add_format({'font_size': 12, 'bold': True, 'align': 'center', 'font_color': '#D00000'})
-        fmt_tri_yellow = wb.add_format({'font_size': 12, 'bold': True, 'align': 'center', 'font_color': '#C9A300'})
+        fmt_tri_base   = wb.add_format({'font_size': 13, 'align': 'left'})
+        fmt_tri_green  = wb.add_format({'font_size': 13, 'align': 'left', 'font_color': '#008A00'})
+        fmt_tri_red    = wb.add_format({'font_size': 13, 'align': 'left', 'font_color': '#D00000'})
+        fmt_tri_yellow = wb.add_format({'font_size': 13, 'align': 'left', 'font_color': '#C9A300'})
     except Exception:
         pass
 
@@ -1816,6 +1816,9 @@ except Exception:
             wsh.write(i,0,k, fmt_bold); wsh.write(i,1,v, fmt_wrap)
     except Exception:
         pass
+
+
+
 
 
 
