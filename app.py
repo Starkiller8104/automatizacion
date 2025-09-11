@@ -1049,6 +1049,7 @@ if st.button("Generar Excel"):
     cetes364, cetes364_f = _ffill_with_flags(m_c364, header_dates)
 
     
+    
     # MONEX compra/venta (prioritario); fallback a MOVEX (cálculo previo)
     try:
         _c_mx, _v_mx, _mx_src = get_monex_usd_compra_venta()
@@ -1064,7 +1065,6 @@ if st.button("Generar Excel"):
             compra = [None] * (len(header_dates) - 1) + [_c_mx]
             venta  = [None] * (len(header_dates) - 1) + [_v_mx]
     except Exception:
-except Exception:
         try:
             movex6  
         except NameError:
@@ -1736,7 +1736,6 @@ except Exception:
             wsh.write(i,0,k, fmt_bold); wsh.write(i,1,v, fmt_wrap)
     except Exception:
         pass
-
 
 
 
