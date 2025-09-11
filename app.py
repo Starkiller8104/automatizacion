@@ -376,7 +376,8 @@ def logo_base64(max_height_px: int = 40):
         w, h = im.size
         if h > max_height_px:
             im = im.resize((int(w * max_height_px / h), max_height_px))
-        bio = io.BytesIO()
+        prog.progress(80, text="Construyendo Excel…")
+    bio = io.BytesIO()
         im.save(bio, format="PNG")
         return base64.b64encode(bio.getvalue()).decode("ascii")
     except Exception:
@@ -489,8 +490,7 @@ def http_session(timeout=15):
 @st.cache_data(ttl=120)
 def get_monex_usd_compra_venta():
     """
-    Lee compra/venta de USD desde la página pública de Monex.
-    Devuelve (compra, venta, fuente). Lanza excepción si no encuentra el patrón.
+    Lee compra/venta de USD desde el portal público de Monex y devuelve (compra, venta, fuente).
     """
     url = "https://www.monex.com.mx/portal/home"
     headers = {"User-Agent": "Mozilla/5.0"}
@@ -499,18 +499,15 @@ def get_monex_usd_compra_venta():
     html = r.text
 
     # Patrón típico: 'USD 17.59 / 19.45'
-    m = re.search(r'USD\s*([0-9][0-9\.,]*)\s*/\s*([0-9][0-9\.,]*)', html)
+    m = _re.search(r'USD\s*([0-9][0-9\.,]*)\s*/\s*([0-9][0-9\.,]*)', html)
     if not m:
-        # Segundo intento: texto sin etiquetas
-        plain = re.sub(r'<[^>]+>', ' ', html)
-        m = re.search(r'USD\s*([0-9][0-9\.,]*)\s*/\s*([0-9][0-9\.,]*)', plain)
+        plain = _re.sub(r'<[^>]+>', ' ', html)
+        m = _re.search(r'USD\s*([0-9][0-9\.,]*)\s*/\s*([0-9][0-9\.,]*)', plain)
     if not m:
         raise RuntimeError("No se encontró USD compra/venta en Monex.")
 
     def _to_num(s: str) -> float:
-        s = str(s).strip()
-        # Normaliza separadores miles/decimales; Monex suele usar punto decimal
-        s = s.replace(",", "")
+        s = str(s).strip().replace(",", "")
         return float(s)
 
     compra = _to_num(m.group(1))
@@ -925,6 +922,8 @@ _check_tokens()
 _render_sidebar_status()
 
 if st.button("Generar Excel"):
+    prog = st.progress(0, text="Iniciando…")
+    prog.progress(5, text="Preparando entorno…")
     def pad6(lst): return ([None]*(6-len(lst)))+lst if len(lst) < 6 else lst[-6:]
     none6 = [None]*6
 
@@ -932,17 +931,21 @@ if st.button("Generar Excel"):
     
     eur6 = pad6([v for _, v in sie_last_n(SIE_SERIES["EUR_MXN"], n=6)])
     jpy6 = pad6([v for _, v in sie_last_n(SIE_SERIES["JPY_MXN"], n=6)])
+    prog.progress(25, text="Consultando Banxico (FX)…")
 
     
     movex_series = rolling_movex_for_last6(window=movex_win)
     movex6 = pad6(movex_series)
+    prog.progress(35, text="Calculando baseline MOVEX…")
 
     
     cetes28_6 = pad6([v for _, v in sie_last_n(SIE_SERIES["CETES_28"], n=6)])
     cetes91_6 = pad6([v for _, v in sie_last_n(SIE_SERIES["CETES_91"], n=6)])
     cetes182_6 = pad6([v for _, v in sie_last_n(SIE_SERIES["CETES_182"], n=6)])
     cetes364_6 = pad6([v for _, v in sie_last_n(SIE_SERIES["CETES_364"], n=6)])
+    prog.progress(50, text="Consultando CETES…")
     uma = get_uma(INEGI_TOKEN)
+    prog.progress(65, text="Obteniendo UMA (INEGI)…")
 
     # Normaliza claves y aplica fallback si vienen vacías/NaN
     from math import isnan
@@ -984,6 +987,7 @@ if st.button("Generar Excel"):
             )
     except NameError:
         fred_rows = None  
+    prog.progress(80, text="Construyendo Excel…")
     bio = io.BytesIO()
     wb = xlsxwriter.Workbook(bio, {'in_memory': True})
 
@@ -1047,13 +1051,6 @@ if st.button("Generar Excel"):
     cetes91, cetes91_f = _ffill_with_flags(m_c91, header_dates)
     cetes182, cetes182_f = _ffill_with_flags(m_c182, header_dates)
     cetes364, cetes364_f = _ffill_with_flags(m_c364, header_dates)
-
-    
-    
-    
-    
-    # MONEX compra/venta (conservador): usa MOVEX+margen para histórico y Monex SOLO para hoy
-    # 1) Base histórica (MOVEX + margen)
     try:
         movex6  
     except NameError:
@@ -1061,13 +1058,12 @@ if st.button("Generar Excel"):
     compra = [(x*(1 - margen_pct/100) if x is not None else None) for x in movex6]
     venta  = [(x*(1 + margen_pct/100) if x is not None else None) for x in movex6]
 
-    # 2) Intentar sobrescribir el último día con Monex (sin tocar días anteriores)
+    # Monex: sobrescribe SOLO el último día si está disponible
     try:
         _c_mx, _v_mx, _mx_src = get_monex_usd_compra_venta()
         if compra: compra[-1] = _c_mx
         if venta:  venta[-1]  = _v_mx
     except Exception:
-        # Si falla Monex, se queda el baseline (MOVEX + margen)
         pass
 
     usd_jpy = [((u/j) if (u is not None and j not in (None, 0)) else None) for u,j in zip(fix_vals, jpy_vals)]
@@ -1077,6 +1073,7 @@ if st.button("Generar Excel"):
         uma  
     except NameError:
         uma = get_uma(INEGI_TOKEN)
+    prog.progress(65, text="Obteniendo UMA (INEGI)…")
 
     def _last_or_none(series_pairs): 
         return series_pairs[-1][1] if series_pairs else None
@@ -1140,7 +1137,7 @@ if st.button("Generar Excel"):
         ws.insert_image(
         'A1',
         'logo.png',
-        {'x_scale': 0.85, 'y_scale': 0.75}
+        {'x_scale': 0.55, 'y_scale': 0.55}
         )
     except Exception:
         pass
@@ -1275,7 +1272,7 @@ if st.button("Generar Excel"):
 
     # Indicadores de variación (flechas grises) en filas clave B..G
     try:
-        for _r in (6, 8, 9, 12, 13, 16, 17):
+        for _r in (6, 8, 9, 12, 13, 16):
             ws.conditional_format(_r, 1, _r, 6, {'type': 'icon_set', 'icon_style': '3_arrows'})
     except Exception:
         pass
@@ -1682,6 +1679,12 @@ try:
     wb.close()
     try:
         st.session_state['xlsx_bytes'] = bio.getvalue()
+        prog.progress(100, text="Listo ✅")
+        time.sleep(0.3)
+        try:
+            prog.empty()
+        except Exception:
+            pass
     except Exception:
         pass
 except NameError:
@@ -1734,8 +1737,6 @@ except Exception:
             wsh.write(i,0,k, fmt_bold); wsh.write(i,1,v, fmt_wrap)
     except Exception:
         pass
-
-
 
 
 
