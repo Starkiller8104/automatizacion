@@ -1271,8 +1271,8 @@ if st.button("Generar Excel"):
 
     # Indicadores de variación (flechas grises) en filas clave B..G
     try:
-        for _r in (6, 8, 9, 12, 13, 16):
-            ws.conditional_format(_r, 1, _r, 6, {'type': 'icon_set', 'icon_style': '3_arrows'})
+        for _r in (6, 8, 9, 12, 13, 16, 17):
+            ws.conditional_format(_r, 1, _r, 6, {'type': 'icon_set', 'icon_style': '3_arrows', 'reverse_icons': True})
     except Exception:
         pass
 
@@ -1402,16 +1402,6 @@ if st.button("Generar Excel"):
         ws.write(r, 1, (cpi_v/100.0) if (cpi_v is not None) else None, fmt_pct2)
         fed_v = m_fed.get(mes_num)
         ws.write(r, 2, (fed_v/100.0) if (fed_v is not None) else None, fmt_pct2)
-    # Formato condicional: flechas de color para Inflación y Tasa (filas 46..57)
-    try:
-        # Inflación (columna B) y Tasa (columna C)
-        ws.conditional_format(45, 1, 56, 1, {'type': 'icon_set', 'icon_style': '3_arrows'})
-        ws.conditional_format(45, 2, 56, 2, {'type': 'icon_set', 'icon_style': '3_arrows'})
-    except Exception:
-        pass
-
-
-
     ws.write(37, 0, "UMA:", fmt_section)
     # --- Escribir UMA como moneda en columnas B..G y leyenda en H ---
     fmt_money_local = wb.add_format({'font_name': 'Arial', 'num_format': '$#,##0.00'})
@@ -1790,6 +1780,11 @@ except Exception:
             wsh.write(i,0,k, fmt_bold); wsh.write(i,1,v, fmt_wrap)
     except Exception:
         pass
+
+
+
+
+
 
 
 
