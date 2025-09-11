@@ -1275,7 +1275,7 @@ if st.button("Generar Excel"):
 
     # Indicadores de variación (flechas grises) en filas clave B..G
     try:
-        for _r in (6, 8, 9, 12, 13, 16):
+        for _r in (6, 8, 9, 12, 13, 16, 17):
             ws.conditional_format(_r, 1, _r, 6, {'type': 'icon_set', 'icon_style': '3_arrows'})
     except Exception:
         pass
@@ -1734,6 +1734,7 @@ except Exception:
             wsh.write(i,0,k, fmt_bold); wsh.write(i,1,v, fmt_wrap)
     except Exception:
         pass
+
 
 
 
