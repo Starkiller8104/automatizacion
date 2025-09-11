@@ -921,6 +921,17 @@ _check_tokens()
 _render_sidebar_status()
 
 if st.button("Generar Excel"):
+    # Limpieza automática de caché al generar
+    try:
+        st.cache_data.clear()
+    except Exception:
+        pass
+    # Evita descargas previas obsoletas
+    try:
+        st.session_state.pop('xlsx_bytes', None)
+    except Exception:
+        pass
+
     prog = st.progress(0, text="Iniciando…")
     prog.progress(5, text="Preparando entorno…")
     def pad6(lst): return ([None]*(6-len(lst)))+lst if len(lst) < 6 else lst[-6:]
@@ -1736,6 +1747,14 @@ except Exception:
             wsh.write(i,0,k, fmt_bold); wsh.write(i,1,v, fmt_wrap)
     except Exception:
         pass
+
+
+
+
+
+
+
+
 
 
 
