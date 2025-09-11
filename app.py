@@ -1136,7 +1136,7 @@ if st.button("Generar Excel"):
         ws.insert_image(
         'A1',
         'logo.png',
-        {'x_scale': 0.55, 'y_scale': 0.55}
+        {'x_scale': 0.75, 'y_scale': 0.75}
         )
     except Exception:
         pass
