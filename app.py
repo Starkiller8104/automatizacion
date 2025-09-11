@@ -1048,13 +1048,23 @@ if st.button("Generar Excel"):
     cetes182, cetes182_f = _ffill_with_flags(m_c182, header_dates)
     cetes364, cetes364_f = _ffill_with_flags(m_c364, header_dates)
 
+    
     # MONEX compra/venta (prioritario); fallback a MOVEX (cálculo previo)
     try:
         _c_mx, _v_mx, _mx_src = get_monex_usd_compra_venta()
-        # Alinear a 6 columnas del encabezado: solo el último día con dato de Monex
-        compra = [_c_mx] * len(header_dates)
-        venta  = [_v_mx] * len(header_dates)
+        # Escala histórico usando la razón Monex/FIX del día más reciente disponible
+        _fix_today = fix_vals[-1] if (fix_vals and (fix_vals[-1] is not None)) else None
+        if _fix_today:
+            _rc = _c_mx / _fix_today
+            _rv = _v_mx / _fix_today
+            compra = [(fv * _rc) if (fv is not None) else None for fv in fix_vals]
+            venta  = [(fv * _rv) if (fv is not None) else None for fv in fix_vals]
+        else:
+            # Si no tenemos FIX del día, al menos coloca el de hoy al final
+            compra = [None] * (len(header_dates) - 1) + [_c_mx]
+            venta  = [None] * (len(header_dates) - 1) + [_v_mx]
     except Exception:
+except Exception:
         try:
             movex6  
         except NameError:
@@ -1726,6 +1736,8 @@ except Exception:
             wsh.write(i,0,k, fmt_bold); wsh.write(i,1,v, fmt_wrap)
     except Exception:
         pass
+
+
 
 
 
