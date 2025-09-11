@@ -1364,6 +1364,7 @@ if st.button("Generar Excel"):
     ws.write(44, 1, "INFLACIÓN", fmt_hdr)
     ws.write(44, 2, "TASA DE INTERES", fmt_hdr)
     ws.set_column(2, 2, 22)  # Columna C más ancha para el título
+    ws.set_column(3, 6, 14)  # Ensancha D..G para la leyenda
 
 
     from datetime import date as _date
@@ -1401,10 +1402,10 @@ if st.button("Generar Excel"):
         if m_cpi.get(_m_actual) is None:
             # Formato de nota discreta
             try:
-                fmt_note = wb.add_format({'font_size': 8, 'italic': True, 'font_color': '#666666', 'text_wrap': True})
+                fmt_note = wb.add_format({'font_size': 8, 'italic': True, 'font_color': '#666666', 'text_wrap': True, 'valign': 'top'})
             except Exception:
                 fmt_note = fmt_pct2
-            ws.write(45, 3, "Nota: El dato de inflación del mes en curso aún no está publicado en FRED; se actualizará tras el reporte oficial (BLS).", fmt_note)
+            ws.merge_range(45, 3, 46, 6, "Nota: El dato de inflación del mes en curso aún no está publicado en FRED; se actualizará tras el reporte oficial (BLS).", fmt_note)
     except Exception:
         pass
 
@@ -1795,6 +1796,8 @@ except Exception:
             wsh.write(i,0,k, fmt_bold); wsh.write(i,1,v, fmt_wrap)
     except Exception:
         pass
+
+
 
 
 
