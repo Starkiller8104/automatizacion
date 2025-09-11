@@ -1357,52 +1357,59 @@ if st.button("Generar Excel"):
         ws.write(34, 1+i, v2, fmt_pct2_ffill if (cetes182_f[i]) else fmt_pct2)
         v3 = (cetes364[i]/100.0) if (cetes364[i] is not None) else None
         ws.write(35, 1+i, v3, fmt_pct2_ffill if (cetes364_f[i]) else fmt_pct2)
+    # === ESTADOS UNIDOS (tabla mensual) ===
+    ws.write(43, 0, "ESTADOS UNIDOS:", fmt_section)
 
-    # === ESTADOS UNIDOS ===
+    ws.write(44, 0, "MES", fmt_hdr)
+    ws.write(44, 1, "INFLACIÓN", fmt_hdr)
+    ws.write(44, 2, "TASA DE INTERES", fmt_hdr)
+
+    from datetime import date as _date
+    _today = today_cdmx().date()
+    _year  = _today.year
+    _meses = [
+        (12, "Diciembre"), (11, "Noviembre"), (10, "Octubre"), (9, "Septiembre"),
+        (8, "Agosto"), (7, "Julio"), (6, "Junio"), (5, "Mayo"),
+        (4, "Abril"), (3, "Marzo"), (2, "Febrero"), (1, "Enero")
+    ]
+
     try:
-        ws.write(43, 0, "ESTADOS UNIDOS:", fmt_section)
+        cpi_obs = fred_fetch_series("CPIAUCSL", start=f"{_year}-01-01", end=f"{_year}-12-31", units="pc1")
+    except Exception:
+        cpi_obs = []
+    try:
+        ff_obs  = fred_fetch_series("DFEDTARU", start=f"{_year}-01-01", end=f"{_year}-12-31", units="lin")
+    except Exception:
+        ff_obs = []
+
+    def _last_per_month(obs):
+        out = {}
+        for o in obs or []:
+            _d = parse_any_date(o.get("date"))
+            _v = try_float(o.get("value"))
+            if _d and (_v is not None):
+                out[_d.month] = _v
+        return out
+
+    m_cpi = _last_per_month(cpi_obs)
+    m_fed = _last_per_month(ff_obs)
+
+    base_row = 45  # Excel 46..57
+    for i, (mes_num, mes_nom) in enumerate(_meses):
+        r = base_row + i
+        ws.write(r, 0, mes_nom)
+        cpi_v = m_cpi.get(mes_num)
+        ws.write(r, 1, (cpi_v/100.0) if (cpi_v is not None) else None, fmt_pct2)
+        fed_v = m_fed.get(mes_num)
+        ws.write(r, 2, (fed_v/100.0) if (fed_v is not None) else None, fmt_pct2)
+    # Formato condicional: flechas de color para Inflación y Tasa (filas 46..57)
+    try:
+        # Inflación (columna B) y Tasa (columna C)
+        ws.conditional_format(45, 1, 56, 1, {'type': 'icon_set', 'icon_style': '3_arrows'})
+        ws.conditional_format(45, 2, 56, 2, {'type': 'icon_set', 'icon_style': '3_arrows'})
     except Exception:
         pass
 
-    # Inflación EE.UU. (variación 12 meses, CPIAUCSL, units=pc1)
-    ws.write(44, 0, "Inflación EE.UU. (12m):")
-    try:
-        cpi_start = (header_dates_date[0] - timedelta(days=500)).isoformat()
-        cpi_end   = header_dates_date[-1].isoformat()
-        cpi_obs   = fred_fetch_series("CPIAUCSL", start=cpi_start, end=cpi_end, units="pc1")
-        m_cpi = {}
-        for o in cpi_obs:
-            _d = parse_any_date(o.get("date"))
-            _v = try_float(o.get("value"))
-            if _d and (_v is not None):
-                m_cpi[_d.date().isoformat()] = _v
-        us_inf_vals, us_inf_fflags = _ffill_with_flags(m_cpi, header_dates)
-    except Exception:
-        us_inf_vals = [None]*6
-        us_inf_fflags = [True]*6
-    for i, v in enumerate(us_inf_vals):
-        vv = (v/100.0) if (v is not None) else None  # a porcentaje
-        ws.write(44, 1+i, vv, fmt_pct2_ffill if (us_inf_fflags[i]) else fmt_pct2)
-
-    # Tasa de interés EE.UU. (Fed, objetivo superior DFEDTARU)
-    ws.write(45, 0, "Tasa de interés EE.UU. (Fed, objetivo superior):")
-    try:
-        ff_start = (header_dates_date[0] - timedelta(days=40)).isoformat()
-        ff_end   = header_dates_date[-1].isoformat()
-        ff_obs   = fred_fetch_series("DFEDTARU", start=ff_start, end=ff_end, units="lin")
-        m_ff = {}
-        for o in ff_obs:
-            _d = parse_any_date(o.get("date"))
-            _v = try_float(o.get("value"))
-            if _d and (_v is not None):
-                m_ff[_d.date().isoformat()] = _v
-        fed_vals, fed_fflags = _ffill_with_flags(m_ff, header_dates)
-    except Exception:
-        fed_vals = [None]*6
-        fed_fflags = [True]*6
-    for i, v in enumerate(fed_vals):
-        vv = (v/100.0) if (v is not None) else None  # a porcentaje
-        ws.write(45, 1+i, vv, fmt_pct2_ffill if (fed_fflags[i]) else fmt_pct2)
 
 
     ws.write(37, 0, "UMA:", fmt_section)
@@ -1783,6 +1790,7 @@ except Exception:
             wsh.write(i,0,k, fmt_bold); wsh.write(i,1,v, fmt_wrap)
     except Exception:
         pass
+
 
 
 
