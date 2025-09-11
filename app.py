@@ -486,7 +486,7 @@ def http_session(timeout=15):
 
 
 
-@st.cache_data(ttl=600)
+@st.cache_data(ttl=120)
 def get_monex_usd_compra_venta():
     """
     Lee compra/venta de USD desde la página pública de Monex.
@@ -1050,21 +1050,33 @@ if st.button("Generar Excel"):
 
     
     
+    
     # MONEX compra/venta (prioritario); fallback a MOVEX (cálculo previo)
     try:
         _c_mx, _v_mx, _mx_src = get_monex_usd_compra_venta()
-        # Escala histórico usando la razón Monex/FIX del día más reciente disponible
-        _fix_today = fix_vals[-1] if (fix_vals and (fix_vals[-1] is not None)) else None
-        if _fix_today:
-            _rc = _c_mx / _fix_today
-            _rv = _v_mx / _fix_today
+        # Opción B: usar el último FIX realmente publicado (evitar forward-fill antes de las 12:00)
+        _fix_idx = len(fix_vals) - 1
+        try:
+            if fix_fflags and fix_fflags[-1]:  # si el último es ffill, busca el más reciente NO ffill
+                for i in range(len(fix_fflags) - 1, -1, -1):
+                    if not fix_fflags[i]:
+                        _fix_idx = i
+                        break
+        except Exception:
+            pass
+
+        _fix_ref = fix_vals[_fix_idx] if (0 <= _fix_idx < len(fix_vals)) else None
+        if _fix_ref:
+            _rc = _c_mx / _fix_ref
+            _rv = _v_mx / _fix_ref
             compra = [(fv * _rc) if (fv is not None) else None for fv in fix_vals]
             venta  = [(fv * _rv) if (fv is not None) else None for fv in fix_vals]
         else:
-            # Si no tenemos FIX del día, al menos coloca el de hoy al final
+            # Si no tenemos FIX de referencia, coloca solo el dato de hoy al final
             compra = [None] * (len(header_dates) - 1) + [_c_mx]
             venta  = [None] * (len(header_dates) - 1) + [_v_mx]
     except Exception:
+        # Fallback: método previo (MOVEX con margen)
         try:
             movex6  
         except NameError:
@@ -1736,6 +1748,8 @@ except Exception:
             wsh.write(i,0,k, fmt_bold); wsh.write(i,1,v, fmt_wrap)
     except Exception:
         pass
+
+
 
 
 
