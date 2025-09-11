@@ -1272,7 +1272,7 @@ if st.button("Generar Excel"):
     # Indicadores de variación (flechas grises) en filas clave B..G
     try:
         for _r in (6, 8, 9, 12, 13, 16, 17):
-            ws.conditional_format(_r, 1, _r, 6, {'type': 'icon_set', 'icon_style': '3_traffic_lights', 'reverse_icons': True})
+            ws.conditional_format(_r, 1, _r, 6, {'type': 'icon_set', 'icon_style': '3_triangles', 'reverse_icons': True})
     except Exception:
         pass
 
@@ -1365,6 +1365,7 @@ if st.button("Generar Excel"):
     ws.write(44, 2, "TASA DE INTERES", fmt_hdr)
     ws.set_column(2, 2, 22)  # Columna C más ancha para el título
     ws.set_column(3, 6, 14)  # Ensancha D..G para la leyenda
+    ws.set_column(7, 7, 28)  # Columna H más ancha para leyenda
 
 
     from datetime import date as _date
@@ -1796,22 +1797,3 @@ except Exception:
             wsh.write(i,0,k, fmt_bold); wsh.write(i,1,v, fmt_wrap)
     except Exception:
         pass
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
