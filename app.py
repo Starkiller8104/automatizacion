@@ -1200,7 +1200,7 @@ if st.button("Generar Excel"):
                 pass
             ws.write(6, 7, _msg, fmt_note)
             try:
-                ws.set_column(7, 7, 36)
+                ws.set_column(7, 7, 48)
                 ws.set_row(6, 48)
             except Exception:
                 pass
@@ -1253,7 +1253,7 @@ if st.button("Generar Excel"):
                 pass
             ws.write(12, 7, _msgj, fmt_note)
             try:
-                ws.set_column(7, 7, 36)
+                ws.set_column(7, 7, 48)
                 ws.set_row(12, 48)
             except Exception:
                 pass
@@ -1269,12 +1269,31 @@ if st.button("Generar Excel"):
     for i, v in enumerate(eur_vals):
         ws.write(16, 1+i, v, fmt_num4_ffill if (eur_fflags[i]) else fmt_num4)
 
-    # Indicadores de variación (flechas grises) en filas clave B..G
+    # Indicadores con triángulos en columna H (verde cuando baja)
+    # Prepara formatos
     try:
-        for _r in (6, 8, 9, 12, 13, 16, 17):
-            ws.conditional_format(_r, 1, _r, 6, {'type': 'icon_set', 'icon_style': '3_traffic_lights', 'reverse_icons': True})
+        fmt_tri_base   = wb.add_format({'font_size': 12, 'bold': True, 'align': 'center'})
+        fmt_tri_green  = wb.add_format({'font_size': 12, 'bold': True, 'align': 'center', 'font_color': '#008A00'})
+        fmt_tri_red    = wb.add_format({'font_size': 12, 'bold': True, 'align': 'center', 'font_color': '#D00000'})
+        fmt_tri_yellow = wb.add_format({'font_size': 12, 'bold': True, 'align': 'center', 'font_color': '#C9A300'})
     except Exception:
         pass
+
+    # Filas objetivo (0-based): mismas que usabas con icon sets
+    _rows = (6, 8, 9, 12, 13, 16, 17)
+    # Asegura ancho de H para ver el símbolo
+    ws.set_column(7, 7, 48)
+
+    for _r in _rows:
+        # Fórmula: compara G (hoy) vs F (ayer). ▼ verde si bajó; ▲ roja si subió; — si casi igual.
+        _excel_r = _r + 1  # 1-based Excel
+        _formula = f'=IF(OR(ISBLANK(G{_excel_r}),ISBLANK(F{_excel_r})), "", IF(G{_excel_r}-F{_excel_r}<-0.0000001, "▼", IF(G{_excel_r}-F{_excel_r}>0.0000001, "▲", "—")))'
+        ws.write_formula(_r, 7, _formula, fmt_tri_base)
+
+        # Colorea según símbolo
+        ws.conditional_format(_r, 7, _r, 7, {'type': 'text', 'criteria': 'containing', 'value': '▼', 'format': fmt_tri_green})
+        ws.conditional_format(_r, 7, _r, 7, {'type': 'text', 'criteria': 'containing', 'value': '▲', 'format': fmt_tri_red})
+        ws.conditional_format(_r, 7, _r, 7, {'type': 'text', 'criteria': 'containing', 'value': '—', 'format': fmt_tri_yellow})
 
 # --- Leyenda FIX Banxico para EUR en H17 ---
     try:
@@ -1302,7 +1321,7 @@ if st.button("Generar Excel"):
                 pass
             ws.write(16, 7, _msge, fmt_note)
             try:
-                ws.set_column(7, 7, 36)
+                ws.set_column(7, 7, 48)
                 ws.set_row(16, 48)
             except Exception:
                 pass
@@ -1365,7 +1384,7 @@ if st.button("Generar Excel"):
     ws.write(44, 2, "TASA DE INTERES", fmt_hdr)
     ws.set_column(2, 2, 22)  # Columna C más ancha para el título
     ws.set_column(3, 6, 14)  # Ensancha D..G para la leyenda
-    ws.set_column(7, 7, 36)  # Columna H más ancha para leyenda
+    ws.set_column(7, 7, 48)  # Columna H más ancha para leyenda
 
 
     from datetime import date as _date
@@ -1455,7 +1474,7 @@ if st.button("Generar Excel"):
             'text_wrap': True, 'align': 'left', 'valign': 'top',
             'bg_color': '#F9F9F9'
         })
-        ws.set_column(7, 7, 36)
+        ws.set_column(7, 7, 48)
         ws.merge_range(39, 7, 41, 7, note_txt, fmt_legend)
     except Exception:
         pass
@@ -1797,6 +1816,13 @@ except Exception:
             wsh.write(i,0,k, fmt_bold); wsh.write(i,1,v, fmt_wrap)
     except Exception:
         pass
+
+
+
+
+
+
+
 
 
 
