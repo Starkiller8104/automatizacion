@@ -921,17 +921,6 @@ _check_tokens()
 _render_sidebar_status()
 
 if st.button("Generar Excel"):
-    # Limpieza automática de caché al generar
-    try:
-        st.cache_data.clear()
-    except Exception:
-        pass
-    # Evita descargas previas obsoletas
-    try:
-        st.session_state.pop('xlsx_bytes', None)
-    except Exception:
-        pass
-
     prog = st.progress(0, text="Iniciando…")
     prog.progress(5, text="Preparando entorno…")
     def pad6(lst): return ([None]*(6-len(lst)))+lst if len(lst) < 6 else lst[-6:]
@@ -1282,7 +1271,7 @@ if st.button("Generar Excel"):
 
     # Indicadores de variación (flechas grises) en filas clave B..G
     try:
-        for _r in (6, 8, 9, 12, 13, 16, 17):
+        for _r in (6, 8, 9, 12, 13, 16):
             ws.conditional_format(_r, 1, _r, 6, {'type': 'icon_set', 'icon_style': '3_arrows'})
     except Exception:
         pass
@@ -1368,6 +1357,53 @@ if st.button("Generar Excel"):
         ws.write(34, 1+i, v2, fmt_pct2_ffill if (cetes182_f[i]) else fmt_pct2)
         v3 = (cetes364[i]/100.0) if (cetes364[i] is not None) else None
         ws.write(35, 1+i, v3, fmt_pct2_ffill if (cetes364_f[i]) else fmt_pct2)
+
+    # === ESTADOS UNIDOS ===
+    try:
+        ws.write(43, 0, "ESTADOS UNIDOS:", fmt_section)
+    except Exception:
+        pass
+
+    # Inflación EE.UU. (variación 12 meses, CPIAUCSL, units=pc1)
+    ws.write(44, 0, "Inflación EE.UU. (12m):")
+    try:
+        cpi_start = (header_dates_date[0] - timedelta(days=500)).isoformat()
+        cpi_end   = header_dates_date[-1].isoformat()
+        cpi_obs   = fred_fetch_series("CPIAUCSL", start=cpi_start, end=cpi_end, units="pc1")
+        m_cpi = {}
+        for o in cpi_obs:
+            _d = parse_any_date(o.get("date"))
+            _v = try_float(o.get("value"))
+            if _d and (_v is not None):
+                m_cpi[_d.date().isoformat()] = _v
+        us_inf_vals, us_inf_fflags = _ffill_with_flags(m_cpi, header_dates)
+    except Exception:
+        us_inf_vals = [None]*6
+        us_inf_fflags = [True]*6
+    for i, v in enumerate(us_inf_vals):
+        vv = (v/100.0) if (v is not None) else None  # a porcentaje
+        ws.write(44, 1+i, vv, fmt_pct2_ffill if (us_inf_fflags[i]) else fmt_pct2)
+
+    # Tasa de interés EE.UU. (Fed, objetivo superior DFEDTARU)
+    ws.write(45, 0, "Tasa de interés EE.UU. (Fed, objetivo superior):")
+    try:
+        ff_start = (header_dates_date[0] - timedelta(days=40)).isoformat()
+        ff_end   = header_dates_date[-1].isoformat()
+        ff_obs   = fred_fetch_series("DFEDTARU", start=ff_start, end=ff_end, units="lin")
+        m_ff = {}
+        for o in ff_obs:
+            _d = parse_any_date(o.get("date"))
+            _v = try_float(o.get("value"))
+            if _d and (_v is not None):
+                m_ff[_d.date().isoformat()] = _v
+        fed_vals, fed_fflags = _ffill_with_flags(m_ff, header_dates)
+    except Exception:
+        fed_vals = [None]*6
+        fed_fflags = [True]*6
+    for i, v in enumerate(fed_vals):
+        vv = (v/100.0) if (v is not None) else None  # a porcentaje
+        ws.write(45, 1+i, vv, fmt_pct2_ffill if (fed_fflags[i]) else fmt_pct2)
+
 
     ws.write(37, 0, "UMA:", fmt_section)
     # --- Escribir UMA como moneda en columnas B..G y leyenda en H ---
@@ -1747,6 +1783,8 @@ except Exception:
             wsh.write(i,0,k, fmt_bold); wsh.write(i,1,v, fmt_wrap)
     except Exception:
         pass
+
+
 
 
 
