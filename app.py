@@ -1272,7 +1272,7 @@ if st.button("Generar Excel"):
     # Indicadores de variación (flechas grises) en filas clave B..G
     try:
         for _r in (6, 8, 9, 12, 13, 16, 17):
-            ws.conditional_format(_r, 1, _r, 6, {'type': 'icon_set', 'icon_style': '3_arrows', 'reverse_icons': True})
+            ws.conditional_format(_r, 1, _r, 6, {'type': 'icon_set', 'icon_style': '3_traffic_lights', 'reverse_icons': True})
     except Exception:
         pass
 
@@ -1402,7 +1402,7 @@ if st.button("Generar Excel"):
         if m_cpi.get(_m_actual) is None:
             # Formato de nota discreta
             try:
-                fmt_note = wb.add_format({'font_size': 8, 'italic': True, 'font_color': '#666666', 'text_wrap': True, 'valign': 'top'})
+                fmt_note = wb.add_format({'font_size': 9, 'italic': True, 'font_color': '#666666', 'text_wrap': True, 'valign': 'top'})
             except Exception:
                 fmt_note = fmt_pct2
             ws.merge_range(45, 3, 46, 6, "Nota: El dato de inflación del mes en curso aún no está publicado en FRED; se actualizará tras el reporte oficial (BLS).", fmt_note)
@@ -1796,8 +1796,6 @@ except Exception:
             wsh.write(i,0,k, fmt_bold); wsh.write(i,1,v, fmt_wrap)
     except Exception:
         pass
-
-
 
 
 
