@@ -376,8 +376,7 @@ def logo_base64(max_height_px: int = 40):
         w, h = im.size
         if h > max_height_px:
             im = im.resize((int(w * max_height_px / h), max_height_px))
-        prog.progress(80, text="Construyendo Excel…")
-    bio = io.BytesIO()
+        bio = io.BytesIO()
         im.save(bio, format="PNG")
         return base64.b64encode(bio.getvalue()).decode("ascii")
     except Exception:
@@ -1737,6 +1736,8 @@ except Exception:
             wsh.write(i,0,k, fmt_bold); wsh.write(i,1,v, fmt_wrap)
     except Exception:
         pass
+
+
 
 
 
