@@ -1051,38 +1051,24 @@ if st.button("Generar Excel"):
     
     
     
-    # MONEX compra/venta (prioritario); fallback a MOVEX (cálculo previo)
+    
+    # MONEX compra/venta (conservador): usa MOVEX+margen para histórico y Monex SOLO para hoy
+    # 1) Base histórica (MOVEX + margen)
+    try:
+        movex6  
+    except NameError:
+        movex6 = rolling_movex_for_last6(window=movex_win)
+    compra = [(x*(1 - margen_pct/100) if x is not None else None) for x in movex6]
+    venta  = [(x*(1 + margen_pct/100) if x is not None else None) for x in movex6]
+
+    # 2) Intentar sobrescribir el último día con Monex (sin tocar días anteriores)
     try:
         _c_mx, _v_mx, _mx_src = get_monex_usd_compra_venta()
-        # Opción B: usar el último FIX realmente publicado (evitar forward-fill antes de las 12:00)
-        _fix_idx = len(fix_vals) - 1
-        try:
-            if fix_fflags and fix_fflags[-1]:  # si el último es ffill, busca el más reciente NO ffill
-                for i in range(len(fix_fflags) - 1, -1, -1):
-                    if not fix_fflags[i]:
-                        _fix_idx = i
-                        break
-        except Exception:
-            pass
-
-        _fix_ref = fix_vals[_fix_idx] if (0 <= _fix_idx < len(fix_vals)) else None
-        if _fix_ref:
-            _rc = _c_mx / _fix_ref
-            _rv = _v_mx / _fix_ref
-            compra = [(fv * _rc) if (fv is not None) else None for fv in fix_vals]
-            venta  = [(fv * _rv) if (fv is not None) else None for fv in fix_vals]
-        else:
-            # Si no tenemos FIX de referencia, coloca solo el dato de hoy al final
-            compra = [None] * (len(header_dates) - 1) + [_c_mx]
-            venta  = [None] * (len(header_dates) - 1) + [_v_mx]
+        if compra: compra[-1] = _c_mx
+        if venta:  venta[-1]  = _v_mx
     except Exception:
-        # Fallback: método previo (MOVEX con margen)
-        try:
-            movex6  
-        except NameError:
-            movex6 = rolling_movex_for_last6(window=movex_win)
-        compra = [(x*(1 - margen_pct/100) if x is not None else None) for x in movex6]
-        venta  = [(x*(1 + margen_pct/100) if x is not None else None) for x in movex6]
+        # Si falla Monex, se queda el baseline (MOVEX + margen)
+        pass
 
     usd_jpy = [((u/j) if (u is not None and j not in (None, 0)) else None) for u,j in zip(fix_vals, jpy_vals)]
     eur_usd = [((e/u) if (e is not None and u not in (None, 0)) else None) for e,u in zip(eur_vals, fix_vals)]
@@ -1748,7 +1734,6 @@ except Exception:
             wsh.write(i,0,k, fmt_bold); wsh.write(i,1,v, fmt_wrap)
     except Exception:
         pass
-
 
 
 
