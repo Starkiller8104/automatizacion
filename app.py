@@ -484,6 +484,38 @@ def http_session(timeout=15):
     s.request = (lambda orig: (lambda *a, **k: orig(*a, timeout=k.pop("timeout", timeout), **k)))(s.request)
     return s
 
+
+
+@st.cache_data(ttl=600)
+def get_monex_usd_compra_venta():
+    """
+    Lee compra/venta de USD desde la página pública de Monex.
+    Devuelve (compra, venta, fuente). Lanza excepción si no encuentra el patrón.
+    """
+    url = "https://www.monex.com.mx/portal/home"
+    headers = {"User-Agent": "Mozilla/5.0"}
+    r = http_session().get(url, headers=headers, timeout=15)
+    r.raise_for_status()
+    html = r.text
+
+    # Patrón típico: 'USD 17.59 / 19.45'
+    m = re.search(r'USD\s*([0-9][0-9\.,]*)\s*/\s*([0-9][0-9\.,]*)', html)
+    if not m:
+        # Segundo intento: texto sin etiquetas
+        plain = re.sub(r'<[^>]+>', ' ', html)
+        m = re.search(r'USD\s*([0-9][0-9\.,]*)\s*/\s*([0-9][0-9\.,]*)', plain)
+    if not m:
+        raise RuntimeError("No se encontró USD compra/venta en Monex.")
+
+    def _to_num(s: str) -> float:
+        s = str(s).strip()
+        # Normaliza separadores miles/decimales; Monex suele usar punto decimal
+        s = s.replace(",", "")
+        return float(s)
+
+    compra = _to_num(m.group(1))
+    venta  = _to_num(m.group(2))
+    return compra, venta, "Monex (portal)"
 def parse_any_date(s: str):
     """Devuelve datetime naive (sin tz)."""
     if not s:
@@ -1016,13 +1048,20 @@ if st.button("Generar Excel"):
     cetes182, cetes182_f = _ffill_with_flags(m_c182, header_dates)
     cetes364, cetes364_f = _ffill_with_flags(m_c364, header_dates)
 
-
+    # MONEX compra/venta (prioritario); fallback a MOVEX (cálculo previo)
     try:
-        movex6  
-    except NameError:
-        movex6 = rolling_movex_for_last6(window=movex_win)
-    compra = [(x*(1 - margen_pct/100) if x is not None else None) for x in movex6]
-    venta  = [(x*(1 + margen_pct/100) if x is not None else None) for x in movex6]
+        _c_mx, _v_mx, _mx_src = get_monex_usd_compra_venta()
+        # Alinear a 6 columnas del encabezado: solo el último día con dato de Monex
+        compra = [_c_mx] * len(header_dates)
+        venta  = [_v_mx] * len(header_dates)
+    except Exception:
+        try:
+            movex6  
+        except NameError:
+            movex6 = rolling_movex_for_last6(window=movex_win)
+        compra = [(x*(1 - margen_pct/100) if x is not None else None) for x in movex6]
+        venta  = [(x*(1 + margen_pct/100) if x is not None else None) for x in movex6]
+
     usd_jpy = [((u/j) if (u is not None and j not in (None, 0)) else None) for u,j in zip(fix_vals, jpy_vals)]
     eur_usd = [((e/u) if (e is not None and u not in (None, 0)) else None) for e,u in zip(eur_vals, fix_vals)]
 
@@ -1687,6 +1726,9 @@ except Exception:
             wsh.write(i,0,k, fmt_bold); wsh.write(i,1,v, fmt_wrap)
     except Exception:
         pass
+
+
+
 
 
 
