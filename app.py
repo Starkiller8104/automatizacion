@@ -1463,27 +1463,25 @@ if st.button("Generar Excel"):
             return df
 
         def _metrics(df_idx):
-    if df_idx is None or df_idx.empty:
-        empty = pd.Series(dtype=float)
-        return empty, empty, empty
+            if df_idx is None or df_idx.empty:
+                empty = pd.Series(dtype=float)
+                return empty, empty, empty
             df = df_idx.copy()
-            df = df.set_index("fecha").sort_index()
+            df = df.set_index('fecha').sort_index()
             # mensual
-            mensual = (df["dato"] / df["dato"].shift(1) - 1.0)
+            mensual = (df['dato'] / df['dato'].shift(1) - 1.0)
             # anual
-            anual = (df["dato"] / df["dato"].shift(12) - 1.0)
+            anual = (df['dato'] / df['dato'].shift(12) - 1.0)
             # acumulada: base dic prev
             base_dic = {}
             for y in sorted(set(df.index.year)):
-                dic_prev = df["dato"][(df.index.year == (y-1)) & (df.index.month == 12)]
+                dic_prev = df['dato'][(df.index.year == (y-1)) & (df.index.month == 12)]
                 dic_val = dic_prev.iloc[-1] if not dic_prev.empty else pd.NA
                 for idx in df.index[df.index.year == y]:
                     base_dic[idx] = dic_val
             base_dic = pd.Series(base_dic)
-            acumulada = (df["dato"] / base_dic - 1.0)
+            acumulada = (df['dato'] / base_dic - 1.0)
             return mensual, acumulada, anual
-
-        # Traer y calcular
         df_g = _get_idx("general")
         df_s = _get_idx("subyacente")
         df_n = _get_idx("no_subyacente")
