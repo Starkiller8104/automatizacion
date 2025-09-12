@@ -57,16 +57,16 @@ def get_uma(inegi_token: str, http_session=None) -> dict:
         except Exception:
             return float('nan')
     status = []
-    sess = http_session(20) if callable(http_session) else None
+    sess = http_session(7) if callable(http_session) else None
     rq = (sess.get if sess else __import__('requests').get)
     headers = {"User-Agent": "Mozilla/5.0", "Accept": "text/html,application/json", "Accept-Language": "es-MX,es;q=0.9"}
     ids = "620706,620707,620708"
-    api_variants = [("00","true","BISE"),("00","true","BIE"),("0700","false","BISE"),("0700","false","BIE")]
+    api_variants = [("00","true","BISE"),("00","true","BIE")]
     if inegi_token:
         for geo,recent,source in api_variants:
             try:
                 url = f"https://www.inegi.org.mx/app/api/indicadores/desarrolladores/jsonxml/INDICATOR/{ids}/es/{geo}/{recent}/{source}/2.0/{inegi_token}?type=json"
-                resp = rq(url, timeout=20, headers=headers)
+                resp = rq(url, timeout=7, headers=headers)
                 if resp.status_code != 200:
                     status.append(f"API {source} {geo}/{recent} HTTP {resp.status_code}")
                     continue
@@ -94,7 +94,7 @@ def get_uma(inegi_token: str, http_session=None) -> dict:
         status.append("Sin INEGI_TOKEN")
     try:
         url = "https://www.inegi.org.mx/temas/uma/"
-        resp = rq(url, timeout=20, headers=headers); html = resp.text
+        resp = rq(url, timeout=7, headers=headers); html = resp.text
         sec = re.search(r'(Valor de la UMA|UMA value).*?<table.*?</table>', html, re.S|re.I)
         if sec:
             table = sec.group(0)
@@ -410,7 +410,7 @@ def fred_fetch_series(series_id: str, start: str | None = None, end: str | None 
     if start: params["observation_start"] = start
     if end:   params["observation_end"]   = end
     try:
-        r = requests.get("https://api.stlouisfed.org/fred/series/observations", params=params, timeout=20)
+        r = requests.get("https://api.stlouisfed.org/fred/series/observations", params=params, timeout=7)
         if r.status_code != 200:
             return []
         data = r.json().get("observations", [])
@@ -562,7 +562,7 @@ def sie_latest(series_id):
 def sie_range(series_id: str, start_iso: str, end_iso: str):
     url = f"https://www.banxico.org.mx/SieAPIRest/service/v1/series/{series_id}/datos/{start_iso}/{end_iso}"
     headers = {"Bmx-Token": BANXICO_TOKEN}
-    r = http_session(20).get(url, headers=headers, timeout=20)
+    r = http_session(7).get(url, headers=headers, timeout=7)
     r.raise_for_status()
     j = r.json()
     series = j.get("bmx", {}).get("series", [])
@@ -716,8 +716,8 @@ def get_uma(inegi_token: str, http_session=None) -> dict:
         if ids and inegi_token:
             base = "https://www.inegi.org.mx/app/api/indicadores/desarrolladores"
             url = f"{base}/jsonxml/INDICATOR/{ids}/es/00/true/BISE/2.0/{inegi_token}?type=json"
-            sess = http_session(20) if callable(http_session) else None
-            resp = (sess.get(url, timeout=20) if sess else __import__('requests').get(url, timeout=20))
+            sess = http_session(7) if callable(http_session) else None
+            resp = (sess.get(url, timeout=7) if sess else __import__('requests').get(url, timeout=7))
             if resp.status_code == 200:
                 data = resp.json()
                 series = data.get('Series') or data.get('series') or []
@@ -758,8 +758,8 @@ def get_uma(inegi_token: str, http_session=None) -> dict:
     # 2) Fallback: página oficial de la UMA en INEGI
     try:
         url = "https://www.inegi.org.mx/temas/uma/"
-        sess = http_session(20) if callable(http_session) else None
-        resp = (sess.get(url, timeout=20) if sess else __import__('requests').get(url, timeout=20))
+        sess = http_session(7) if callable(http_session) else None
+        resp = (sess.get(url, timeout=7) if sess else __import__('requests').get(url, timeout=7))
         html = resp.text
 
         # Busca la tabla "Valor de la UMA" y toma la primera fila (año más reciente)
@@ -804,7 +804,7 @@ def get_uma(inegi_token: str, http_session=None) -> dict:
     last_err = None
     for u in urls:
         try:
-            r = http_session(20).get(u, timeout=20)
+            r = http_session(7).get(u, timeout=7)
             if r.status_code != 200:
                 last_err = f"HTTP {r.status_code}"
                 continue
@@ -955,8 +955,9 @@ if st.button("Generar Excel"):
     cetes182_6 = pad6([v for _, v in sie_last_n(SIE_SERIES["CETES_182"], n=6)])
     cetes364_6 = pad6([v for _, v in sie_last_n(SIE_SERIES["CETES_364"], n=6)])
     prog.progress(50, text="Consultando CETES…")
+    prog.progress(60, text="Obteniendo UMA (INEGI)…")
     uma = get_uma(INEGI_TOKEN)
-    prog.progress(65, text="Obteniendo UMA (INEGI)…")
+    prog.progress(65, text="UMA listo")
 
     # Normaliza claves y aplica fallback si vienen vacías/NaN
     from math import isnan
@@ -1083,8 +1084,9 @@ if st.button("Generar Excel"):
     try:
         uma  
     except NameError:
-        uma = get_uma(INEGI_TOKEN)
-    prog.progress(65, text="Obteniendo UMA (INEGI)…")
+        prog.progress(60, text="Obteniendo UMA (INEGI)…")
+    uma = get_uma(INEGI_TOKEN)
+    prog.progress(65, text="UMA listo")
 
     def _last_or_none(series_pairs): 
         return series_pairs[-1][1] if series_pairs else None
@@ -1856,14 +1858,6 @@ def fill_template_and_get_bytes(template_path, header_dates, series_map):
     bio = io.BytesIO()
     wb.save(bio)
     return bio.getvalue()
-
-
-
-
-
-
-
-
 
 
 
