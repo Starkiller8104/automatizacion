@@ -1148,9 +1148,7 @@ if st.button("Generar Excel"):
 
     # Claridad inmediata: anchos y congelar encabezado (hasta B3)
     ws.set_column(0, 0, 22)   # columna A (rótulos)
-    ws.set_column(1, 7, 13)   
-    ws.set_column(2, 2, 18)   # ancho para los triángulos en C
-# columnas B..H (fechas y sparklines)
+    ws.set_column(1, 7, 13)   # columnas B..H (fechas y sparklines)
     ws.freeze_panes(3, 1)
     try:
         ws.set_landscape()
@@ -1169,13 +1167,13 @@ if st.button("Generar Excel"):
     ws.write(1, 0, "Fecha:", fmt_bold)
     from datetime import datetime as _dt
     for i, d in enumerate(header_dates_date):
-        ws.write_datetime(1, _col_gap(i), _dt(d.year, d.month, d.day), fmt_date_dm)
+        ws.write_datetime(1, 1+i, _dt(d.year, d.month, d.day), fmt_date_dm)
 
     ws.write(3, 0, "TIPOS DE CAMBIO:", fmt_section)
     ws.write(5, 0, "DÓLAR AMERICANO.", fmt_bold)
     ws.write(6, 0, "Dólar/Pesos:")
     for i, v in enumerate(fix_vals):
-        ws.write(6, _col_gap(i), v, fmt_num4_ffill if (fix_fflags[i]) else fmt_num4)
+        ws.write(6, 1+i, v, fmt_num4_ffill if (fix_fflags[i]) else fmt_num4)
     # --- Leyenda FIX Banxico para USD en H7 ---
     try:
         need_legend = False
@@ -1202,7 +1200,7 @@ if st.button("Generar Excel"):
                 pass
             ws.write(6, 7, _msg, fmt_note)
             try:
-                ws.set_column(2, 2, 48)
+                ws.set_column(7, 7, 48)
                 ws.set_row(6, 48)
             except Exception:
                 pass
@@ -1213,10 +1211,10 @@ if st.button("Generar Excel"):
 
     ws.write(8, 0, "Compra:")
     for i, v in enumerate(compra):
-        ws.write(8, _col_gap(i), v, fmt_num4)
+        ws.write(8, 1+i, v, fmt_num4)
     ws.write(9, 0, "Venta:")
     for i, v in enumerate(venta):
-        ws.write(9, _col_gap(i), v, fmt_num4)
+        ws.write(9, 1+i, v, fmt_num4)
     # Asegura explícitamente las celdas G9/G10 (columna 6, fila 8 y 9)
     try:
         if compra: ws.write(8, 6, compra[-1], fmt_num4)
@@ -1228,7 +1226,7 @@ if st.button("Generar Excel"):
     ws.write(11, 0, "YEN JAPONÉS.", fmt_bold)
     ws.write(12, 0, "Yen Japonés/Peso:")
     for i, v in enumerate(jpy_vals):
-        ws.write(12, _col_gap(i), v, fmt_num4_ffill if (jpy_fflags[i]) else fmt_num4)
+        ws.write(12, 1+i, v, fmt_num4_ffill if (jpy_fflags[i]) else fmt_num4)
     # --- Leyenda FIX Banxico para JPY en H13 ---
     try:
         need_legend_jpy = False
@@ -1255,7 +1253,7 @@ if st.button("Generar Excel"):
                 pass
             ws.write(12, 7, _msgj, fmt_note)
             try:
-                ws.set_column(2, 2, 48)
+                ws.set_column(7, 7, 48)
                 ws.set_row(12, 48)
             except Exception:
                 pass
@@ -1264,14 +1262,14 @@ if st.button("Generar Excel"):
 
     ws.write(13, 0, "Dólar/Yen Japonés:")
     for i, v in enumerate(usd_jpy):
-        ws.write(13, _col_gap(i), v, fmt_num4)
+        ws.write(13, 1+i, v, fmt_num4)
 
     ws.write(15, 0, "EURO.", fmt_bold)
     ws.write(16, 0, "Euro/Peso:")
     for i, v in enumerate(eur_vals):
-        ws.write(16, _col_gap(i), v, fmt_num4_ffill if (eur_fflags[i]) else fmt_num4)
+        ws.write(16, 1+i, v, fmt_num4_ffill if (eur_fflags[i]) else fmt_num4)
 
-    # Indicadores con triángulos en columna C (verde cuando baja)
+    # Indicadores con triángulos en columna H (verde cuando baja)
     # Prepara formatos
     try:
         fmt_tri_base   = wb.add_format({'font_size': 13, 'align': 'left'})
@@ -1284,18 +1282,18 @@ if st.button("Generar Excel"):
     # Filas objetivo (0-based): mismas que usabas con icon sets
     _rows = (6, 8, 9, 12, 13, 16, 17)
     # Asegura ancho de H para ver el símbolo
-    ws.set_column(2, 2, 48)
+    ws.set_column(7, 7, 48)
 
     for _r in _rows:
         # Fórmula: compara G (hoy) vs F (ayer). ▼ verde si bajó; ▲ roja si subió; — si casi igual.
         _excel_r = _r + 1  # 1-based Excel
-        _formula = f'=IF(OR(ISBLANK(D{_excel_r}),ISBLANK(B{_excel_r})), "", IF(D{_excel_r}-B{_excel_r}<-0.0000001, "▼", IF(D{_excel_r}-B{_excel_r}>0.0000001, "▲", "—")))'
-        ws.write_formula(_r, 2, _formula, fmt_tri_base)
+        _formula = f'=IF(OR(ISBLANK(G{_excel_r}),ISBLANK(F{_excel_r})), "", IF(G{_excel_r}-F{_excel_r}<-0.0000001, "▼", IF(G{_excel_r}-F{_excel_r}>0.0000001, "▲", "—")))'
+        ws.write_formula(_r, 7, _formula, fmt_tri_base)
 
         # Colorea según símbolo
-        ws.conditional_format(_r, 2, _r, 2, {'type': 'text', 'criteria': 'containing', 'value': '▼', 'format': fmt_tri_green})
-        ws.conditional_format(_r, 2, _r, 2, {'type': 'text', 'criteria': 'containing', 'value': '▲', 'format': fmt_tri_red})
-        ws.conditional_format(_r, 2, _r, 2, {'type': 'text', 'criteria': 'containing', 'value': '—', 'format': fmt_tri_yellow})
+        ws.conditional_format(_r, 7, _r, 7, {'type': 'text', 'criteria': 'containing', 'value': '▼', 'format': fmt_tri_green})
+        ws.conditional_format(_r, 7, _r, 7, {'type': 'text', 'criteria': 'containing', 'value': '▲', 'format': fmt_tri_red})
+        ws.conditional_format(_r, 7, _r, 7, {'type': 'text', 'criteria': 'containing', 'value': '—', 'format': fmt_tri_yellow})
 
 # --- Leyenda FIX Banxico para EUR en H17 ---
     try:
@@ -1323,7 +1321,7 @@ if st.button("Generar Excel"):
                 pass
             ws.write(16, 7, _msge, fmt_note)
             try:
-                ws.set_column(2, 2, 48)
+                ws.set_column(7, 7, 48)
                 ws.set_row(16, 48)
             except Exception:
                 pass
@@ -1332,7 +1330,7 @@ if st.button("Generar Excel"):
 
     ws.write(17, 0, "Euro/Dólar:")
     for i, v in enumerate(eur_usd):
-        ws.write(17, _col_gap(i), v, fmt_num6)
+        ws.write(17, 1+i, v, fmt_num6)
 
     ws.write(19, 0, "UDIS:", fmt_bold)
     ws.write(21, 0, "UDIS: ")
@@ -1348,7 +1346,7 @@ if st.button("Generar Excel"):
             m_udis_r[_f.date().isoformat()] = _v
     udis_vals, udis_fflags = _ffill_with_flags(m_udis_r, header_dates)
     for i, v in enumerate(udis_vals):
-        ws.write(21, _col_gap(i), v, fmt_num6_ffill if (udis_fflags[i]) else fmt_num6)
+        ws.write(21, 1+i, v, fmt_num6_ffill if (udis_fflags[i]) else fmt_num6)
 
     ws.write(23, 0, "TASAS TIIE:", fmt_section)
     ws.write(25, 0, "TIIE objetivo:")
@@ -1357,13 +1355,13 @@ if st.button("Generar Excel"):
     ws.write(28, 0, "TIIE 182 Días:")
     for i in range(6):
         vobj = (tiie_obj[i]/100.0) if (tiie_obj[i] is not None) else None
-        ws.write(25, _col_gap(i), vobj, fmt_pct2_ffill if (tiie_obj_f[i]) else fmt_pct2)
+        ws.write(25, 1+i, vobj, fmt_pct2_ffill if (tiie_obj_f[i]) else fmt_pct2)
         v28 = (tiie28[i]/100.0) if (tiie28[i] is not None) else None
-        ws.write(26, _col_gap(i), v28, fmt_pct2_ffill if (tiie28_f[i]) else fmt_pct2)
+        ws.write(26, 1+i, v28, fmt_pct2_ffill if (tiie28_f[i]) else fmt_pct2)
         v91 = (tiie91[i]/100.0) if (tiie91[i] is not None) else None
-        ws.write(27, _col_gap(i), v91, fmt_pct2_ffill if (tiie91_f[i]) else fmt_pct2)
+        ws.write(27, 1+i, v91, fmt_pct2_ffill if (tiie91_f[i]) else fmt_pct2)
         v182 = (tiie182[i]/100.0) if (tiie182[i] is not None) else None
-        ws.write(28, _col_gap(i), v182, fmt_pct2_ffill if (tiie182_f[i]) else fmt_pct2)
+        ws.write(28, 1+i, v182, fmt_pct2_ffill if (tiie182_f[i]) else fmt_pct2)
     ws.write(30, 0, "CETES:", fmt_section)
     ws.write(32, 0, "CETES 28 Días:")
     ws.write(33, 0, "CETES 91 Días:")
@@ -1371,13 +1369,13 @@ if st.button("Generar Excel"):
     ws.write(35, 0, "CETES 364 Días:")
     for i in range(6):
         v0 = (cetes28[i]/100.0) if (cetes28[i] is not None) else None
-        ws.write(32, _col_gap(i), v0, fmt_pct2_ffill if (cetes28_f[i]) else fmt_pct2)
+        ws.write(32, 1+i, v0, fmt_pct2_ffill if (cetes28_f[i]) else fmt_pct2)
         v1 = (cetes91[i]/100.0) if (cetes91[i] is not None) else None
-        ws.write(33, _col_gap(i), v1, fmt_pct2_ffill if (cetes91_f[i]) else fmt_pct2)
+        ws.write(33, 1+i, v1, fmt_pct2_ffill if (cetes91_f[i]) else fmt_pct2)
         v2 = (cetes182[i]/100.0) if (cetes182[i] is not None) else None
-        ws.write(34, _col_gap(i), v2, fmt_pct2_ffill if (cetes182_f[i]) else fmt_pct2)
+        ws.write(34, 1+i, v2, fmt_pct2_ffill if (cetes182_f[i]) else fmt_pct2)
         v3 = (cetes364[i]/100.0) if (cetes364[i] is not None) else None
-        ws.write(35, _col_gap(i), v3, fmt_pct2_ffill if (cetes364_f[i]) else fmt_pct2)
+        ws.write(35, 1+i, v3, fmt_pct2_ffill if (cetes364_f[i]) else fmt_pct2)
     # === ESTADOS UNIDOS (tabla mensual) ===
     ws.write(43, 0, "ESTADOS UNIDOS:", fmt_section)
 
@@ -1386,7 +1384,7 @@ if st.button("Generar Excel"):
     ws.write(44, 2, "TASA DE INTERES", fmt_hdr)
     ws.set_column(2, 2, 22)  # Columna C más ancha para el título
     ws.set_column(3, 6, 14)  # Ensancha D..G para la leyenda
-    ws.set_column(2, 2, 48)  # Columna H más ancha para leyenda
+    ws.set_column(7, 7, 48)  # Columna H más ancha para leyenda
 
 
     from datetime import date as _date
@@ -1476,7 +1474,7 @@ if st.button("Generar Excel"):
             'text_wrap': True, 'align': 'left', 'valign': 'top',
             'bg_color': '#F9F9F9'
         })
-        ws.set_column(2, 2, 48)
+        ws.set_column(7, 7, 48)
         ws.merge_range(39, 7, 41, 7, note_txt, fmt_legend)
     except Exception:
         pass
@@ -1818,35 +1816,4 @@ except Exception:
             wsh.write(i,0,k, fmt_bold); wsh.write(i,1,v, fmt_wrap)
     except Exception:
         pass
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
