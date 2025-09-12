@@ -1286,14 +1286,14 @@ if st.button("Generar Excel"):
                 pass
     except Exception:
         pass
-ws.write(7, 0, "MONEX:")
+    ws.write(7, 0, "MONEX:")
 
-ws.write(8, 0, "Compra:")
-for i, v in enumerate(compra):
-    ws.write(8, 1+i, v, fmt_num4)
-ws.write(9, 0, "Venta:")
-for i, v in enumerate(venta):
-    ws.write(9, 1+i, v, fmt_num4)
+    ws.write(8, 0, "Compra:")
+    for i, v in enumerate(compra):
+        ws.write(8, 1+i, v, fmt_num4)
+    ws.write(9, 0, "Venta:")
+    for i, v in enumerate(venta):
+        ws.write(9, 1+i, v, fmt_num4)
     # Asegura explícitamente las celdas G9/G10 (columna 6, fila 8 y 9)
     try:
         if compra: ws.write(8, 6, compra[-1], fmt_num4)
