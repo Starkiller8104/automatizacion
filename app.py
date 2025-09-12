@@ -1200,7 +1200,7 @@ if st.button("Generar Excel"):
                 pass
             ws.write(6, 7, _msg, fmt_note)
             try:
-                ws.set_column(7, 7, 40)
+                ws.set_column(7, 7, 48)
                 ws.set_row(6, 48)
             except Exception:
                 pass
@@ -1253,7 +1253,7 @@ if st.button("Generar Excel"):
                 pass
             ws.write(12, 7, _msgj, fmt_note)
             try:
-                ws.set_column(7, 7, 40)
+                ws.set_column(7, 7, 48)
                 ws.set_row(12, 48)
             except Exception:
                 pass
@@ -1269,12 +1269,31 @@ if st.button("Generar Excel"):
     for i, v in enumerate(eur_vals):
         ws.write(16, 1+i, v, fmt_num4_ffill if (eur_fflags[i]) else fmt_num4)
 
-    # Indicadores de variación (flechas grises) en filas clave B..G
+    # Indicadores con triángulos en columna H (verde cuando baja)
+    # Prepara formatos
     try:
-        for _r in (6, 8, 9, 12, 13, 16, 17):
-            ws.conditional_format(_r, 1, _r, 6, {'type': 'icon_set', 'icon_style': '3_arrows'})
+        fmt_tri_base   = wb.add_format({'font_size': 13, 'align': 'left'})
+        fmt_tri_green  = wb.add_format({'font_size': 13, 'align': 'left', 'font_color': '#008A00'})
+        fmt_tri_red    = wb.add_format({'font_size': 13, 'align': 'left', 'font_color': '#D00000'})
+        fmt_tri_yellow = wb.add_format({'font_size': 13, 'align': 'left', 'font_color': '#C9A300'})
     except Exception:
         pass
+
+    # Filas objetivo (0-based): mismas que usabas con icon sets
+    _rows = (6, 8, 9, 12, 13, 16, 17)
+    # Asegura ancho de H para ver el símbolo
+    ws.set_column(7, 7, 48)
+
+    for _r in _rows:
+        # Fórmula: compara G (hoy) vs F (ayer). ▼ verde si bajó; ▲ roja si subió; — si casi igual.
+        _excel_r = _r + 1  # 1-based Excel
+        _formula = f'=IF(OR(ISBLANK(G{_excel_r}),ISBLANK(F{_excel_r})), "", IF(G{_excel_r}-F{_excel_r}<-0.0000001, "▼", IF(G{_excel_r}-F{_excel_r}>0.0000001, "▲", "—")))'
+        ws.write_formula(_r, 7, _formula, fmt_tri_base)
+
+        # Colorea según símbolo
+        ws.conditional_format(_r, 7, _r, 7, {'type': 'text', 'criteria': 'containing', 'value': '▼', 'format': fmt_tri_green})
+        ws.conditional_format(_r, 7, _r, 7, {'type': 'text', 'criteria': 'containing', 'value': '▲', 'format': fmt_tri_red})
+        ws.conditional_format(_r, 7, _r, 7, {'type': 'text', 'criteria': 'containing', 'value': '—', 'format': fmt_tri_yellow})
 
 # --- Leyenda FIX Banxico para EUR en H17 ---
     try:
@@ -1302,7 +1321,7 @@ if st.button("Generar Excel"):
                 pass
             ws.write(16, 7, _msge, fmt_note)
             try:
-                ws.set_column(7, 7, 40)
+                ws.set_column(7, 7, 48)
                 ws.set_row(16, 48)
             except Exception:
                 pass
@@ -1357,7 +1376,68 @@ if st.button("Generar Excel"):
         ws.write(34, 1+i, v2, fmt_pct2_ffill if (cetes182_f[i]) else fmt_pct2)
         v3 = (cetes364[i]/100.0) if (cetes364[i] is not None) else None
         ws.write(35, 1+i, v3, fmt_pct2_ffill if (cetes364_f[i]) else fmt_pct2)
+    # === ESTADOS UNIDOS (tabla mensual) ===
+    ws.write(43, 0, "ESTADOS UNIDOS:", fmt_section)
 
+    ws.write(44, 0, "MES", fmt_hdr)
+    ws.write(44, 1, "INFLACIÓN", fmt_hdr)
+    ws.write(44, 2, "TASA DE INTERES", fmt_hdr)
+    ws.set_column(2, 2, 22)  # Columna C más ancha para el título
+    ws.set_column(3, 6, 14)  # Ensancha D..G para la leyenda
+    ws.set_column(7, 7, 48)  # Columna H más ancha para leyenda
+
+
+    from datetime import date as _date
+    _today = today_cdmx()
+    _year  = _today.year
+    _meses = [
+        (12, "Diciembre"), (11, "Noviembre"), (10, "Octubre"), (9, "Septiembre"),
+        (8, "Agosto"), (7, "Julio"), (6, "Junio"), (5, "Mayo"),
+        (4, "Abril"), (3, "Marzo"), (2, "Febrero"), (1, "Enero")
+    ]
+
+    try:
+        cpi_obs = fred_fetch_series("CPIAUCSL", start=f"{_year}-01-01", end=f"{_year}-12-31", units="pc1")
+    except Exception:
+        cpi_obs = []
+    try:
+        ff_obs  = fred_fetch_series("DFEDTARU", start=f"{_year}-01-01", end=f"{_year}-12-31", units="lin")
+    except Exception:
+        ff_obs = []
+
+    def _last_per_month(obs):
+        out = {}
+        for o in obs or []:
+            _d = parse_any_date(o.get("date"))
+            _v = try_float(o.get("value"))
+            if _d and (_v is not None):
+                out[_d.month] = _v
+        return out
+
+    m_cpi = _last_per_month(cpi_obs)
+    m_fed = _last_per_month(ff_obs)
+    # Si no hay dato de inflación para el mes en curso, mostramos leyenda en D46
+    try:
+        _m_actual = _today.month
+        if m_cpi.get(_m_actual) is None:
+            # Formato de nota discreta
+            try:
+                fmt_note = wb.add_format({'font_size': 9, 'italic': True, 'font_color': '#666666', 'text_wrap': True, 'valign': 'top'})
+            except Exception:
+                fmt_note = fmt_pct2
+            ws.merge_range(45, 3, 46, 6, "Nota: El dato de inflación del mes en curso aún no está publicado en FRED; se actualizará tras el reporte oficial (BLS).", fmt_note)
+    except Exception:
+        pass
+
+
+    base_row = 45  # Excel 46..57
+    for i, (mes_num, mes_nom) in enumerate(_meses):
+        r = base_row + i
+        ws.write(r, 0, mes_nom)
+        cpi_v = m_cpi.get(mes_num)
+        ws.write(r, 1, (cpi_v/100.0) if (cpi_v is not None) else None, fmt_pct2)
+        fed_v = m_fed.get(mes_num)
+        ws.write(r, 2, (fed_v/100.0) if (fed_v is not None) else None, fmt_pct2)
     ws.write(37, 0, "UMA:", fmt_section)
     # --- Escribir UMA como moneda en columnas B..G y leyenda en H ---
     fmt_money_local = wb.add_format({'font_name': 'Arial', 'num_format': '$#,##0.00'})
@@ -1394,7 +1474,7 @@ if st.button("Generar Excel"):
             'text_wrap': True, 'align': 'left', 'valign': 'top',
             'bg_color': '#F9F9F9'
         })
-        ws.set_column(7, 7, 34)
+        ws.set_column(7, 7, 48)
         ws.merge_range(39, 7, 41, 7, note_txt, fmt_legend)
     except Exception:
         pass
@@ -1736,6 +1816,19 @@ except Exception:
             wsh.write(i,0,k, fmt_bold); wsh.write(i,1,v, fmt_wrap)
     except Exception:
         pass
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
