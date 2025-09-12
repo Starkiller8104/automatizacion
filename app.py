@@ -944,7 +944,11 @@ if st.button("Generar Excel"):
     cetes182_6 = pad6([v for _, v in sie_last_n(SIE_SERIES["CETES_182"], n=6)])
     cetes364_6 = pad6([v for _, v in sie_last_n(SIE_SERIES["CETES_364"], n=6)])
     prog.progress(50, text="Consultando CETES…")
-    uma = get_uma(INEGI_TOKEN)
+    # Reusar UMA ya calculada; evita segunda consulta
+    try:
+        uma
+    except NameError:
+        uma = get_uma(INEGI_TOKEN)
     prog.progress(65, text="Obteniendo UMA (INEGI)…")
 
     # Normaliza claves y aplica fallback si vienen vacías/NaN
