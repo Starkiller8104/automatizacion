@@ -18,7 +18,6 @@ from urllib.parse import urlparse
 from openpyxl import Workbook
 from openpyxl.styles import Alignment, Font, PatternFill
 from requests.adapters import HTTPAdapter, Retry
-import pandas as pd
 
 @st.cache_data(ttl=60*60)
 def get_uma(inegi_token: str, http_session=None) -> dict:
@@ -944,11 +943,7 @@ if st.button("Generar Excel"):
     cetes182_6 = pad6([v for _, v in sie_last_n(SIE_SERIES["CETES_182"], n=6)])
     cetes364_6 = pad6([v for _, v in sie_last_n(SIE_SERIES["CETES_364"], n=6)])
     prog.progress(50, text="Consultando CETES…")
-    # Reusar UMA ya calculada; evita segunda consulta
-    try:
-        uma
-    except NameError:
-        uma = get_uma(INEGI_TOKEN)
+    uma = get_uma(INEGI_TOKEN)
     prog.progress(65, text="Obteniendo UMA (INEGI)…")
 
     # Normaliza claves y aplica fallback si vienen vacías/NaN
@@ -1055,45 +1050,6 @@ if st.button("Generar Excel"):
     cetes91, cetes91_f = _ffill_with_flags(m_c91, header_dates)
     cetes182, cetes182_f = _ffill_with_flags(m_c182, header_dates)
     cetes364, cetes364_f = _ffill_with_flags(m_c364, header_dates)
-
-    # Fallback robusto para CETES si no hay datos alineados en B..G
-    def _align_pairs_to_dates(pairs, dates):
-        # pairs: list[(date_str, value)] desc/asc; dates: list[date]
-        def to_d(s):
-            from datetime import datetime
-            try:
-                if isinstance(s, str) and "/" in s:
-                    return datetime.strptime(s, "%d/%m/%Y").date()
-                return datetime.fromisoformat(str(s)).date()
-            except Exception:
-                return None
-        pts = sorted([(to_d(d), v) for d, v in pairs if to_d(d)], key=lambda x: x[0])
-        out = []
-        for d in dates:
-            v = None
-            for dd, vv in pts:
-                if dd and dd <= d:
-                    v = vv
-                else:
-                    break
-            out.append(v)
-        return out
-
-    try:
-        if not any(x is not None for x in cetes28):
-            _p = sie_last_n(SIE_SERIES["CETES_28"], 6)
-            cetes28 = _align_pairs_to_dates(_p, header_dates_date)
-        if not any(x is not None for x in cetes91):
-            _p = sie_last_n(SIE_SERIES["CETES_91"], 6)
-            cetes91 = _align_pairs_to_dates(_p, header_dates_date)
-        if not any(x is not None for x in cetes182):
-            _p = sie_last_n(SIE_SERIES["CETES_182"], 6)
-            cetes182 = _align_pairs_to_dates(_p, header_dates_date)
-        if not any(x is not None for x in cetes364):
-            _p = sie_last_n(SIE_SERIES["CETES_364"], 6)
-            cetes364 = _align_pairs_to_dates(_p, header_dates_date)
-    except Exception:
-        pass
     try:
         movex6  
     except NameError:
@@ -1332,7 +1288,13 @@ if st.button("Generar Excel"):
         # Fórmula: compara G (hoy) vs F (ayer). ▼ verde si bajó; ▲ roja si subió; — si casi igual.
         _excel_r = _r + 1  # 1-based Excel
         _formula = f'=IF(OR(ISBLANK(G{_excel_r}),ISBLANK(F{_excel_r})), "", IF(G{_excel_r}-F{_excel_r}<-0.0000001, "▼", IF(G{_excel_r}-F{_excel_r}>0.0000001, "▲", "—")))'
-        # [DESACTIVADO] Triángulos en H deshabilitados para permitir leyendas.
+        ws.write_formula(_r, 7, _formula, fmt_tri_base)
+
+        # Colorea según símbolo
+        ws.conditional_format(_r, 7, _r, 7, {'type': 'text', 'criteria': 'containing', 'value': '▼', 'format': fmt_tri_green})
+        ws.conditional_format(_r, 7, _r, 7, {'type': 'text', 'criteria': 'containing', 'value': '▲', 'format': fmt_tri_red})
+        ws.conditional_format(_r, 7, _r, 7, {'type': 'text', 'criteria': 'containing', 'value': '—', 'format': fmt_tri_yellow})
+
 # --- Leyenda FIX Banxico para EUR en H17 ---
     try:
         need_legend_eur = False
@@ -1414,164 +1376,444 @@ if st.button("Generar Excel"):
         ws.write(34, 1+i, v2, fmt_pct2_ffill if (cetes182_f[i]) else fmt_pct2)
         v3 = (cetes364[i]/100.0) if (cetes364[i] is not None) else None
         ws.write(35, 1+i, v3, fmt_pct2_ffill if (cetes364_f[i]) else fmt_pct2)
-    
-    # === INFLACIÓN MÉXICO (INPC) — Ene..Sep ===============================
+    # === ESTADOS UNIDOS (tabla mensual) ===
+    ws.write(43, 0, "ESTADOS UNIDOS:", fmt_section)
+
+    ws.write(44, 0, "MES", fmt_hdr)
+    ws.write(44, 1, "INFLACIÓN", fmt_hdr)
+    ws.write(44, 2, "TASA DE INTERES", fmt_hdr)
+    ws.set_column(2, 2, 22)  # Columna C más ancha para el título
+    ws.set_column(3, 6, 14)  # Ensancha D..G para la leyenda
+    ws.set_column(7, 7, 48)  # Columna H más ancha para leyenda
+
+
+    from datetime import date as _date
+    _today = today_cdmx()
+    _year  = _today.year
+    _meses = [
+        (12, "Diciembre"), (11, "Noviembre"), (10, "Octubre"), (9, "Septiembre"),
+        (8, "Agosto"), (7, "Julio"), (6, "Junio"), (5, "Mayo"),
+        (4, "Abril"), (3, "Marzo"), (2, "Febrero"), (1, "Enero")
+    ]
+
     try:
-        # Series Banxico SIE (índices, base 2018=100)
-        INPC_SERIES = {
-            "general": "SP1",
-            "subyacente": "SP74625",
-            "no_subyacente": "SP74630",  # Non-core
-        }
-        from datetime import date
-        hoy = today_cdmx()
-        anio = hoy.year
+        cpi_obs = fred_fetch_series("CPIAUCSL", start=f"{_year}-01-01", end=f"{_year}-12-31", units="pc1")
+    except Exception:
+        cpi_obs = []
+    try:
+        ff_obs  = fred_fetch_series("DFEDTARU", start=f"{_year}-01-01", end=f"{_year}-12-31", units="lin")
+    except Exception:
+        ff_obs = []
 
-        # Fechas para traer: desde dic prev -> sep actual (para acumulada anual)
-        ini = f"{anio-1}-12-01"
-        fin = f"{anio}-09-30"
-        # Fallback: si la SIE falla para alguna serie, extraemos los 3 valores del portal de inflación
-        def _portal_inflacion_triple():
+    def _last_per_month(obs):
+        out = {}
+        for o in obs or []:
+            _d = parse_any_date(o.get("date"))
+            _v = try_float(o.get("value"))
+            if _d and (_v is not None):
+                out[_d.month] = _v
+        return out
+
+    m_cpi = _last_per_month(cpi_obs)
+    m_fed = _last_per_month(ff_obs)
+    # Si no hay dato de inflación para el mes en curso, mostramos leyenda en D46
+    try:
+        _m_actual = _today.month
+        if m_cpi.get(_m_actual) is None:
+            # Formato de nota discreta
             try:
-                url = "https://www.banxico.org.mx/tipcamb/llenarInflacionAction.do?idioma=sp"
-                r = http_session(20).get(url, timeout=20)
-                r.raise_for_status()
-                txt = r.text
-                import re as _re
-                clean = _re.sub(r"<[^>]+>", " ", txt)
-                clean = clean.replace("\u00a0", " ")
-                clean = _re.sub(r"\s+", " ", clean)
-
-                def trio(label):
-                    m = _re.search(label + r"\s+(-?\d+(?:\.\d+)?)\s+(-?\d+(?:\.\d+)?)\s+(-?\d+(?:\.\d+)?)", clean, _re.I)
-                    if not m:
-                        return None
-                    return tuple(float(x)/100.0 for x in m.groups())
-
-                g = trio("INPC índice general")
-                s = trio("INPC subyacente")
-                n = trio("INPC no subyacente")
-                return g, s, n
+                fmt_note = wb.add_format({'font_size': 9, 'italic': True, 'font_color': '#666666', 'text_wrap': True, 'valign': 'top'})
             except Exception:
-                return None
+                fmt_note = fmt_pct2
+            ws.merge_range(45, 3, 46, 6, "Nota: El dato de inflación del mes en curso aún no está publicado en FRED; se actualizará tras el reporte oficial (BLS).", fmt_note)
+    except Exception:
+        pass
 
 
-        def _get_idx(sid):
-            obs = sie_range(INPC_SERIES[sid], ini, fin) or []
-            df = pd.DataFrame(obs)
-            if df.empty:
-                return pd.DataFrame(columns=["fecha","dato"])
-            df["fecha"] = pd.to_datetime(df["fecha"], dayfirst=True, errors="coerce")
-            df["dato"] = pd.to_numeric(df["dato"].astype(str).str.replace(",", ""), errors="coerce")
-            df = df.dropna().sort_values("fecha").reset_index(drop=True)
-            return df
-
-        def _metrics(df_idx):
-            if df_idx is None or df_idx.empty:
-                empty = pd.Series(dtype=float)
-                return empty, empty, empty
-            df = df_idx.copy()
-            df = df.set_index('fecha').sort_index()
-            # mensual
-            mensual = (df['dato'] / df['dato'].shift(1) - 1.0)
-            # anual
-            anual = (df['dato'] / df['dato'].shift(12) - 1.0)
-            # acumulada: base dic prev
-            base_dic = {}
-            for y in sorted(set(df.index.year)):
-                dic_prev = df['dato'][(df.index.year == (y-1)) & (df.index.month == 12)]
-                dic_val = dic_prev.iloc[-1] if not dic_prev.empty else pd.NA
-                for idx in df.index[df.index.year == y]:
-                    base_dic[idx] = dic_val
-            base_dic = pd.Series(base_dic)
-            acumulada = (df['dato'] / base_dic - 1.0)
-            return mensual, acumulada, anual
-        df_g = _get_idx("general")
-        df_s = _get_idx("subyacente")
-        df_n = _get_idx("no_subyacente")
-
-        m_g, a_g, y_g = _metrics(df_g)
-        m_s, a_s, y_s = _metrics(df_s)
-        m_n, a_n, y_n = _metrics(df_n)
-        # Si alguna serie no se obtuvo, usar valores del portal para el mes vigente (llenaremos solo la columna J)
-        def _is_empty(s):
-            try:
-                return (s is None) or (not hasattr(s, 'dropna')) or s.dropna().empty
-            except Exception:
-                return True
-        
-        if any(_is_empty(s) for s in [m_g, a_g, y_g, m_s, a_s, y_s, m_n, a_n, y_n]):
-            _portal = _portal_inflacion_triple()
-            if _portal:
-                try:
-                    (pg_m, pg_a, pg_y), (ps_m, ps_a, ps_y), (pn_m, pn_a, pn_y) = _portal
-                    last = pd.to_datetime(f"{anio}-09-01")
-                    def _onepoint(v):
-                        return pd.Series({last: v}) if (v is not None) else pd.Series(dtype=float)
-                    if m_g.dropna().empty: m_g = _onepoint(pg_m)
-                    if a_g.dropna().empty: a_g = _onepoint(pg_a)
-                    if y_g.dropna().empty: y_g = _onepoint(pg_y)
-                    if m_s.dropna().empty: m_s = _onepoint(ps_m)
-                    if a_s.dropna().empty: a_s = _onepoint(ps_a)
-                    if y_s.dropna().empty: y_s = _onepoint(ps_y)
-                    if m_n.dropna().empty: m_n = _onepoint(pn_m)
-                    if a_n.dropna().empty: a_n = _onepoint(pn_a)
-                    if y_n.dropna().empty: y_n = _onepoint(pn_y)
-                except Exception:
-                    pass
-
-        # --- Construcción de tabla Ene..Sep ---
-        meses = pd.date_range(f"{anio}-01-01", f"{anio}-09-01", freq="MS")
-        start_row = 58  # encabezados en fila 59
-
-        # Formatos con bordes para esta tabla
-        fmt_pct2_b = wb.add_format({'font_name':'Arial','num_format':'0.00%','border':1})
-        fmt_lbl_b  = wb.add_format({'font_name':'Arial','bold':True,'border':1})
-        fmt_hdr_b  = wb.add_format({'font_name':'Arial','bold':True,'bg_color':'#F2F2F2','align':'center','border':1})
-
-        ws.write(start_row-1, 0, 'Mes', fmt_hdr_b)
-        for j, d in enumerate(meses, start=1):
-            ws.write(start_row-1, j, d.strftime('%b').capitalize(), fmt_hdr_b)
-        ws.write(start_row-1, 10, 'Δ último mes', fmt_hdr_b)  # K
-        ws.write(start_row-1, 11, '▲/▼', fmt_hdr_b)          # L
-
-        etiquetas = [
-            ('INPC (General) — Inflación mensual',        m_g),
-            ('INPC (General) — Inflación acumulada año',  a_g),
-            ('INPC (General) — Inflación anual',          y_g),
-            ('Subyacente — Inflación mensual',            m_s),
-            ('Subyacente — Inflación acumulada año',      a_s),
-            ('Subyacente — Inflación anual',              y_s),
-            ('No subyacente — Inflación mensual',         m_n),
-            ('No subyacente — Inflación acumulada año',   a_n),
-            ('No subyacente — Inflación anual',           y_n),
-        ]
-
-        for i, (label, serie) in enumerate(etiquetas):
-            r = start_row + i
-            ws.write(r, 0, label, fmt_lbl_b)
-            for j, d in enumerate(meses, start=1):
-                try:
-                    v = float(serie.loc[d]) if (d in serie.index and pd.notna(serie.loc[d])) else None
-                except Exception:
-                    v = None
-                if v is None:
-                    ws.write(r, j, 'N/D')
-                else:
-                    ws.write(r, j, v, fmt_pct2_b)
-            # Delta último mes en K
-            formula = f"=IF(ISNUMBER(J{r+1}),J{r+1}-I{r+1},IF(ISNUMBER(I{r+1}),I{r+1}-H{r+1},IF(ISNUMBER(H{r+1}),H{r+1}-G{r+1},IF(ISNUMBER(G{r+1}),G{r+1}-F{r+1},IF(ISNUMBER(F{r+1}),F{r+1}-E{r+1},IF(ISNUMBER(E{r+1}),E{r+1}-D{r+1},IF(ISNUMBER(D{r+1}),D{r+1}-C{r+1},IF(ISNUMBER(C{r+1}),C{r+1}-B{r+1},''))))))))"
-            ws.write_formula(r, 10, formula, fmt_pct2_b)  # K
-            # Icono en L
-            tri_formula = f"=IF(J{r+1}-I{r+1}<-0.0000001,'▼',IF(J{r+1}-I{r+1}>0.0000001,'▲','—'))"
-            ws.write_formula(r, 11, tri_formula)
-
-        ws.set_column(0, 0, 42)   # A
-        ws.set_column(1, 9, 12)   # B..J
-        ws.set_column(10, 11, 14) # K..L
-
-    except Exception as e:
+    base_row = 45  # Excel 46..57
+    for i, (mes_num, mes_nom) in enumerate(_meses):
+        r = base_row + i
+        ws.write(r, 0, mes_nom)
+        cpi_v = m_cpi.get(mes_num)
+        ws.write(r, 1, (cpi_v/100.0) if (cpi_v is not None) else None, fmt_pct2)
+        fed_v = m_fed.get(mes_num)
+        ws.write(r, 2, (fed_v/100.0) if (fed_v is not None) else None, fmt_pct2)
+    ws.write(37, 0, "UMA:", fmt_section)
+    # --- Escribir UMA como moneda en columnas B..G y leyenda en H ---
+    fmt_money_local = wb.add_format({'font_name': 'Arial', 'num_format': '$#,##0.00'})
+    def _write_uma_row(row, label, val):
+        ws.write(row, 0, label)
         try:
-            st.warning(f'No fue posible generar INPC: {e}')
+            from math import isnan
+            v = float(val) if val is not None else None
+            if v is not None and not isnan(v):
+                for c in range(1, 7):   # B..G
+                    ws.write_number(row, c, round(v, 2), fmt_money_local)
+            else:
+                for c in range(1, 7):
+                    ws.write(row, c, "")
+        except Exception:
+            for c in range(1, 7):
+                ws.write(row, c, "")
+
+    d = uma.get("diaria") or uma.get("diario")
+    m = uma.get("mensual")
+    a = uma.get("anual")
+
+    _write_uma_row(39, "Diario:", d)
+    _write_uma_row(40, "Mensual:", m)
+    _write_uma_row(41, "Anual:",   a)
+
+    # Leyenda en columna H explicando el arrastre B→G
+    try:
+        note_txt = ("UMA: valor vigente anual publicado por INEGI. "
+                    "Se replica de B→G porque no cambia día a día; "
+                    "Mensual = Diaria × 30.4; Anual = Mensual × 12. Fuente: INEGI.")
+        fmt_legend = wb.add_format({
+            'font_name': 'Arial', 'font_size': 9, 'italic': True,
+            'text_wrap': True, 'align': 'left', 'valign': 'top',
+            'bg_color': '#F9F9F9'
+        })
+        ws.set_column(7, 7, 48)
+        ws.merge_range(39, 7, 41, 7, note_txt, fmt_legend)
+    except Exception:
+        pass
+
+
+    
+
+
+do_raw = globals().get('do_raw', True)
+if do_raw and ('wb' in globals()):
+    ws3 = wb.add_worksheet("Datos crudos")
+    try:
+        ws3.set_column(0, 50, None, fmt_all)
+        ws3.hide_gridlines(2)
+    except Exception:
+        pass
+    ws3.write(0,0,"Serie", fmt_hdr); ws3.write(0,1,"Fecha", fmt_hdr); ws3.write(0,2,"Valor", fmt_hdr)
+    def _dump(ws_sheet, start_row, tag, pairs):
+        r = start_row
+        for d, v in pairs:
+            ws_sheet.write(r, 0, tag)
+            ws_sheet.write(r, 1, d)
+            ws_sheet.write(r, 2, v)
+            r += 1
+
+        return r
+
+    r = 1
+    r = _dump(ws3, r, "USD/MXN (FIX)", sie_last_n(SIE_SERIES["USD_FIX"], 6))
+    r = _dump(ws3, r, "EUR/MXN",       sie_last_n(SIE_SERIES["EUR_MXN"], 6))
+    r = _dump(ws3, r, "JPY/MXN",       sie_last_n(SIE_SERIES["JPY_MXN"], 6))
+    r = _dump(ws3, r, "UDIS",          sie_last_n(SIE_SERIES["UDIS"],    6))
+    r = _dump(ws3, r, "CETES 28d (%)", sie_last_n(SIE_SERIES["CETES_28"],6))
+    r = _dump(ws3, r, "CETES 91d (%)", sie_last_n(SIE_SERIES["CETES_91"],6))
+    r = _dump(ws3, r, "CETES 182d (%)",sie_last_n(SIE_SERIES["CETES_182"],6))
+    r = _dump(ws3, r, "CETES 364d (%)",sie_last_n(SIE_SERIES["CETES_364"],6))
+    ws3.set_column(0, 0, 18); ws3.set_column(1, 1, 12); ws3.set_column(2, 2, 16)
+
+    
+do_charts = globals().get('do_charts', True)
+if do_charts and ('wb' in globals()):
+    ws4 = wb.add_worksheet("Gráficos")
+    try:
+        ws4.set_column(0, 50, None, fmt_all)
+        ws4.hide_gridlines(2)
+    except Exception:
+        pass
+    chart1 = wb.add_chart({'type': 'line'})
+    chart1.add_series({
+    'name':       "USD/MXN (FIX)",
+    'categories': "=Indicadores!$B$2:$G$2",
+    'values':     "=Indicadores!$B$7:$G$7",
+    })
+    chart1.set_title({'name': 'USD/MXN (FIX)'})
+    ws4.insert_chart('B2', chart1, {'x_scale': 1.3, 'y_scale': 1.2})
+
+    chart2 = wb.add_chart({'type': 'line'})
+    for row in (33,34,35,36):
+        chart2.add_series({
+            'name':       f"=Indicadores!$A${row}",
+            'categories': "=Indicadores!$B$2:$G$2",
+            'values':     f"=Indicadores!$B${row}:$G${row}",
+        })
+    chart2.set_title({'name': 'CETES (%)'})
+    ws4.insert_chart('B18', chart2, {'x_scale': 1.3, 'y_scale': 1.2})
+
+
+    try:
+        if fred_rows and st.session_state.get('want_fred', False):
+            wsname  = f"FRED_{fred_id[:25]}"
+            wsfred  = wb.add_worksheet(wsname)
+
+            try:
+                wsfred.set_column(0, 50, None, fmt_all)
+                wsfred.hide_gridlines(2)
+            except Exception:
+                pass
+            fmt_bold = wb.add_format({'font_name': 'Arial', "bold": True})
+            fmt_num  = wb.add_format({'font_name': 'Arial', "num_format": "#,##0.0000"})
+            fmt_date = wb.add_format({'font_name': 'Arial', "num_format": "yyyy-mm-dd"})
+
+            
+            wsfred.write(0, 0, f"FRED – {fred_id}", fmt_bold)
+            wsfred.write(1, 0, f"Generado: {today_cdmx('%Y-%m-%d %H:%M')} (CDMX)")
+            wsfred.write_row(3, 0, ["date", fred_id], fmt_bold)
+
+            
+            r_start = 4
+            r = r_start
+            valid_count = 0
+
+            for row in fred_rows:
+                d = row.get("date")
+                v = row.get("value")
+
+                
+                try:
+                    dt = pd.to_datetime(d).to_pydatetime()
+                    wsfred.write_datetime(r, 0, dt, fmt_date)
+                except Exception:
+                    wsfred.write(r, 0, str(d))
+
+                
+                try:
+                    if v is not None:
+                        v_float = float(v)
+                        if not pd.isna(v_float):
+                            wsfred.write_number(r, 1, v_float, fmt_num)
+                            valid_count += 1
+                        else:
+                            wsfred.write_blank(r, 1, None)
+                    else:
+                        wsfred.write_blank(r, 1, None)
+                except Exception:
+                    wsfred.write_blank(r, 1, None)
+
+                r += 1
+
+            wsfred.set_column(0, 0, 12)
+            wsfred.set_column(1, 1, 16)
+
+            if valid_count >= 2:
+                first_excel_row = r_start + 1
+                last_excel_row  = r
+                ch = wb.add_chart({"type": "line"})
+                ch.add_series({
+                    "name": fred_id,
+                    "categories": f"={wsname}!$A${first_excel_row}:$A${last_excel_row}",
+                    "values":     f"={wsname}!$B${first_excel_row}:$B${last_excel_row}",
+                })
+                ch.set_title({"name": f"{fred_id} (FRED)"})
+                ch.set_y_axis({"num_format": "#,##0.0000"})
+                wsfred.insert_chart("D4", ch, {"x_scale": 1.2, "y_scale": 1.2})
+    except Exception as _e:
+        pass
+
+try:
+    fred_key = ""
+    try:
+        fred_key = st.secrets.get("FRED_API_KEY", "").strip()
+    except Exception:
+        pass
+    if fred_key and st.session_state.get('want_fred', False):
+        end_dt = datetime.now()
+        start_dt = end_dt - timedelta(days=180)
+        fred_series = {
+            "US 10Y (DGS10)": "DGS10",
+            "Fed Funds (DFF)": "DFF",
+            "MXN/USD (DEXMXUS)": "DEXMXUS",
+        }
+        fred_data = {}
+        for label, sid in fred_series.items():
+            try:
+                fred_data[label] = _fred_fetch_v1(
+                    sid,
+                    start_dt.strftime("%Y-%m-%d"),
+                    end_dt.strftime("%Y-%m-%d"),
+                    fred_key
+                )
+            except Exception:
+                fred_data[label] = []
+        if any(len(v) > 0 for v in fred_data.values()):
+            _fred_write_v1(wb, fred_data, sheet_name="FRED_v2")
+
+    _news = []
+    try:
+        _news = _mx_news_get_v1(max_items=12)
+    except Exception:
+        _news = []
+    if _news and st.session_state.get('want_news', False):
+        _mx_news_write_v1(wb, _news, sheet_name="Noticias_RSS")
+except Exception:
+    pass
+
+try:
+    # === Hoja 'Lógica de datos' (siempre en ruta normal) ===
+    try:
+        # Reutiliza formatos si existen; si no, crea mínimos
+        try:
+            fmt_all = fmt_all
+        except NameError:
+            fmt_all = wb.add_format({'font_name': 'Arial'})
+        try:
+            fmt_hdr = fmt_hdr
+        except NameError:
+            fmt_hdr = wb.add_format({'font_name': 'Arial', 'bold': True, 'bg_color': '#F2F2F2'})
+        try:
+            fmt_bold = fmt_bold
+        except NameError:
+            fmt_bold = wb.add_format({'font_name': 'Arial', 'bold': True})
+        fmt_wrap = wb.add_format({'font_name': 'Arial', 'text_wrap': True})
+    
+        wsh_ld = wb.add_worksheet("Lógica de datos")
+        wsh_ld.set_column(0, 0, 28, fmt_all)
+        wsh_ld.set_column(1, 1, 95, fmt_all)
+        try:
+            wsh_ld.hide_gridlines(2)
         except Exception:
             pass
+        wsh_ld.write(0, 0, "Sección", fmt_hdr)
+        wsh_ld.write(0, 1, "Contenido", fmt_hdr)
+    
+        row = 1
+        # Contenido detallado
+        wsh_ld.write(row, 0, "Propósito", fmt_bold); wsh_ld.write(row, 1, "Concentrar indicadores (FX, UDIS, TIIE, CETES) para los últimos 6 días hábiles.", fmt_wrap); row += 1
+        wsh_ld.write(row, 0, "Flujo de generación", fmt_bold); wsh_ld.write(row, 1, "1) Encabezado con días hábiles.\n2) Consulta Banxico SIE por rango.\n3) Normalización numérica.\n4) Forward‑fill por fecha.", fmt_wrap); row += 1
+        wsh_ld.write(row, 0, "Fuentes / Series SIE", fmt_bold); wsh_ld.write(row, 1, "USD/MXN FIX (SF43718), EUR/MXN (SF46410), JPY/MXN (SF46406), UDIS (SP68257), CETES 28/91/182/364 (SF60634/5/6/7), TIIE 28/91/182 (SF60653/4/5), Tasa objetivo (SF61745).", fmt_wrap); row += 1
+        wsh_ld.write(row, 0, "Tratamiento de datos", fmt_bold); wsh_ld.write(row, 1, "• Forward‑fill por fecha cuando falte publicación.\n• Tasas en %: si valor > 1.0, dividir entre 100 (11.25% = 0.1125).\n• UDIS / FX con 6/4 decimales según corresponda.", fmt_wrap); row += 1
+        wsh_ld.write(row, 0, "Rangos con nombre", fmt_bold); wsh_ld.write(row, 1, "RANGO_FECHAS, RANGO_USDMXN, RANGO_EURMXN, RANGO_JPYMXN, RANGO_UDIS, RANGO_TOBJ, RANGO_TIIE28/91/182, RANGO_C28/91/182/364.", fmt_wrap); row += 1
+        wsh_ld.write(row, 0, "Trazabilidad y metadatos", fmt_bold); wsh_ld.write(row, 1, "Ver hoja 'Metadatos': fecha/hora CDMX, zona, reglas y claves SIE. Cotejar encabezado con calendario hábil y disponibilidad de Banxico.", fmt_wrap); row += 1
+        wsh_ld.write(row, 0, "Limitaciones", fmt_bold); wsh_ld.write(row, 1, "Feriados/rezagos de publicación; valores nulos permanecen vacíos.", fmt_wrap); row += 1
+        wsh_ld.write(row, 0, "Versión", fmt_bold); wsh_ld.write(row, 1, "Indicadores de Tipo de Cambio Ver.3.0", fmt_wrap); row += 1
+    
+    except Exception:
+        # No bloquear la generación del archivo si falla esta hoja
+        pass
+    # === Hoja "Metadatos" (crear siempre, al final) ===
+    try:
+        # Reutiliza formatos si existen; si no, crea mínimos
+        try:
+            fmt_all = fmt_all
+        except NameError:
+            fmt_all = wb.add_format({"font_name": "Arial"})
+        try:
+            fmt_bold = fmt_bold
+        except NameError:
+            fmt_bold = wb.add_format({"font_name": "Arial", "bold": True})
+    
+        # Crear hoja; si ya existe, usar nombre alterno
+        try:
+            wsm = wb.add_worksheet("Metadatos")
+        except Exception:
+            wsm = wb.add_worksheet("Meta datos")
+    
+        # Presentación básica
+        try:
+            wsm.set_column(0, 0, 28, fmt_all)
+            wsm.set_column(1, 1, 48, fmt_all)
+            wsm.hide_gridlines(2)
+        except Exception:
+            pass
+    
+        # Contenido
+        from datetime import datetime
+        ts = None
+        try:
+            ts = today_cdmx("%Y-%m-%d %H:%M (CDMX)")
+        except Exception:
+            ts = datetime.now().strftime("%Y-%m-%d %H:%M")
+        rows = [
+            ("Generado", ts),
+            ("Zona horaria", "America/Mexico_City"),
+        ]
+        # Series SIE si existe el dict
+        try:
+            rows.extend([
+                ("SIE USD/MXN", SIE_SERIES.get("USD_FIX","")),
+                ("SIE EUR/MXN", SIE_SERIES.get("EUR_MXN","")),
+                ("SIE JPY/MXN", SIE_SERIES.get("JPY_MXN","")),
+                ("SIE UDIS", SIE_SERIES.get("UDIS","")),
+                ("SIE CETES 28", SIE_SERIES.get("CETES_28","")),
+                ("SIE CETES 91", SIE_SERIES.get("CETES_91","")),
+                ("SIE CETES 182", SIE_SERIES.get("CETES_182","")),
+                ("SIE CETES 364", SIE_SERIES.get("CETES_364","")),
+                ("SIE TIIE 28", SIE_SERIES.get("TIIE_28","")),
+                ("SIE TIIE 91", SIE_SERIES.get("TIIE_91","")),
+                ("SIE TIIE 182", SIE_SERIES.get("TIIE_182","")),
+                ("SIE Tasa objetivo", SIE_SERIES.get("OBJETIVO","")),
+            ])
+        except Exception:
+            pass
+        for i, (k, v) in enumerate(rows):
+            try:
+                wsm.write(i, 0, k, fmt_bold)
+            except Exception:
+                wsm.write(i, 0, k)
+            wsm.write(i, 1, v)
+    except Exception:
+        # No bloquear la generación del archivo si falla esta hoja
+        pass
+    wb.close()
+    try:
+        st.session_state['xlsx_bytes'] = bio.getvalue()
+        prog.progress(100, text="Listo ✅")
+        time.sleep(0.3)
+        try:
+            prog.empty()
+        except Exception:
+            pass
+    except Exception:
+        pass
+except NameError:
+    pass
+except Exception:
+    pass
+    st.download_button(
+    "Descargar Excel",
+        data=bio.getvalue(),
+        file_name=f"indicadores_{today_cdmx()}.xlsx",
+        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        )
+    
+
+
+
+try:
+    xbytes = st.session_state.get('xlsx_bytes')
+    if xbytes:
+        st.download_button(
+            'Descargar Excel',
+            data=xbytes,
+            file_name=f"indicadores_{today_cdmx()}.xlsx",
+            mime='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+            use_container_width=True
+        )
+except Exception:
+    pass
+
+    # Hoja Manual / Ayuda para usuarios
+    try:
+        wsh = wb.add_worksheet("Manual")
+        wsh.set_column(0, 0, 28, fmt_all)
+        wsh.set_column(1, 1, 90, fmt_all)
+        wsh.hide_gridlines(2)
+        wsh.write(0,0,"Sección", fmt_hdr); wsh.write(0,1,"Contenido", fmt_hdr)
+
+        manual_rows = [
+            ("Propósito", "Este archivo presenta indicadores de tipo de cambio, UDIS, TIIE y CETES para los últimos 6 días hábiles. Incluye tendencias (sparklines), metadatos y rangos con nombre para su integración en reportes."),
+            ("Fechas", "Se usan días hábiles (lun-vie). Formato de fecha en cabecera: dd \"de\" mmm (ej.: 09 de sep)."),
+            ("Fuentes", "Banxico SIE para FIX, EUR/MXN, JPY/MXN, UDIS, CETES (28/91/182/364) y TIIE (28/91/182) + SF61745 (tasa objetivo)."),
+            ("Cálculos derivados", "USD/JPY = USD/MXN ÷ JPY/MXN; Euro/Dólar = EUR/MXN ÷ USD/MXN. UDIS/TIIE/CETES se muestran con relleno (ffill) cuando no hay publicación del día."),
+            ("Relleno (ffill)", "Cuando el día hábil no tiene aún publicación, el valor se arrastra desde el último disponible. En la hoja Indicadores, los valores arrastrados se distinguen en itálicas color gris y con la leyenda *."),
+            ("Sparklines", "Columna H muestra la tendencia de B..G para cada indicador principal."),
+            ("Rangos con nombre", "RANGO_FECHAS, RANGO_USDMXN, RANGO_JPYMXN, RANGO_EURMXN, RANGO_UDIS, RANGO_TOBJ, RANGO_TIIE28, RANGO_TIIE91, RANGO_TIIE182, RANGO_C28, RANGO_C91, RANGO_C182, RANGO_C364."),
+            ("Branding", "Se inserta logo.png (si existe) en la hoja Indicadores."),
+            ("Trazabilidad", "Ver hoja Metadatos: zona horaria, reglas de negocio y claves SIE/FRED utilizadas."),
+        ]
+        for i,(k,v) in enumerate(manual_rows, start=1):
+            wsh.write(i,0,k, fmt_bold); wsh.write(i,1,v, fmt_wrap)
+    except Exception:
+        pass
+
