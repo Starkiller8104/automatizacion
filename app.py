@@ -597,59 +597,9 @@ def _ffill_by_dates(map_vals: dict, dates: list):
         out.append(last)
     return out
 
-
-def write_fix_legend(ws, fmt_note):
-    """Escribe leyenda en H7 si el FIX de hoy no se ha publicado; si ya se publicó, deja H7 en blanco."""
-    from datetime import datetime
-    try:
-        try:
-            fix_fecha_str, _ = sie_latest(SIE_SERIES.get("USD_FIX") or SIE_SERIES["USD_FIX"])
-        except Exception:
-            fix_fecha_str = None
-
-        try:
-            fix_date = parse_any_date(fix_fecha_str).date() if fix_fecha_str else None
-        except Exception:
-            fix_date = None
-
-        try:
-            now = today_cdmx(full=True)   # datetime con tz de CDMX
-        except Exception:
-            d = today_cdmx()
-            now = datetime(d.year, d.month, d.day, 10, 0, 0)
-
-        today_d = now.date()
-        show_legend = (fix_date is None) or (fix_date < today_d)
-
-        if show_legend:
-            msg = "Banxico aún no publica el FIX de hoy; se muestra el FIX del día anterior hasta ~12:00."
-            try:
-                if fix_date:
-                    msg += " Último dato: " + fix_date.strftime("%d/%m/%Y")
-            except Exception:
-                pass
-            ws.write(6, 7, msg, fmt_note)     # H7
-            try:
-                ws.set_column(7, 7, 48)
-                ws.set_row(6, 48)
-            except Exception:
-                pass
-        else:
-            ws.write(6, 7, "")                # limpiar H7
-    except Exception:
-        # Nunca bloquear la generación del Excel por esta leyenda
-        try:
-            ws.write(6, 7, "")
-        except Exception:
-            pass
-
-
 def _ffill_with_flags(map_vals: dict, dates: list):
-    """Alinea valores a 'dates' con forward-fill y devuelve (valores, flags_ffill).
-    Semilla: usa el último valor disponible <= a la primera fecha del encabezado para evitar huecos al inicio.
-    """
+    # Similar a _ffill_by_dates pero devuelve (valores, flags_ffill)
     from datetime import datetime
-
     def to_dt(s):
         try:
             if isinstance(s, str) and "/" in s:
@@ -657,34 +607,17 @@ def _ffill_with_flags(map_vals: dict, dates: list):
             return datetime.fromisoformat(str(s)).date()
         except Exception:
             return None
-
-    # Normalizar claves a ISO
-    norm = {}
+    normalized = {}
     for k, v in map_vals.items():
         kd = to_dt(k)
         if kd:
-            norm[kd.isoformat()] = v
-
+            normalized[kd.isoformat()] = v
     out_vals, out_flags = [], []
     last = None
-
-    # Semilla inicial
-    if dates:
-        try:
-            first = to_dt(dates[0] if isinstance(dates[0], str) else dates[0].isoformat())
-            for key in sorted(norm.keys()):
-                dk = to_dt(key)
-                if dk and first and dk <= first:
-                    last = norm[key]
-                else:
-                    break
-        except Exception:
-            pass
-
     for ds in dates:
         key = ds if isinstance(ds, str) else (ds.isoformat() if ds else None)
-        if key in norm and norm[key] is not None:
-            last = norm[key]
+        if key in normalized and normalized[key] is not None:
+            last = normalized[key]
             out_vals.append(last)
             out_flags.append(False)
         else:
@@ -1117,29 +1050,6 @@ if st.button("Generar Excel"):
     cetes91, cetes91_f = _ffill_with_flags(m_c91, header_dates)
     cetes182, cetes182_f = _ffill_with_flags(m_c182, header_dates)
     cetes364, cetes364_f = _ffill_with_flags(m_c364, header_dates)
-
-# Backfill hacia la izquierda para cubrir huecos iniciales (B..E) de CETES
-def _backfill_left(arr):
-    if not arr:
-        return arr
-    first_non = None
-    for x in arr:
-        if x is not None:
-            first_non = x
-            break
-    if first_non is not None:
-        for i in range(len(arr)):
-            if arr[i] is None:
-                arr[i] = first_non
-            else:
-                break
-    return arr
-
-cetes28  = _backfill_left(cetes28)
-cetes91  = _backfill_left(cetes91)
-cetes182 = _backfill_left(cetes182)
-cetes364 = _backfill_left(cetes364)
-
     try:
         movex6  
     except NameError:
@@ -1296,13 +1206,15 @@ cetes364 = _backfill_left(cetes364)
                 pass
     except Exception:
         pass
-ws.write(7, 0, "MONEX:")
-ws.write(8, 0, "Compra:")
-for i, v in enumerate(compra):
-    ws.write(8, 1+i, v, fmt_num4)
-ws.write(9, 0, "Venta:")
-for i, v in enumerate(venta):
-    ws.write(9, 1+i, v, fmt_num4)
+
+    ws.write(7, 0, "MONEX:")
+
+    ws.write(8, 0, "Compra:")
+    for i, v in enumerate(compra):
+        ws.write(8, 1+i, v, fmt_num4)
+    ws.write(9, 0, "Venta:")
+    for i, v in enumerate(venta):
+        ws.write(9, 1+i, v, fmt_num4)
     # Asegura explícitamente las celdas G9/G10 (columna 6, fila 8 y 9)
     try:
         if compra: ws.write(8, 6, compra[-1], fmt_num4)
@@ -1357,7 +1269,32 @@ for i, v in enumerate(venta):
     for i, v in enumerate(eur_vals):
         ws.write(16, 1+i, v, fmt_num4_ffill if (eur_fflags[i]) else fmt_num4)
 
-    # (removido) Indicadores con triángulos en columna H
+    # Indicadores con triángulos en columna H (verde cuando baja)
+    # Prepara formatos
+    try:
+        fmt_tri_base   = wb.add_format({'font_size': 13, 'align': 'left'})
+        fmt_tri_green  = wb.add_format({'font_size': 13, 'align': 'left', 'font_color': '#008A00'})
+        fmt_tri_red    = wb.add_format({'font_size': 13, 'align': 'left', 'font_color': '#D00000'})
+        fmt_tri_yellow = wb.add_format({'font_size': 13, 'align': 'left', 'font_color': '#C9A300'})
+    except Exception:
+        pass
+
+    # Filas objetivo (0-based): mismas que usabas con icon sets
+    _rows = (6, 8, 9, 12, 13, 16, 17)
+    # Asegura ancho de H para ver el símbolo
+    ws.set_column(7, 7, 48)
+
+    for _r in _rows:
+        # Fórmula: compara G (hoy) vs F (ayer). ▼ verde si bajó; ▲ roja si subió; — si casi igual.
+        _excel_r = _r + 1  # 1-based Excel
+        _formula = f'=IF(OR(ISBLANK(G{_excel_r}),ISBLANK(F{_excel_r})), "", IF(G{_excel_r}-F{_excel_r}<-0.0000001, "▼", IF(G{_excel_r}-F{_excel_r}>0.0000001, "▲", "—")))'
+        ws.write_formula(_r, 7, _formula, fmt_tri_base)
+
+        # Colorea según símbolo
+        ws.conditional_format(_r, 7, _r, 7, {'type': 'text', 'criteria': 'containing', 'value': '▼', 'format': fmt_tri_green})
+        ws.conditional_format(_r, 7, _r, 7, {'type': 'text', 'criteria': 'containing', 'value': '▲', 'format': fmt_tri_red})
+        ws.conditional_format(_r, 7, _r, 7, {'type': 'text', 'criteria': 'containing', 'value': '—', 'format': fmt_tri_yellow})
+
 # --- Leyenda FIX Banxico para EUR en H17 ---
     try:
         need_legend_eur = False
@@ -1879,5 +1816,6 @@ except Exception:
             wsh.write(i,0,k, fmt_bold); wsh.write(i,1,v, fmt_wrap)
     except Exception:
         pass
+
 
 
