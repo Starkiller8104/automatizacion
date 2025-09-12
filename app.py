@@ -598,9 +598,55 @@ def _ffill_by_dates(map_vals: dict, dates: list):
     return out
 
 
+def write_fix_legend(ws, fmt_note):
+    """Escribe leyenda en H7 si el FIX de hoy no se ha publicado; si ya se publicó, deja H7 en blanco."""
+    from datetime import datetime
+    try:
+        try:
+            fix_fecha_str, _ = sie_latest(SIE_SERIES.get("USD_FIX") or SIE_SERIES["USD_FIX"])
+        except Exception:
+            fix_fecha_str = None
+
+        try:
+            fix_date = parse_any_date(fix_fecha_str).date() if fix_fecha_str else None
+        except Exception:
+            fix_date = None
+
+        try:
+            now = today_cdmx(full=True)   # datetime con tz de CDMX
+        except Exception:
+            d = today_cdmx()
+            now = datetime(d.year, d.month, d.day, 10, 0, 0)
+
+        today_d = now.date()
+        show_legend = (fix_date is None) or (fix_date < today_d)
+
+        if show_legend:
+            msg = "Banxico aún no publica el FIX de hoy; se muestra el FIX del día anterior hasta ~12:00."
+            try:
+                if fix_date:
+                    msg += " Último dato: " + fix_date.strftime("%d/%m/%Y")
+            except Exception:
+                pass
+            ws.write(6, 7, msg, fmt_note)     # H7
+            try:
+                ws.set_column(7, 7, 48)
+                ws.set_row(6, 48)
+            except Exception:
+                pass
+        else:
+            ws.write(6, 7, "")                # limpiar H7
+    except Exception:
+        # Nunca bloquear la generación del Excel por esta leyenda
+        try:
+            ws.write(6, 7, "")
+        except Exception:
+            pass
+
+
 def _ffill_with_flags(map_vals: dict, dates: list):
     """Alinea valores a 'dates' con forward-fill y devuelve (valores, flags_ffill).
-    Semilla: usa el último valor disponible <= a la primera fecha del encabezado para evitar huecos iniciales.
+    Semilla: usa el último valor disponible <= a la primera fecha del encabezado para evitar huecos al inicio.
     """
     from datetime import datetime
 
@@ -645,7 +691,6 @@ def _ffill_with_flags(map_vals: dict, dates: list):
             out_vals.append(last)
             out_flags.append(last is not None)
     return out_vals, out_flags
-
 
 def rolling_movex_for_last6(window:int=20):
     end = today_cdmx()
@@ -1073,7 +1118,7 @@ if st.button("Generar Excel"):
     cetes182, cetes182_f = _ffill_with_flags(m_c182, header_dates)
     cetes364, cetes364_f = _ffill_with_flags(m_c364, header_dates)
 
-# Backfill hacia la izquierda para cubrir huecos iniciales (B..E)
+# Backfill hacia la izquierda para cubrir huecos iniciales (B..E) de CETES
 def _backfill_left(arr):
     if not arr:
         return arr
@@ -1094,7 +1139,6 @@ cetes28  = _backfill_left(cetes28)
 cetes91  = _backfill_left(cetes91)
 cetes182 = _backfill_left(cetes182)
 cetes364 = _backfill_left(cetes364)
-
 
     try:
         movex6  
@@ -1220,57 +1264,101 @@ cetes364 = _backfill_left(cetes364)
     ws.write(6, 0, "Dólar/Pesos:")
     for i, v in enumerate(fix_vals):
         ws.write(6, 1+i, v, fmt_num4_ffill if (fix_fflags[i]) else fmt_num4)
-    
-# --- Leyenda FIX Banxico para USD en H7 ---
-try:
-    from datetime import datetime
-    # Fecha más reciente del FIX
-    fix_fecha_str, _ = sie_latest(SIE_SERIES["USD_FIX"])
+    # --- Leyenda FIX Banxico para USD en H7 ---
     try:
-        fix_date = parse_any_date(fix_fecha_str).date() if fix_fecha_str else None
-    except Exception:
-        fix_date = None
-
-    # Hora local CDMX
-    try:
-        now = today_cdmx(full=True)
-    except Exception:
-        _d = today_cdmx()
-        now = datetime(_d.year, _d.month, _d.day, 10, 0, 0)
-    noon = now.replace(hour=12, minute=0, second=0, microsecond=0)
-    today_d = now.date()
-
-    show_legend = False
-    if (fix_date is None) or (fix_date < today_d):
-        # No hay FIX de hoy: mostrar leyenda (antes o después de las 12)
-        show_legend = True
-    else:
-        # FIX publicado hoy → no mostrar
-        show_legend = False
-
-    if show_legend:
-        _msg = "Banxico aún no publica el FIX de hoy; se muestra el FIX del día anterior hasta ~12:00."
+        need_legend = False
+        _today = today_cdmx()
         try:
-            if fix_date:
-                _msg += " Último dato: " + fix_date.strftime("%d/%m/%Y")
+            if isinstance(fix_fflags, (list, tuple)) and len(fix_fflags) > 0 and bool(fix_fflags[-1]):
+                need_legend = True
         except Exception:
             pass
-        ws.write(6, 7, _msg, fmt_note)
-        try: ws.set_column(7, 7, 48); ws.set_row(6, 48)
-        except Exception: pass
-    else:
-        ws.write(6, 7, "")
-except Exception:
-    pass
+        _d = None
+        try:
+            fix_fecha_str, _ = sie_latest(SIE_SERIES["USD_FIX"])
+            _d = parse_any_date(fix_fecha_str)
+            if _d and _d.date() != _today:
+                need_legend = True
+        except Exception:
+            pass
+        if need_legend:
+            _msg = "El valor mostrado corresponde al último dato publicado por Banxico. El FIX del día se publica alrededor de las 12:00 p.m."
+            try:
+                if _d:
+                    _msg += " Último dato: " + _d.strftime("%d/%m/%Y")
+            except Exception:
+                pass
+            ws.write(6, 7, _msg, fmt_note)
+            try:
+                ws.set_column(7, 7, 48)
+                ws.set_row(6, 48)
+            except Exception:
+                pass
+    except Exception:
+        pass
+ws.write(7, 0, "MONEX:")
+ws.write(8, 0, "Compra:")
+for i, v in enumerate(compra):
+    ws.write(8, 1+i, v, fmt_num4)
+ws.write(9, 0, "Venta:")
+for i, v in enumerate(venta):
+    ws.write(9, 1+i, v, fmt_num4)
+    # Asegura explícitamente las celdas G9/G10 (columna 6, fila 8 y 9)
+    try:
+        if compra: ws.write(8, 6, compra[-1], fmt_num4)
+        if venta:  ws.write(9, 6, venta[-1],  fmt_num4)
+    except Exception:
+        pass
 
-# Limpiar H8..H18
-try:
-    for rr in range(7, 18):
-        ws.write(rr, 7, "")
-except Exception:
-    pass
+
+    ws.write(11, 0, "YEN JAPONÉS.", fmt_bold)
+    ws.write(12, 0, "Yen Japonés/Peso:")
+    for i, v in enumerate(jpy_vals):
+        ws.write(12, 1+i, v, fmt_num4_ffill if (jpy_fflags[i]) else fmt_num4)
+    # --- Leyenda FIX Banxico para JPY en H13 ---
+    try:
+        need_legend_jpy = False
+        _today = today_cdmx()
+        try:
+            if isinstance(jpy_fflags, (list, tuple)) and len(jpy_fflags) > 0 and bool(jpy_fflags[-1]):
+                need_legend_jpy = True
+        except Exception:
+            pass
+        _dj = None
+        try:
+            jpy_fecha_str, _ = sie_latest(SIE_SERIES["JPY_MXN"])
+            _dj = parse_any_date(jpy_fecha_str)
+            if _dj and _dj.date() != _today:
+                need_legend_jpy = True
+        except Exception:
+            pass
+        if need_legend_jpy:
+            _msgj = "El valor mostrado corresponde al último dato publicado por Banxico. El FIX del día se publica alrededor de las 12:00 p.m."
+            try:
+                if _dj:
+                    _msgj += " Último dato: " + _dj.strftime("%d/%m/%Y")
+            except Exception:
+                pass
+            ws.write(12, 7, _msgj, fmt_note)
+            try:
+                ws.set_column(7, 7, 48)
+                ws.set_row(12, 48)
+            except Exception:
+                pass
+    except Exception:
+        pass
+
+    ws.write(13, 0, "Dólar/Yen Japonés:")
+    for i, v in enumerate(usd_jpy):
+        ws.write(13, 1+i, v, fmt_num4)
+
+    ws.write(15, 0, "EURO.", fmt_bold)
+    ws.write(16, 0, "Euro/Peso:")
+    for i, v in enumerate(eur_vals):
+        ws.write(16, 1+i, v, fmt_num4_ffill if (eur_fflags[i]) else fmt_num4)
+
+    # (removido) Indicadores con triángulos en columna H
 # --- Leyenda FIX Banxico para EUR en H17 ---
-
     try:
         need_legend_eur = False
         _today = today_cdmx()
