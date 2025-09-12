@@ -1233,39 +1233,60 @@ if st.button("Generar Excel"):
             ws.write(rr, 7, "")
     except Exception:
         pass
+    
+    # --- Leyenda en H7 condicionada a publicación del FIX de Banxico ---
     try:
+        from datetime import datetime, time as _time
         need_legend = False
-        _today = today_cdmx()
+        now_cdmx = now_cdmx if 'now_cdmx' in globals() else None
         try:
-            if isinstance(fix_fflags, (list, tuple)) and len(fix_fflags) > 0 and bool(fix_fflags[-1]):
-                need_legend = True
-        except Exception:
-            pass
-        _d = None
-        try:
+            # Obtén fecha más reciente del FIX
             fix_fecha_str, _ = sie_latest(SIE_SERIES["USD_FIX"])
-            _d = parse_any_date(fix_fecha_str)
-            if _d and _d.date() != _today:
-                need_legend = True
+            fix_date = parse_any_date(fix_fecha_str).date() if fix_fecha_str else None
         except Exception:
-            pass
+            fix_date = None
+
+        # Hora de corte (12:00) en CDMX
+        try:
+            _now = today_cdmx(full=True)  # datetime en CDMX
+        except Exception:
+            # Fallback si solo tenemos date()
+            _d = today_cdmx()
+            _now = datetime(_d.year, _d.month, _d.day, 10, 0, 0)
+        noon = _now.replace(hour=12, minute=0, second=0, microsecond=0)
+        today_d = _now.date()
+
+        # Reglas:
+        # - Antes de las 12: si el FIX de hoy no está publicado, mostramos leyenda
+        # - Después de las 12: solo mostramos si hoy sigue sin publicar
+        if fix_date is None or fix_date < today_d:
+            if _now < noon or _now >= noon:
+                need_legend = True
+        else:
+            need_legend = False  # publicado hoy
+
         if need_legend:
-            _msg = "El valor mostrado corresponde al último dato publicado por Banxico. El FIX del día se publica alrededor de las 12:00 p.m."
+            _msg = "Banxico aún no publica el FIX de hoy; se muestra el FIX del día anterior hasta ~12:00."
+            # Anexa última fecha disponible si la tenemos
             try:
-                if _d:
-                    _msg += " Último dato: " + _d.strftime("%d/%m/%Y")
+                if fix_date:
+                    _msg += " Último dato: " + fix_date.strftime("%d/%m/%Y")
             except Exception:
                 pass
             ws.write(6, 7, _msg, fmt_note)
             try:
-                ws.set_column(7, 7, 48)
-                ws.set_row(6, 48)
+                ws.set_column(7, 7, 48); ws.set_row(6, 48)
+            except Exception:
+                pass
+        else:
+            # Si ya se publicó hoy, limpiamos la celda H7 (sin leyenda)
+            try:
+                ws.write(6, 7, "")
             except Exception:
                 pass
     except Exception:
         pass
-
-    ws.write(7, 0, "MONEX:")
+ws.write(7, 0, "MONEX:")
 
     ws.write(8, 0, "Compra:")
     for i, v in enumerate(compra):
