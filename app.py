@@ -9,15 +9,6 @@ import re
 import requests
 import feedparser
 import xlsxwriter
-
-from pathlib import Path as _Path
-try:
-    import openpyxl
-    from openpyxl.styles import Font as _Font
-    from openpyxl.formatting.rule import Rule as _Rule
-    from openpyxl.styles.differential import DifferentialStyle as _DiffStyle
-except Exception:
-    openpyxl = None
 import streamlit as st
 from datetime import datetime, timedelta, date
 from email.utils import parsedate_to_datetime
@@ -57,16 +48,16 @@ def get_uma(inegi_token: str, http_session=None) -> dict:
         except Exception:
             return float('nan')
     status = []
-    sess = http_session(7) if callable(http_session) else None
+    sess = http_session(20) if callable(http_session) else None
     rq = (sess.get if sess else __import__('requests').get)
     headers = {"User-Agent": "Mozilla/5.0", "Accept": "text/html,application/json", "Accept-Language": "es-MX,es;q=0.9"}
     ids = "620706,620707,620708"
-    api_variants = [("00","true","BISE"),("00","true","BIE")]
+    api_variants = [("00","true","BISE"),("00","true","BIE"),("0700","false","BISE"),("0700","false","BIE")]
     if inegi_token:
         for geo,recent,source in api_variants:
             try:
                 url = f"https://www.inegi.org.mx/app/api/indicadores/desarrolladores/jsonxml/INDICATOR/{ids}/es/{geo}/{recent}/{source}/2.0/{inegi_token}?type=json"
-                resp = rq(url, timeout=7, headers=headers)
+                resp = rq(url, timeout=20, headers=headers)
                 if resp.status_code != 200:
                     status.append(f"API {source} {geo}/{recent} HTTP {resp.status_code}")
                     continue
@@ -94,7 +85,7 @@ def get_uma(inegi_token: str, http_session=None) -> dict:
         status.append("Sin INEGI_TOKEN")
     try:
         url = "https://www.inegi.org.mx/temas/uma/"
-        resp = rq(url, timeout=7, headers=headers); html = resp.text
+        resp = rq(url, timeout=20, headers=headers); html = resp.text
         sec = re.search(r'(Valor de la UMA|UMA value).*?<table.*?</table>', html, re.S|re.I)
         if sec:
             table = sec.group(0)
@@ -410,7 +401,7 @@ def fred_fetch_series(series_id: str, start: str | None = None, end: str | None 
     if start: params["observation_start"] = start
     if end:   params["observation_end"]   = end
     try:
-        r = requests.get("https://api.stlouisfed.org/fred/series/observations", params=params, timeout=7)
+        r = requests.get("https://api.stlouisfed.org/fred/series/observations", params=params, timeout=20)
         if r.status_code != 200:
             return []
         data = r.json().get("observations", [])
@@ -562,7 +553,7 @@ def sie_latest(series_id):
 def sie_range(series_id: str, start_iso: str, end_iso: str):
     url = f"https://www.banxico.org.mx/SieAPIRest/service/v1/series/{series_id}/datos/{start_iso}/{end_iso}"
     headers = {"Bmx-Token": BANXICO_TOKEN}
-    r = http_session(7).get(url, headers=headers, timeout=7)
+    r = http_session(20).get(url, headers=headers, timeout=20)
     r.raise_for_status()
     j = r.json()
     series = j.get("bmx", {}).get("series", [])
@@ -716,8 +707,8 @@ def get_uma(inegi_token: str, http_session=None) -> dict:
         if ids and inegi_token:
             base = "https://www.inegi.org.mx/app/api/indicadores/desarrolladores"
             url = f"{base}/jsonxml/INDICATOR/{ids}/es/00/true/BISE/2.0/{inegi_token}?type=json"
-            sess = http_session(7) if callable(http_session) else None
-            resp = (sess.get(url, timeout=7) if sess else __import__('requests').get(url, timeout=7))
+            sess = http_session(20) if callable(http_session) else None
+            resp = (sess.get(url, timeout=20) if sess else __import__('requests').get(url, timeout=20))
             if resp.status_code == 200:
                 data = resp.json()
                 series = data.get('Series') or data.get('series') or []
@@ -758,8 +749,8 @@ def get_uma(inegi_token: str, http_session=None) -> dict:
     # 2) Fallback: página oficial de la UMA en INEGI
     try:
         url = "https://www.inegi.org.mx/temas/uma/"
-        sess = http_session(7) if callable(http_session) else None
-        resp = (sess.get(url, timeout=7) if sess else __import__('requests').get(url, timeout=7))
+        sess = http_session(20) if callable(http_session) else None
+        resp = (sess.get(url, timeout=20) if sess else __import__('requests').get(url, timeout=20))
         html = resp.text
 
         # Busca la tabla "Valor de la UMA" y toma la primera fila (año más reciente)
@@ -804,7 +795,7 @@ def get_uma(inegi_token: str, http_session=None) -> dict:
     last_err = None
     for u in urls:
         try:
-            r = http_session(7).get(u, timeout=7)
+            r = http_session(20).get(u, timeout=20)
             if r.status_code != 200:
                 last_err = f"HTTP {r.status_code}"
                 continue
@@ -930,9 +921,6 @@ _check_tokens()
 _render_sidebar_status()
 
 if st.button("Generar Excel"):
-    # Limpieza automática de caché
-    st.cache_data.clear()
-    st.session_state.pop('xlsx_bytes', None)
     prog = st.progress(0, text="Iniciando…")
     prog.progress(5, text="Preparando entorno…")
     def pad6(lst): return ([None]*(6-len(lst)))+lst if len(lst) < 6 else lst[-6:]
@@ -955,9 +943,8 @@ if st.button("Generar Excel"):
     cetes182_6 = pad6([v for _, v in sie_last_n(SIE_SERIES["CETES_182"], n=6)])
     cetes364_6 = pad6([v for _, v in sie_last_n(SIE_SERIES["CETES_364"], n=6)])
     prog.progress(50, text="Consultando CETES…")
-    prog.progress(60, text="Obteniendo UMA (INEGI)…")
     uma = get_uma(INEGI_TOKEN)
-    prog.progress(65, text="UMA listo")
+    prog.progress(65, text="Obteniendo UMA (INEGI)…")
 
     # Normaliza claves y aplica fallback si vienen vacías/NaN
     from math import isnan
@@ -1084,9 +1071,8 @@ if st.button("Generar Excel"):
     try:
         uma  
     except NameError:
-        prog.progress(60, text="Obteniendo UMA (INEGI)…")
-    uma = get_uma(INEGI_TOKEN)
-    prog.progress(65, text="UMA listo")
+        uma = get_uma(INEGI_TOKEN)
+    prog.progress(65, text="Obteniendo UMA (INEGI)…")
 
     def _last_or_none(series_pairs): 
         return series_pairs[-1][1] if series_pairs else None
@@ -1286,7 +1272,7 @@ if st.button("Generar Excel"):
     # Indicadores de variación (flechas grises) en filas clave B..G
     try:
         for _r in (6, 8, 9, 12, 13, 16, 17):
-            ws.conditional_format(_r, 1, _r, 6, {'type': 'icon_set', 'icon_style': '3_traffic_lights', 'reverse_icons': True})
+            ws.conditional_format(_r, 1, _r, 6, {'type': 'icon_set', 'icon_style': '3_arrows'})
     except Exception:
         pass
 
@@ -1691,22 +1677,7 @@ try:
         pass
     wb.close()
     try:
-        TEMPLATE_PATH = _Path(__file__).parent / 'layout.xlsx'
-        series_map = {
-            'usd_mxn': usd6,
-            'eur_mxn': eur6,
-            'jpy_mxn': jpy6,
-            'usd_jpy': usd_jpy,
-            'eur_usd': eurusd,
-            'compra': compra,
-            'venta':  venta,
-            'cetes_28': [ (v/100.0 if v is not None else None) for v in cetes28_6 ],
-            'cetes_91': [ (v/100.0 if v is not None else None) for v in cetes91_6 ],
-            'cetes_182': [ (v/100.0 if v is not None else None) for v in cetes182_6 ],
-            'cetes_364': [ (v/100.0 if v is not None else None) for v in cetes364_6 ],
-        }
-        _tplb = fill_template_and_get_bytes(TEMPLATE_PATH, header_dates, series_map)
-        st.session_state['xlsx_bytes'] = (_tplb if _tplb is not None else bio.getvalue())
+        st.session_state['xlsx_bytes'] = bio.getvalue()
         prog.progress(100, text="Listo ✅")
         time.sleep(0.3)
         try:
@@ -1771,93 +1742,6 @@ except Exception:
 
 
 
-
-
-
-
-
-def _try_find_row_by_label(ws, label_parts, start_row=1, end_row=120):
-    """Busca en columna A una fila cuyo texto contenga TODAS las partes."""
-    for r in range(start_row, end_row+1):
-        v = ws.cell(r, 1).value
-        if isinstance(v, str):
-            s = v.lower()
-            if all(p.lower() in s for p in label_parts):
-                return r
-    return None
-
-def _fill_triangles(ws, r, col_idx):
-    """Escribe fórmula de triángulo (▼/▲/—) en la columna intermedia (C/E/G/I/K)."""
-    def col_letter(c):
-        res = ""
-        while c:
-            c, rem = divmod(c-1, 26)
-            res = chr(65+rem) + res
-        return res
-    left  = col_letter(col_idx-1)
-    right = col_letter(col_idx+1)
-    cell  = f"{col_letter(col_idx)}{r}"
-    f = f'=IF(OR(ISBLANK({right}{r}),ISBLANK({left}{r})), "", IF({right}{r}-{left}{r}<-0.0000001, "▼", IF({right}{r}-{left}{r}>0.0000001, "▲", "—")))'
-    ws[cell] = f
-
-def fill_template_and_get_bytes(template_path, header_dates, series_map):
-    """Rellena layout.xlsx con los datos calculados y devuelve bytes del archivo resultante."""
-    if (openpyxl is None) or (not template_path.exists()):
-        return None
-
-    wb = openpyxl.load_workbook(str(template_path))
-    ws = wb.active
-
-    # Fechas cabecera (fila 6): B,D,F,H,J,L
-    cols_vals = [2,4,6,8,10,12]
-    for i, c in enumerate(cols_vals):
-        if i < len(header_dates):
-            ws.cell(6, c).value = header_dates[i]
-
-    label_to_key = {
-        ("dólar", "peso"): "usd_mxn",
-        ("eur", "peso"): "eur_mxn",
-        ("yen", "peso"): "jpy_mxn",
-        ("dólar", "yen"): "usd_jpy",
-        ("euro", "dólar"): "eur_usd",
-        ("compra", "monex"): "compra",
-        ("venta", "monex"): "venta",
-        ("cetes", "28"): "cetes_28",
-        ("cetes", "91"): "cetes_91",
-        ("cetes", "182"): "cetes_182",
-        ("cetes", "364"): "cetes_364",
-    }
-
-    for parts, key in label_to_key.items():
-        vals = series_map.get(key)
-        if not vals:
-            continue
-        r = _try_find_row_by_label(ws, parts, start_row=6, end_row=30)
-        if not r:
-            continue
-        for i, c in enumerate(cols_vals):
-            v = vals[i] if i < len(vals) else None
-            ws.cell(r, c).value = v
-            if c != 2:
-                _fill_triangles(ws, r, c-1)
-
-    # Colorear triángulos (verde si baja, rojo si sube, amarillo si casi igual) en C,E,G,I,K filas 7..18
-    try:
-        from openpyxl.utils import get_column_letter as _col
-        sym_cols = [3,5,7,9,11]
-        for r in range(7, 19):
-            for cc in sym_cols:
-                cell = f"{_col(cc)}{r}"
-                rule_v = _Rule(type="containsText", operator="containsText", text="▼"); rule_v.dxf = _DiffStyle(font=_Font(color="008A00")); ws.conditional_formatting.add(cell, rule_v)
-                rule_r = _Rule(type="containsText", operator="containsText", text="▲"); rule_r.dxf = _DiffStyle(font=_Font(color="D00000")); ws.conditional_formatting.add(cell, rule_r)
-                rule_y = _Rule(type="containsText", operator="containsText", text="—"); rule_y.dxf = _DiffStyle(font=_Font(color="C9A300")); ws.conditional_formatting.add(cell, rule_y)
-    except Exception:
-        pass
-
-    import io
-    bio = io.BytesIO()
-    wb.save(bio)
-    return bio.getvalue()
 
 
 
