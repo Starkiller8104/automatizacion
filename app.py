@@ -1415,9 +1415,9 @@ if st.button("Generar Excel"):
     try:
         # Series Banxico SIE (índices, base 2018=100)
         INPC_SERIES = {
-            "general": "SP74624",
+            "general": "SP1",
             "subyacente": "SP74625",
-            "no_subyacente": "SP74627",
+            "no_subyacente": "SP74630",  # Non-core
         }
         from datetime import date
         hoy = today_cdmx()
@@ -1426,6 +1426,31 @@ if st.button("Generar Excel"):
         # Fechas para traer: desde dic prev -> sep actual (para acumulada anual)
         ini = f"{anio-1}-12-01"
         fin = f"{anio}-09-30"
+        # Fallback: si la SIE falla para alguna serie, extraemos los 3 valores del portal de inflación
+        def _portal_inflacion_triple():
+            try:
+                url = "https://www.banxico.org.mx/tipcamb/llenarInflacionAction.do?idioma=sp"
+                r = http_session(20).get(url, timeout=20)
+                r.raise_for_status()
+                txt = r.text
+                import re as _re
+                clean = _re.sub(r"<[^>]+>", " ", txt)
+                clean = clean.replace("\u00a0", " ")
+                clean = _re.sub(r"\s+", " ", clean)
+
+                def trio(label):
+                    m = _re.search(label + r"\s+(-?\d+(?:\.\d+)?)\s+(-?\d+(?:\.\d+)?)\s+(-?\d+(?:\.\d+)?)", clean, _re.I)
+                    if not m:
+                        return None
+                    return tuple(float(x)/100.0 for x in m.groups())
+
+                g = trio("INPC índice general")
+                s = trio("INPC subyacente")
+                n = trio("INPC no subyacente")
+                return g, s, n
+            except Exception:
+                return None
+
 
         def _get_idx(sid):
             obs = sie_range(INPC_SERIES[sid], ini, fin) or []
@@ -1465,6 +1490,28 @@ if st.button("Generar Excel"):
         m_g, a_g, y_g = _metrics(df_g)
         m_s, a_s, y_s = _metrics(df_s)
         m_n, a_n, y_n = _metrics(df_n)
+        # Si alguna serie no se obtuvo, usar valores del portal para el mes vigente (llenaremos solo la columna J)
+        if (not m_g) or (not a_g) or (not y_g) or (not m_s) or (not a_s) or (not y_s) or (not m_n) or (not a_n) or (not y_n):
+            _portal = _portal_inflacion_triple()
+            if _portal:
+                try:
+                    (pg_m, pg_a, pg_y), (ps_m, ps_a, ps_y), (pn_m, pn_a, pn_y) = _portal
+                    # construir series de un solo punto en la última fecha (septiembre del año)
+                    last = pd.to_datetime(f"{anio}-09-01")
+                    def onepoint(v):
+                        return pd.Series({last: v}) if (v is not None) else pd.Series(dtype=float)
+                    if not m_g: m_g = onepoint(pg_m)
+                    if not a_g: a_g = onepoint(pg_a)
+                    if not y_g: y_g = onepoint(pg_y)
+                    if not m_s: m_s = onepoint(ps_m)
+                    if not a_s: a_s = onepoint(ps_a)
+                    if not y_s: y_s = onepoint(ps_y)
+                    if not m_n: m_n = onepoint(pn_m)
+                    if not a_n: a_n = onepoint(pn_a)
+                    if not y_n: y_n = onepoint(pn_y)
+                except Exception:
+                    pass
+
 
         # Meses enero..septiembre
         meses = pd.date_range(f"{anio}-01-01", f"{anio}-09-01", freq="MS")
