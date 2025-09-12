@@ -1497,3 +1497,77 @@ if st.button("Generar Excel"):
                 return True
         
         if any(_is_empty(s) for s in [m_g, a_g, y_g, m_s, a_s, y_s, m_n, a_n, y_n]):
+            _portal = _portal_inflacion_triple()
+            if _portal:
+                try:
+                    (pg_m, pg_a, pg_y), (ps_m, ps_a, ps_y), (pn_m, pn_a, pn_y) = _portal
+                    last = pd.to_datetime(f"{anio}-09-01")
+                    def _onepoint(v):
+                        return pd.Series({last: v}) if (v is not None) else pd.Series(dtype=float)
+                    if m_g.dropna().empty: m_g = _onepoint(pg_m)
+                    if a_g.dropna().empty: a_g = _onepoint(pg_a)
+                    if y_g.dropna().empty: y_g = _onepoint(pg_y)
+                    if m_s.dropna().empty: m_s = _onepoint(ps_m)
+                    if a_s.dropna().empty: a_s = _onepoint(ps_a)
+                    if y_s.dropna().empty: y_s = _onepoint(ps_y)
+                    if m_n.dropna().empty: m_n = _onepoint(pn_m)
+                    if a_n.dropna().empty: a_n = _onepoint(pn_a)
+                    if y_n.dropna().empty: y_n = _onepoint(pn_y)
+                except Exception:
+                    pass
+
+        # --- Construcción de tabla Ene..Sep ---
+        meses = pd.date_range(f"{anio}-01-01", f"{anio}-09-01", freq="MS")
+        start_row = 58  # encabezados en fila 59
+
+        # Formatos con bordes para esta tabla
+        fmt_pct2_b = wb.add_format({'font_name':'Arial','num_format':'0.00%','border':1})
+        fmt_lbl_b  = wb.add_format({'font_name':'Arial','bold':True,'border':1})
+        fmt_hdr_b  = wb.add_format({'font_name':'Arial','bold':True,'bg_color':'#F2F2F2','align':'center','border':1})
+
+        ws.write(start_row-1, 0, 'Mes', fmt_hdr_b)
+        for j, d in enumerate(meses, start=1):
+            ws.write(start_row-1, j, d.strftime('%b').capitalize(), fmt_hdr_b)
+        ws.write(start_row-1, 10, 'Δ último mes', fmt_hdr_b)  # K
+        ws.write(start_row-1, 11, '▲/▼', fmt_hdr_b)          # L
+
+        etiquetas = [
+            ('INPC (General) — Inflación mensual',        m_g),
+            ('INPC (General) — Inflación acumulada año',  a_g),
+            ('INPC (General) — Inflación anual',          y_g),
+            ('Subyacente — Inflación mensual',            m_s),
+            ('Subyacente — Inflación acumulada año',      a_s),
+            ('Subyacente — Inflación anual',              y_s),
+            ('No subyacente — Inflación mensual',         m_n),
+            ('No subyacente — Inflación acumulada año',   a_n),
+            ('No subyacente — Inflación anual',           y_n),
+        ]
+
+        for i, (label, serie) in enumerate(etiquetas):
+            r = start_row + i
+            ws.write(r, 0, label, fmt_lbl_b)
+            for j, d in enumerate(meses, start=1):
+                try:
+                    v = float(serie.loc[d]) if (d in serie.index and pd.notna(serie.loc[d])) else None
+                except Exception:
+                    v = None
+                if v is None:
+                    ws.write(r, j, 'N/D')
+                else:
+                    ws.write(r, j, v, fmt_pct2_b)
+            # Delta último mes en K
+            formula = f"=IF(ISNUMBER(J{r+1}),J{r+1}-I{r+1},IF(ISNUMBER(I{r+1}),I{r+1}-H{r+1},IF(ISNUMBER(H{r+1}),H{r+1}-G{r+1},IF(ISNUMBER(G{r+1}),G{r+1}-F{r+1},IF(ISNUMBER(F{r+1}),F{r+1}-E{r+1},IF(ISNUMBER(E{r+1}),E{r+1}-D{r+1},IF(ISNUMBER(D{r+1}),D{r+1}-C{r+1},IF(ISNUMBER(C{r+1}),C{r+1}-B{r+1},''))))))))"
+            ws.write_formula(r, 10, formula, fmt_pct2_b)  # K
+            # Icono en L
+            tri_formula = f"=IF(J{r+1}-I{r+1}<-0.0000001,'▼',IF(J{r+1}-I{r+1}>0.0000001,'▲','—'))"
+            ws.write_formula(r, 11, tri_formula)
+
+        ws.set_column(0, 0, 42)   # A
+        ws.set_column(1, 9, 12)   # B..J
+        ws.set_column(10, 11, 14) # K..L
+
+    except Exception as e:
+        try:
+            st.warning(f'No fue posible generar INPC: {e}')
+        except Exception:
+            pass
