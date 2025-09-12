@@ -9,6 +9,15 @@ import re
 import requests
 import feedparser
 import xlsxwriter
+
+from pathlib import Path as _Path
+try:
+    import openpyxl
+    from openpyxl.styles import Font as _Font
+    from openpyxl.formatting.rule import Rule as _Rule
+    from openpyxl.styles.differential import DifferentialStyle as _DiffStyle
+except Exception:
+    openpyxl = None
 import streamlit as st
 from datetime import datetime, timedelta, date
 from email.utils import parsedate_to_datetime
@@ -921,6 +930,9 @@ _check_tokens()
 _render_sidebar_status()
 
 if st.button("Generar Excel"):
+    # Limpieza automática de caché
+    st.cache_data.clear()
+    st.session_state.pop('xlsx_bytes', None)
     prog = st.progress(0, text="Iniciando…")
     prog.progress(5, text="Preparando entorno…")
     def pad6(lst): return ([None]*(6-len(lst)))+lst if len(lst) < 6 else lst[-6:]
@@ -1200,7 +1212,7 @@ if st.button("Generar Excel"):
                 pass
             ws.write(6, 7, _msg, fmt_note)
             try:
-                ws.set_column(7, 7, 48)
+                ws.set_column(7, 7, 40)
                 ws.set_row(6, 48)
             except Exception:
                 pass
@@ -1253,7 +1265,7 @@ if st.button("Generar Excel"):
                 pass
             ws.write(12, 7, _msgj, fmt_note)
             try:
-                ws.set_column(7, 7, 48)
+                ws.set_column(7, 7, 40)
                 ws.set_row(12, 48)
             except Exception:
                 pass
@@ -1269,31 +1281,12 @@ if st.button("Generar Excel"):
     for i, v in enumerate(eur_vals):
         ws.write(16, 1+i, v, fmt_num4_ffill if (eur_fflags[i]) else fmt_num4)
 
-    # Indicadores con triángulos en columna H (verde cuando baja)
-    # Prepara formatos
+    # Indicadores de variación (flechas grises) en filas clave B..G
     try:
-        fmt_tri_base   = wb.add_format({'font_size': 13, 'align': 'left'})
-        fmt_tri_green  = wb.add_format({'font_size': 13, 'align': 'left', 'font_color': '#008A00'})
-        fmt_tri_red    = wb.add_format({'font_size': 13, 'align': 'left', 'font_color': '#D00000'})
-        fmt_tri_yellow = wb.add_format({'font_size': 13, 'align': 'left', 'font_color': '#C9A300'})
+        for _r in (6, 8, 9, 12, 13, 16, 17):
+            ws.conditional_format(_r, 1, _r, 6, {'type': 'icon_set', 'icon_style': '3_traffic_lights', 'reverse_icons': True})
     except Exception:
         pass
-
-    # Filas objetivo (0-based): mismas que usabas con icon sets
-    _rows = (6, 8, 9, 12, 13, 16, 17)
-    # Asegura ancho de H para ver el símbolo
-    ws.set_column(7, 7, 48)
-
-    for _r in _rows:
-        # Fórmula: compara G (hoy) vs F (ayer). ▼ verde si bajó; ▲ roja si subió; — si casi igual.
-        _excel_r = _r + 1  # 1-based Excel
-        _formula = f'=IF(OR(ISBLANK(G{_excel_r}),ISBLANK(F{_excel_r})), "", IF(G{_excel_r}-F{_excel_r}<-0.0000001, "▼", IF(G{_excel_r}-F{_excel_r}>0.0000001, "▲", "—")))'
-        ws.write_formula(_r, 7, _formula, fmt_tri_base)
-
-        # Colorea según símbolo
-        ws.conditional_format(_r, 7, _r, 7, {'type': 'text', 'criteria': 'containing', 'value': '▼', 'format': fmt_tri_green})
-        ws.conditional_format(_r, 7, _r, 7, {'type': 'text', 'criteria': 'containing', 'value': '▲', 'format': fmt_tri_red})
-        ws.conditional_format(_r, 7, _r, 7, {'type': 'text', 'criteria': 'containing', 'value': '—', 'format': fmt_tri_yellow})
 
 # --- Leyenda FIX Banxico para EUR en H17 ---
     try:
@@ -1321,7 +1314,7 @@ if st.button("Generar Excel"):
                 pass
             ws.write(16, 7, _msge, fmt_note)
             try:
-                ws.set_column(7, 7, 48)
+                ws.set_column(7, 7, 40)
                 ws.set_row(16, 48)
             except Exception:
                 pass
@@ -1376,68 +1369,7 @@ if st.button("Generar Excel"):
         ws.write(34, 1+i, v2, fmt_pct2_ffill if (cetes182_f[i]) else fmt_pct2)
         v3 = (cetes364[i]/100.0) if (cetes364[i] is not None) else None
         ws.write(35, 1+i, v3, fmt_pct2_ffill if (cetes364_f[i]) else fmt_pct2)
-    # === ESTADOS UNIDOS (tabla mensual) ===
-    ws.write(43, 0, "ESTADOS UNIDOS:", fmt_section)
 
-    ws.write(44, 0, "MES", fmt_hdr)
-    ws.write(44, 1, "INFLACIÓN", fmt_hdr)
-    ws.write(44, 2, "TASA DE INTERES", fmt_hdr)
-    ws.set_column(2, 2, 22)  # Columna C más ancha para el título
-    ws.set_column(3, 6, 14)  # Ensancha D..G para la leyenda
-    ws.set_column(7, 7, 48)  # Columna H más ancha para leyenda
-
-
-    from datetime import date as _date
-    _today = today_cdmx()
-    _year  = _today.year
-    _meses = [
-        (12, "Diciembre"), (11, "Noviembre"), (10, "Octubre"), (9, "Septiembre"),
-        (8, "Agosto"), (7, "Julio"), (6, "Junio"), (5, "Mayo"),
-        (4, "Abril"), (3, "Marzo"), (2, "Febrero"), (1, "Enero")
-    ]
-
-    try:
-        cpi_obs = fred_fetch_series("CPIAUCSL", start=f"{_year}-01-01", end=f"{_year}-12-31", units="pc1")
-    except Exception:
-        cpi_obs = []
-    try:
-        ff_obs  = fred_fetch_series("DFEDTARU", start=f"{_year}-01-01", end=f"{_year}-12-31", units="lin")
-    except Exception:
-        ff_obs = []
-
-    def _last_per_month(obs):
-        out = {}
-        for o in obs or []:
-            _d = parse_any_date(o.get("date"))
-            _v = try_float(o.get("value"))
-            if _d and (_v is not None):
-                out[_d.month] = _v
-        return out
-
-    m_cpi = _last_per_month(cpi_obs)
-    m_fed = _last_per_month(ff_obs)
-    # Si no hay dato de inflación para el mes en curso, mostramos leyenda en D46
-    try:
-        _m_actual = _today.month
-        if m_cpi.get(_m_actual) is None:
-            # Formato de nota discreta
-            try:
-                fmt_note = wb.add_format({'font_size': 9, 'italic': True, 'font_color': '#666666', 'text_wrap': True, 'valign': 'top'})
-            except Exception:
-                fmt_note = fmt_pct2
-            ws.merge_range(45, 3, 46, 6, "Nota: El dato de inflación del mes en curso aún no está publicado en FRED; se actualizará tras el reporte oficial (BLS).", fmt_note)
-    except Exception:
-        pass
-
-
-    base_row = 45  # Excel 46..57
-    for i, (mes_num, mes_nom) in enumerate(_meses):
-        r = base_row + i
-        ws.write(r, 0, mes_nom)
-        cpi_v = m_cpi.get(mes_num)
-        ws.write(r, 1, (cpi_v/100.0) if (cpi_v is not None) else None, fmt_pct2)
-        fed_v = m_fed.get(mes_num)
-        ws.write(r, 2, (fed_v/100.0) if (fed_v is not None) else None, fmt_pct2)
     ws.write(37, 0, "UMA:", fmt_section)
     # --- Escribir UMA como moneda en columnas B..G y leyenda en H ---
     fmt_money_local = wb.add_format({'font_name': 'Arial', 'num_format': '$#,##0.00'})
@@ -1474,7 +1406,7 @@ if st.button("Generar Excel"):
             'text_wrap': True, 'align': 'left', 'valign': 'top',
             'bg_color': '#F9F9F9'
         })
-        ws.set_column(7, 7, 48)
+        ws.set_column(7, 7, 34)
         ws.merge_range(39, 7, 41, 7, note_txt, fmt_legend)
     except Exception:
         pass
@@ -1757,7 +1689,22 @@ try:
         pass
     wb.close()
     try:
-        st.session_state['xlsx_bytes'] = bio.getvalue()
+        TEMPLATE_PATH = _Path(__file__).parent / 'layout.xlsx'
+        series_map = {
+            'usd_mxn': usd6,
+            'eur_mxn': eur6,
+            'jpy_mxn': jpy6,
+            'usd_jpy': usd_jpy,
+            'eur_usd': eurusd,
+            'compra': compra,
+            'venta':  venta,
+            'cetes_28': [ (v/100.0 if v is not None else None) for v in cetes28_6 ],
+            'cetes_91': [ (v/100.0 if v is not None else None) for v in cetes91_6 ],
+            'cetes_182': [ (v/100.0 if v is not None else None) for v in cetes182_6 ],
+            'cetes_364': [ (v/100.0 if v is not None else None) for v in cetes364_6 ],
+        }
+        _tplb = fill_template_and_get_bytes(TEMPLATE_PATH, header_dates, series_map)
+        st.session_state['xlsx_bytes'] = (_tplb if _tplb is not None else bio.getvalue())
         prog.progress(100, text="Listo ✅")
         time.sleep(0.3)
         try:
@@ -1824,6 +1771,91 @@ except Exception:
 
 
 
+
+
+
+def _try_find_row_by_label(ws, label_parts, start_row=1, end_row=120):
+    """Busca en columna A una fila cuyo texto contenga TODAS las partes."""
+    for r in range(start_row, end_row+1):
+        v = ws.cell(r, 1).value
+        if isinstance(v, str):
+            s = v.lower()
+            if all(p.lower() in s for p in label_parts):
+                return r
+    return None
+
+def _fill_triangles(ws, r, col_idx):
+    """Escribe fórmula de triángulo (▼/▲/—) en la columna intermedia (C/E/G/I/K)."""
+    def col_letter(c):
+        res = ""
+        while c:
+            c, rem = divmod(c-1, 26)
+            res = chr(65+rem) + res
+        return res
+    left  = col_letter(col_idx-1)
+    right = col_letter(col_idx+1)
+    cell  = f"{col_letter(col_idx)}{r}"
+    f = f'=IF(OR(ISBLANK({right}{r}),ISBLANK({left}{r})), "", IF({right}{r}-{left}{r}<-0.0000001, "▼", IF({right}{r}-{left}{r}>0.0000001, "▲", "—")))'
+    ws[cell] = f
+
+def fill_template_and_get_bytes(template_path, header_dates, series_map):
+    """Rellena layout.xlsx con los datos calculados y devuelve bytes del archivo resultante."""
+    if (openpyxl is None) or (not template_path.exists()):
+        return None
+
+    wb = openpyxl.load_workbook(str(template_path))
+    ws = wb.active
+
+    # Fechas cabecera (fila 6): B,D,F,H,J,L
+    cols_vals = [2,4,6,8,10,12]
+    for i, c in enumerate(cols_vals):
+        if i < len(header_dates):
+            ws.cell(6, c).value = header_dates[i]
+
+    label_to_key = {
+        ("dólar", "peso"): "usd_mxn",
+        ("eur", "peso"): "eur_mxn",
+        ("yen", "peso"): "jpy_mxn",
+        ("dólar", "yen"): "usd_jpy",
+        ("euro", "dólar"): "eur_usd",
+        ("compra", "monex"): "compra",
+        ("venta", "monex"): "venta",
+        ("cetes", "28"): "cetes_28",
+        ("cetes", "91"): "cetes_91",
+        ("cetes", "182"): "cetes_182",
+        ("cetes", "364"): "cetes_364",
+    }
+
+    for parts, key in label_to_key.items():
+        vals = series_map.get(key)
+        if not vals:
+            continue
+        r = _try_find_row_by_label(ws, parts, start_row=6, end_row=30)
+        if not r:
+            continue
+        for i, c in enumerate(cols_vals):
+            v = vals[i] if i < len(vals) else None
+            ws.cell(r, c).value = v
+            if c != 2:
+                _fill_triangles(ws, r, c-1)
+
+    # Colorear triángulos (verde si baja, rojo si sube, amarillo si casi igual) en C,E,G,I,K filas 7..18
+    try:
+        from openpyxl.utils import get_column_letter as _col
+        sym_cols = [3,5,7,9,11]
+        for r in range(7, 19):
+            for cc in sym_cols:
+                cell = f"{_col(cc)}{r}"
+                rule_v = _Rule(type="containsText", operator="containsText", text="▼"); rule_v.dxf = _DiffStyle(font=_Font(color="008A00")); ws.conditional_formatting.add(cell, rule_v)
+                rule_r = _Rule(type="containsText", operator="containsText", text="▲"); rule_r.dxf = _DiffStyle(font=_Font(color="D00000")); ws.conditional_formatting.add(cell, rule_r)
+                rule_y = _Rule(type="containsText", operator="containsText", text="—"); rule_y.dxf = _DiffStyle(font=_Font(color="C9A300")); ws.conditional_formatting.add(cell, rule_y)
+    except Exception:
+        pass
+
+    import io
+    bio = io.BytesIO()
+    wb.save(bio)
+    return bio.getvalue()
 
 
 
