@@ -18,6 +18,7 @@ from urllib.parse import urlparse
 from openpyxl import Workbook
 from openpyxl.styles import Alignment, Font, PatternFill
 from requests.adapters import HTTPAdapter, Retry
+import pandas as pd
 
 @st.cache_data(ttl=60*60)
 def get_uma(inegi_token: str, http_session=None) -> dict:
@@ -1050,6 +1051,45 @@ if st.button("Generar Excel"):
     cetes91, cetes91_f = _ffill_with_flags(m_c91, header_dates)
     cetes182, cetes182_f = _ffill_with_flags(m_c182, header_dates)
     cetes364, cetes364_f = _ffill_with_flags(m_c364, header_dates)
+
+    # Fallback robusto para CETES si no hay datos alineados en B..G
+    def _align_pairs_to_dates(pairs, dates):
+        # pairs: list[(date_str, value)] desc/asc; dates: list[date]
+        def to_d(s):
+            from datetime import datetime
+            try:
+                if isinstance(s, str) and "/" in s:
+                    return datetime.strptime(s, "%d/%m/%Y").date()
+                return datetime.fromisoformat(str(s)).date()
+            except Exception:
+                return None
+        pts = sorted([(to_d(d), v) for d, v in pairs if to_d(d)], key=lambda x: x[0])
+        out = []
+        for d in dates:
+            v = None
+            for dd, vv in pts:
+                if dd and dd <= d:
+                    v = vv
+                else:
+                    break
+            out.append(v)
+        return out
+
+    try:
+        if not any(x is not None for x in cetes28):
+            _p = sie_last_n(SIE_SERIES["CETES_28"], 6)
+            cetes28 = _align_pairs_to_dates(_p, header_dates_date)
+        if not any(x is not None for x in cetes91):
+            _p = sie_last_n(SIE_SERIES["CETES_91"], 6)
+            cetes91 = _align_pairs_to_dates(_p, header_dates_date)
+        if not any(x is not None for x in cetes182):
+            _p = sie_last_n(SIE_SERIES["CETES_182"], 6)
+            cetes182 = _align_pairs_to_dates(_p, header_dates_date)
+        if not any(x is not None for x in cetes364):
+            _p = sie_last_n(SIE_SERIES["CETES_364"], 6)
+            cetes364 = _align_pairs_to_dates(_p, header_dates_date)
+    except Exception:
+        pass
     try:
         movex6  
     except NameError:
@@ -1288,13 +1328,7 @@ if st.button("Generar Excel"):
         # Fórmula: compara G (hoy) vs F (ayer). ▼ verde si bajó; ▲ roja si subió; — si casi igual.
         _excel_r = _r + 1  # 1-based Excel
         _formula = f'=IF(OR(ISBLANK(G{_excel_r}),ISBLANK(F{_excel_r})), "", IF(G{_excel_r}-F{_excel_r}<-0.0000001, "▼", IF(G{_excel_r}-F{_excel_r}>0.0000001, "▲", "—")))'
-        ws.write_formula(_r, 7, _formula, fmt_tri_base)
-
-        # Colorea según símbolo
-        ws.conditional_format(_r, 7, _r, 7, {'type': 'text', 'criteria': 'containing', 'value': '▼', 'format': fmt_tri_green})
-        ws.conditional_format(_r, 7, _r, 7, {'type': 'text', 'criteria': 'containing', 'value': '▲', 'format': fmt_tri_red})
-        ws.conditional_format(_r, 7, _r, 7, {'type': 'text', 'criteria': 'containing', 'value': '—', 'format': fmt_tri_yellow})
-
+        # [DESACTIVADO] Triángulos en H deshabilitados para permitir leyendas.
 # --- Leyenda FIX Banxico para EUR en H17 ---
     try:
         need_legend_eur = False
@@ -1376,7 +1410,139 @@ if st.button("Generar Excel"):
         ws.write(34, 1+i, v2, fmt_pct2_ffill if (cetes182_f[i]) else fmt_pct2)
         v3 = (cetes364[i]/100.0) if (cetes364[i] is not None) else None
         ws.write(35, 1+i, v3, fmt_pct2_ffill if (cetes364_f[i]) else fmt_pct2)
-    # === ESTADOS UNIDOS (tabla mensual) ===
+    
+    # === INFLACIÓN MÉXICO (INPC) — Ene..Sep ===============================
+    try:
+        # Series Banxico SIE (índices, base 2018=100)
+        INPC_SERIES = {
+            "general": "SP74624",
+            "subyacente": "SP74625",
+            "no_subyacente": "SP74627",
+        }
+        from datetime import date
+        hoy = today_cdmx()
+        anio = hoy.year
+
+        # Fechas para traer: desde dic prev -> sep actual (para acumulada anual)
+        ini = f"{anio-1}-12-01"
+        fin = f"{anio}-09-30"
+
+        def _get_idx(sid):
+            obs = sie_range(INPC_SERIES[sid], ini, fin) or []
+            df = pd.DataFrame(obs)
+            if df.empty:
+                return pd.DataFrame(columns=["fecha","dato"])
+            df["fecha"] = pd.to_datetime(df["fecha"], dayfirst=True, errors="coerce")
+            df["dato"] = pd.to_numeric(df["dato"].astype(str).str.replace(",", ""), errors="coerce")
+            df = df.dropna().sort_values("fecha").reset_index(drop=True)
+            return df
+
+        def _metrics(df_idx):
+            if df_idx is None or df_idx.empty:
+                return {}, {}, {}
+            df = df_idx.copy()
+            df = df.set_index("fecha").sort_index()
+            # mensual
+            mensual = (df["dato"] / df["dato"].shift(1) - 1.0)
+            # anual
+            anual = (df["dato"] / df["dato"].shift(12) - 1.0)
+            # acumulada: base dic prev
+            base_dic = {}
+            for y in sorted(set(df.index.year)):
+                dic_prev = df["dato"][(df.index.year == (y-1)) & (df.index.month == 12)]
+                dic_val = dic_prev.iloc[-1] if not dic_prev.empty else pd.NA
+                for idx in df.index[df.index.year == y]:
+                    base_dic[idx] = dic_val
+            base_dic = pd.Series(base_dic)
+            acumulada = (df["dato"] / base_dic - 1.0)
+            return mensual, acumulada, anual
+
+        # Traer y calcular
+        df_g = _get_idx("general")
+        df_s = _get_idx("subyacente")
+        df_n = _get_idx("no_subyacente")
+
+        m_g, a_g, y_g = _metrics(df_g)
+        m_s, a_s, y_s = _metrics(df_s)
+        m_n, a_n, y_n = _metrics(df_n)
+
+        # Meses enero..septiembre
+        meses = pd.date_range(f"{anio}-01-01", f"{anio}-09-01", freq="MS")
+
+        # Ubicación en hoja
+        start_row = 58  # fila 59 en Excel
+        ws.write(start_row-1, 0, "Mes", fmt_hdr)
+        for j, d in enumerate(meses, start=1):
+            try:
+                ws.write(start_row-1, j, d.strftime("%b").capitalize(), fmt_hdr)
+            except Exception:
+                ws.write(start_row-1, j, str(d), fmt_hdr)
+        ws.write(start_row-1, 10, "Δ último mes", fmt_hdr)  # Columna K
+
+        etiquetas = [
+            ("INPC (General) — Inflación mensual",        m_g),
+            ("INPC (General) — Inflación acumulada año",  a_g),
+            ("INPC (General) — Inflación anual",          y_g),
+            ("Subyacente — Inflación mensual",            m_s),
+            ("Subyacente — Inflación acumulada año",      a_s),
+            ("Subyacente — Inflación anual",              y_s),
+            ("No subyacente — Inflación mensual",         m_n),
+            ("No subyacente — Inflación acumulada año",   a_n),
+            ("No subyacente — Inflación anual",           y_n),
+        ]
+
+        # Formatos con bordes
+        fmt_pct2_b = wb.add_format({'font_name':'Arial','num_format':'0.00%','border':1})
+        fmt_lbl_b  = wb.add_format({'font_name':'Arial','bold':True,'border':1})
+        fmt_hdr_b  = wb.add_format({'font_name':'Arial','bold':True,'bg_color':'#F2F2F2','align':'center','border':1})
+        # sobreescribir encabezado con bordes
+        ws.write(start_row-1, 0, "Mes", fmt_hdr_b)
+        for j, d in enumerate(meses, start=1):
+            ws.write(start_row-1, j, d.strftime("%b").capitalize(), fmt_hdr_b)
+        ws.write(start_row-1, 10, "Δ último mes", fmt_hdr_b)
+
+        for i, (label, serie) in enumerate(etiquetas):
+            r = start_row + i
+            ws.write(r, 0, label, fmt_lbl_b)
+            # Llenar meses
+            for j, d in enumerate(meses, start=1):
+                v = None
+                try:
+                    if d in serie.index and pd.notna(serie.loc[d]):
+                        v = float(serie.loc[d])
+                except Exception:
+                    pass
+                if v is None:
+                    ws.write(r, j, "N/D")
+                else:
+                    ws.write(r, j, v, fmt_pct2_b)
+            # Δ último mes en K: diferencia J - I con degradado de símbolos
+            # Calcula con fórmula textual de flechas (no interfiere con H)
+            # Dependencias: columnas B..J (1..9)
+            formula = f'=IF(ISNUMBER(J{r+1}),J{r+1}-I{r+1},IF(ISNUMBER(I{r+1}),I{r+1}-H{r+1},IF(ISNUMBER(H{r+1}),H{r+1}-G{r+1},IF(ISNUMBER(G{r+1}),G{r+1}-F{r+1},IF(ISNUMBER(F{r+1}),F{r+1}-E{r+1},IF(ISNUMBER(E{r+1}),E{r+1}-D{r+1},IF(ISNUMBER(D{r+1}),D{r+1}-C{r+1},IF(ISNUMBER(C{r+1}),C{r+1}-B{r+1},"")))))))))'
+            ws.write_formula(r, 10, formula, fmt_pct2_b)
+
+            # Triángulos visuales en K con formato condicional de texto
+            try:
+                tri_formula = f'=IF({ "J"+str(r+1)} - { "I"+str(r+1)} < -0.0000001, "▼", IF({ "J"+str(r+1)} - { "I"+str(r+1)} > 0.0000001, "▲", "—"))'
+                ws.write_formula(r, 11, tri_formula)  # Columna L para icono
+                ws.conditional_format(r, 11, r, 11, {'type':'text','criteria':'containing','value':'▼','format': wb.add_format({'font_color':'#2E7D32'})})
+                ws.conditional_format(r, 11, r, 11, {'type':'text','criteria':'containing','value':'▲','format': wb.add_format({'font_color':'#C62828'})})
+                ws.conditional_format(r, 11, r, 11, {'type':'text','criteria':'containing','value':'—','format': wb.add_format({'font_color':'#999999'})})
+            except Exception:
+                pass
+
+        # Ajuste de anchos
+        ws.set_column(0, 0, 42)   # Columna A
+        ws.set_column(1, 9, 12)   # B..J
+        ws.set_column(10, 11, 14) # K..L
+
+    except Exception as e:
+        try:
+            st.warning(f"No fue posible generar INPC: {e}")
+        except Exception:
+            pass
+# === ESTADOS UNIDOS (tabla mensual) ===
     ws.write(43, 0, "ESTADOS UNIDOS:", fmt_section)
 
     ws.write(44, 0, "MES", fmt_hdr)
