@@ -599,12 +599,12 @@ def _ffill_by_dates(map_vals: dict, dates: list):
 
 
 def _ffill_with_flags(map_vals: dict, dates: list):
-    # Similar a _ffill_by_dates pero devuelve (valores, flags_ffill).
-    # Mejora: inicializa con el último valor disponible ANTES de la primera fecha de 'dates'
-    # para no dejar vacíos en B..E cuando la serie es semanal (p.ej., CETES).
+    """Alinea valores a 'dates' con forward-fill y devuelve (valores, flags_ffill).
+    Mejora: inicializa con el último valor disponible <= a la primera fecha del encabezado.
+    """
     from datetime import datetime, date as _date
 
-    def to_dt(s):
+    def _to_date(s):
         try:
             if isinstance(s, str) and "/" in s:
                 return datetime.strptime(s, "%d/%m/%Y").date()
@@ -612,44 +612,46 @@ def _ffill_with_flags(map_vals: dict, dates: list):
         except Exception:
             return None
 
-    # Normalizar claves a ISO (YYYY-MM-DD)
-    normalized = {}
+    # Normalizar claves a ISO
+    norm = {}
     for k, v in map_vals.items():
-        kd = to_dt(k)
+        kd = _to_date(k)
         if kd:
-            normalized[kd.isoformat()] = v
-
-    # Determinar la fecha base (primera fecha del encabezado)
-    if not dates:
-        return [None]*0, [False]*0
-    first_ds = dates[0]
-    first_key = first_ds if isinstance(first_ds, str) else (first_ds.isoformat() if first_ds else None)
-
-    # Valor inicial: último <= primera fecha
-    last = None
-    try:
-        keys_sorted = sorted((datetime.fromisoformat(k).date(), v) for k, v in normalized.items())
-        first_date = to_dt(first_key)
-        for kd, vv in keys_sorted:
-            if first_date and kd <= first_date:
-                last = vv
-            else:
-                break
-    except Exception:
-        pass
+            norm[kd.isoformat()] = v
 
     out_vals, out_flags = [], []
+    last = None
+
+    # Semilla: último valor <= primera fecha
+    if dates:
+        try:
+            first = _to_date(dates[0] if isinstance(dates[0], str) else dates[0].isoformat())
+            for kd in sorted(norm.keys()):
+                d = _to_date(kd)
+                if d and first and d <= first:
+                    last = norm[kd]
+                else:
+                    break
+        except Exception:
+            pass
+
     for ds in dates:
         key = ds if isinstance(ds, str) else (ds.isoformat() if ds else None)
-        if key in normalized and normalized[key] is not None:
-            last = normalized[key]
+        if key in norm and norm[key] is not None:
+            last = norm[key]
             out_vals.append(last)
             out_flags.append(False)
         else:
             out_vals.append(last)
             out_flags.append(last is not None)
     return out_vals, out_flags
-      f = o.get("fecha"); v = try_float(o.get("dato"))
+def rolling_movex_for_last6(window:int=20):
+    end = today_cdmx()
+    start = end - timedelta(days=2*365)
+    obs = sie_range(SIE_SERIES["USD_FIX"], start.isoformat(), end.isoformat())
+    vals = []
+    for o in obs:
+        f = o.get("fecha"); v = try_float(o.get("dato"))
         if f and (v is not None):
             vals.append((f, v))
     if not vals:
@@ -1068,28 +1070,26 @@ if st.button("Generar Excel"):
     cetes91, cetes91_f = _ffill_with_flags(m_c91, header_dates)
     cetes182, cetes182_f = _ffill_with_flags(m_c182, header_dates)
     cetes364, cetes364_f = _ffill_with_flags(m_c364, header_dates)
-    # Backfill hacia la izquierda para cubrir los primeros días hábiles con el último dato disponible
-    def _backfill_left(arr):
-        # arr es una lista de 6 posiciones (B..G)
-        # toma el primer valor no-None y lo propaga hacia la izquierda
-        if not arr:
-            return arr
-        first_non = None
-        for x in arr:
-            if x is not None:
-                first_non = x
-                break
-        if first_non is not None:
-            for i in range(len(arr)):
-                if arr[i] is None:
-                    arr[i] = first_non
-                else:
-                    break
+# Backfill hacia la izquierda para cubrir huecos iniciales si la primera fecha cae antes de la última publicación semanal
+def _backfill_left(arr):
+    if not arr:
         return arr
-    cetes28  = _backfill_left(cetes28)
-    cetes91  = _backfill_left(cetes91)
-    cetes182 = _backfill_left(cetes182)
-    cetes364 = _backfill_left(cetes364)
+    first_non = None
+    for x in arr:
+        if x is not None:
+            first_non = x
+            break
+    if first_non is not None:
+        for i in range(len(arr)):
+            if arr[i] is None:
+                arr[i] = first_non
+            else:
+                break
+    return arr
+cetes28  = _backfill_left(cetes28)
+cetes91  = _backfill_left(cetes91)
+cetes182 = _backfill_left(cetes182)
+cetes364 = _backfill_left(cetes364)
 
     try:
         movex6  
@@ -1857,4 +1857,5 @@ except Exception:
             wsh.write(i,0,k, fmt_bold); wsh.write(i,1,v, fmt_wrap)
     except Exception:
         pass
+
 
