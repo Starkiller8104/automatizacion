@@ -1817,3 +1817,49 @@ except Exception:
     except Exception:
         pass
 
+
+
+
+        # === Formato y variación (triángulos) para el bloque de INPC ============
+        try:
+            header_row = 59
+            data_start = 60
+            data_end = 68
+            # Encabezado de columna de variación
+            ws_ind.cell(row=header_row, column=11, value="Δ último mes")
+            thin = Side(style="thin")
+            border = Border(left=thin, right=thin, top=thin, bottom=thin)
+
+            # Encabezados en negrita y centrados (A59..K59)
+            for c in range(1, 12):
+                cell = ws_ind.cell(row=header_row, column=c)
+                cell.font = Font(bold=True)
+                cell.alignment = Alignment(horizontal="center", vertical="center")
+                cell.border = border
+
+            # Etiquetas de fila en negrita y bordes en todo el bloque
+            for r in range(data_start, data_end+1):
+                # Columna A (etiqueta) en negrita
+                ws_ind.cell(row=r, column=1).font = Font(bold=True)
+                for c in range(1, 12):
+                    ws_ind.cell(row=r, column=c).border = border
+
+                # Fórmula de variación: último mes disponible menos el anterior
+                formula = f'=IF(ISNUMBER(J{r}),J{r}-I{r},IF(ISNUMBER(I{r}),I{r}-H{r},IF(ISNUMBER(H{r}),H{r}-G{r},IF(ISNUMBER(G{r}),G{r}-F{r},IF(ISNUMBER(F{r}),F{r}-E{r},IF(ISNUMBER(E{r}),E{r}-D{r},IF(ISNUMBER(D{r}),D{r}-C{r},IF(ISNUMBER(C{r}),C{r}-B{r},"")))))))))'
+                cell_delta = ws_ind.cell(row=r, column=11)
+                cell_delta.value = formula
+                cell_delta.number_format = '0.00%'
+
+            # Iconos de triángulos (solo icono, sin valor visible)
+            try:
+                cf_range = f"K{data_start}:K{data_end}"
+                rule = IconSetRule(icon_style='3Triangles', showValue=False, percent=True, reverse=False)
+                ws_ind.conditional_formatting.add(cf_range, rule)
+            except Exception:
+                pass
+        except Exception as _e:
+            try:
+                st.warning(f"No se pudo aplicar formato/triángulos INPC: {_e}")
+            except Exception:
+                pass
+
