@@ -1054,15 +1054,41 @@ if st.button("Generar Excel"):
             if _f and (_v is not None):
                 m[_f.date().isoformat()] = _v
         return m
+
+    # Helper: ASOF ffill with flags (marca True si el valor viene por arrastre y la fecha no coincide exacta)
+    def _ffill_asof_with_flags_from_map(map_vals: dict, dates: list):
+        from datetime import datetime
+        def to_dt(s):
+            try:
+                if isinstance(s, str) and "/" in s:
+                    return datetime.strptime(s, "%d/%m/%Y").date()
+                return datetime.fromisoformat(str(s)).date()
+            except Exception:
+                return None
+        pairs = sorted([(to_dt(k), v) for k, v in map_vals.items() if to_dt(k)], key=lambda x: x[0])
+        exact = {to_dt(k) for k in map_vals.keys() if to_dt(k)}
+        out_vals, out_flags = [], []
+        last = None
+        i = 0
+        for ds in dates:
+            d = to_dt(ds)
+            if d is None:
+                out_vals.append(None); out_flags.append(False); continue
+            while i < len(pairs) and pairs[i][0] <= d:
+                last = pairs[i][1]
+                i += 1
+            out_vals.append(last)
+            out_flags.append((d not in exact) and (last is not None))
+        return out_vals, out_flags
     m_c28  = _as_map_from_range_cetes('CETES_28')
     m_c91  = _as_map_from_range_cetes('CETES_91')
     m_c182 = _as_map_from_range_cetes('CETES_182')
     m_c364 = _as_map_from_range_cetes('CETES_364')
 
-    cetes28, cetes28_f = _ffill_with_flags(m_c28, header_dates)
-    cetes91, cetes91_f = _ffill_with_flags(m_c91, header_dates)
-    cetes182, cetes182_f = _ffill_with_flags(m_c182, header_dates)
-    cetes364, cetes364_f = _ffill_with_flags(m_c364, header_dates)
+    cetes28, cetes28_f = _ffill_asof_with_flags_from_map(m_c28, header_dates)
+    cetes91, cetes91_f = _ffill_asof_with_flags_from_map(m_c91, header_dates)
+    cetes182, cetes182_f = _ffill_asof_with_flags_from_map(m_c182, header_dates)
+    cetes364, cetes364_f = _ffill_asof_with_flags_from_map(m_c364, header_dates)
     try:
         movex6  
     except NameError:
@@ -1829,6 +1855,8 @@ except Exception:
             wsh.write(i,0,k, fmt_bold); wsh.write(i,1,v, fmt_wrap)
     except Exception:
         pass
+
+
 
 
 
