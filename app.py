@@ -1042,22 +1042,24 @@ if st.button("Generar Excel"):
     fix_vals, fix_fflags = _ffill_with_flags(m_fix, header_dates)
     eur_vals, eur_fflags = _ffill_with_flags(m_eur, header_dates)
     jpy_vals, jpy_fflags = _ffill_with_flags(m_jpy, header_dates)
-# Usar ventana más amplia para CETES (364 días puede ser poco frecuente)
-cet_start = (header_dates_date[0] - timedelta(days=450)).isoformat()
-cet_end   = header_dates_date[-1].isoformat()
-def _as_map_from_range_cetes(series_key):
-    obs = sie_range(SIE_SERIES[series_key], cet_start, cet_end)
-    m = {}
-    for o in obs:
-        _f = parse_any_date(o.get('fecha'))
-        _v = try_float(o.get('dato'))
-        if _f and (_v is not None):
-            m[_f.date().isoformat()] = _v
-    return m
-m_c28  = _as_map_from_range_cetes('CETES_28')
-m_c91  = _as_map_from_range_cetes('CETES_91')
-m_c182 = _as_map_from_range_cetes('CETES_182')
-m_c364 = _as_map_from_range_cetes('CETES_364')cetes28, cetes28_f = _ffill_with_flags(m_c28, header_dates)
+    # Usar ventana más amplia para CETES (364 días puede ser poco frecuente)
+    cet_start = (header_dates_date[0] - timedelta(days=450)).isoformat()
+    cet_end   = header_dates_date[-1].isoformat()
+    def _as_map_from_range_cetes(series_key):
+        obs = sie_range(SIE_SERIES[series_key], cet_start, cet_end)
+        m = {}
+        for o in obs:
+            _f = parse_any_date(o.get('fecha'))
+            _v = try_float(o.get('dato'))
+            if _f and (_v is not None):
+                m[_f.date().isoformat()] = _v
+        return m
+    m_c28  = _as_map_from_range_cetes('CETES_28')
+    m_c91  = _as_map_from_range_cetes('CETES_91')
+    m_c182 = _as_map_from_range_cetes('CETES_182')
+    m_c364 = _as_map_from_range_cetes('CETES_364')
+
+    cetes28, cetes28_f = _ffill_with_flags(m_c28, header_dates)
     cetes91, cetes91_f = _ffill_with_flags(m_c91, header_dates)
     cetes182, cetes182_f = _ffill_with_flags(m_c182, header_dates)
     cetes364, cetes364_f = _ffill_with_flags(m_c364, header_dates)
@@ -1827,6 +1829,7 @@ except Exception:
             wsh.write(i,0,k, fmt_bold); wsh.write(i,1,v, fmt_wrap)
     except Exception:
         pass
+
 
 
 
