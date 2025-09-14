@@ -1235,7 +1235,7 @@ if st.button("Generar Excel"):
     ws.write(5, 0, "DÓLAR AMERICANO.", fmt_bold)
     ws.write(6, 0, "Dólar/Pesos:")
     for i, v in enumerate(fix_vals):
-        ws.write(6, 1+i, v, fmt_num4_ffill if (fix_fflags[i]) 
+        ws.write(6, 1+i, v, fmt_num4_ffill if (fix_fflags[i]) else fmt_num4)
     # Iconos (triángulos) sobre USD/MXN (B7:G7)
     try:
         ws.conditional_format(6, 1, 6, 6, {
@@ -1298,7 +1298,7 @@ else fmt_num4)
     ws.write(11, 0, "YEN JAPONÉS.", fmt_bold)
     ws.write(12, 0, "Yen Japonés/Peso:")
     for i, v in enumerate(jpy_vals):
-        ws.write(12, 1+i, v, fmt_num4_ffill if (jpy_fflags[i]) 
+        ws.write(12, 1+i, v, fmt_num4_ffill if (jpy_fflags[i]) else fmt_num4)
     # Iconos (triángulos) sobre JPY/MXN (B13:G13)
     try:
         ws.conditional_format(12, 1, 12, 6, {
@@ -1349,7 +1349,7 @@ else fmt_num4)
     ws.write(15, 0, "EURO.", fmt_bold)
     ws.write(16, 0, "Euro/Peso:")
     for i, v in enumerate(eur_vals):
-        ws.write(16, 1+i, v, fmt_num4_ffill if (eur_fflags[i]) 
+        ws.write(16, 1+i, v, fmt_num4_ffill if (eur_fflags[i]) else fmt_num4)
     # Iconos (triángulos) sobre EUR/MXN (B17:G17)
     try:
         ws.conditional_format(16, 1, 16, 6, {
@@ -1882,9 +1882,6 @@ except Exception:
             wsh.write(i,0,k, fmt_bold); wsh.write(i,1,v, fmt_wrap)
     except Exception:
         pass
-
-
-
 
 
 
