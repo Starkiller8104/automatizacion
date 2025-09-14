@@ -1484,17 +1484,14 @@ if st.button("Generar Excel"):
 
     # === Formato condicional USD/MXN (iconos + fallback) ===
     try:
-        ws.conditional_format(6, 1, 6, 6, {'type': 'icon_set', 'icon_style': '3_arrows', 'icons_only': False})
-    except Exception:
+        except Exception:
         pass
     try:
-        ws.conditional_format(6, 1, 6, 6, {'type': '3_color_scale'})
-    except Exception:
+        except Exception:
         pass
     # Iconos (triángulos) sobre USD/MXN (B7:G7)
     try:
-        _ensure_icon_or_color_scale(ws, 6, 1, 6, 6)
-    except Exception:
+        except Exception:
         pass
     # --- Leyenda FIX Banxico para USD en H7 ---
     try:
@@ -1552,17 +1549,14 @@ if st.button("Generar Excel"):
 
     # === Formato condicional JPY/MXN (iconos + fallback) ===
     try:
-        ws.conditional_format(12, 1, 12, 6, {'type': 'icon_set', 'icon_style': '3_arrows', 'icons_only': False})
-    except Exception:
+        except Exception:
         pass
     try:
-        ws.conditional_format(12, 1, 12, 6, {'type': '3_color_scale'})
-    except Exception:
+        except Exception:
         pass
     # Iconos (triángulos) sobre JPY/MXN (B13:G13)
     try:
-        _ensure_icon_or_color_scale(ws, 12, 1, 12, 6)
-    except Exception:
+        except Exception:
         pass
     # --- Leyenda FIX Banxico para JPY en H13 ---
     try:
@@ -1608,17 +1602,14 @@ if st.button("Generar Excel"):
 
     # === Formato condicional EUR/MXN (iconos + fallback) ===
     try:
-        ws.conditional_format(16, 1, 16, 6, {'type': 'icon_set', 'icon_style': '3_arrows', 'icons_only': False})
-    except Exception:
+        except Exception:
         pass
     try:
-        ws.conditional_format(16, 1, 16, 6, {'type': '3_color_scale'})
-    except Exception:
+        except Exception:
         pass
     # Iconos (triángulos) sobre EUR/MXN (B17:G17)
     try:
-        _ensure_icon_or_color_scale(ws, 16, 1, 16, 6)
-    except Exception:
+        except Exception:
         pass
 
     # # --- Leyenda FIX Banxico para EUR en H17 ---
@@ -1634,7 +1625,36 @@ if st.button("Generar Excel"):
         try:
             eur_fecha_str, _ = sie_latest(SIE_SERIES["EUR_MXN"])
             _de = parse_any_date(eur_fecha_str)
-            if _de and _de.date() != _today:
+            i    # === Formato condicional SOLO FLECHAS (B..G) ===
+    try:
+        ws.conditional_format(6, 1, 6, 6, {'type': 'icon_set', 'icon_style': '3_arrows', 'icons_only': False})
+    except Exception:
+        pass
+    try:
+        ws.conditional_format(8, 1, 8, 6, {'type': 'icon_set', 'icon_style': '3_arrows', 'icons_only': False})
+    except Exception:
+        pass
+    try:
+        ws.conditional_format(9, 1, 9, 6, {'type': 'icon_set', 'icon_style': '3_arrows', 'icons_only': False})
+    except Exception:
+        pass
+    try:
+        ws.conditional_format(12, 1, 12, 6, {'type': 'icon_set', 'icon_style': '3_arrows', 'icons_only': False})
+    except Exception:
+        pass
+    try:
+        ws.conditional_format(13, 1, 13, 6, {'type': 'icon_set', 'icon_style': '3_arrows', 'icons_only': False})
+    except Exception:
+        pass
+    try:
+        ws.conditional_format(16, 1, 16, 6, {'type': 'icon_set', 'icon_style': '3_arrows', 'icons_only': False})
+    except Exception:
+        pass
+    try:
+        ws.conditional_format(17, 1, 17, 6, {'type': 'icon_set', 'icon_style': '3_arrows', 'icons_only': False})
+    except Exception:
+        pass
+f _de and _de.date() != _today:
                 need_legend_eur = True
         except Exception:
             pass
