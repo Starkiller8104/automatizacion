@@ -1,4 +1,3 @@
-
 import io
 import re
 import time
@@ -497,7 +496,7 @@ def get_monex_usd_compra_venta():
     r.raise_for_status()
     html = r.text
 
-    # Patrón típico: 'USD 17.59 / 19.45'
+    
     m = _re.search(r'USD\s*([0-9][0-9\.,]*)\s*/\s*([0-9][0-9\.,]*)', html)
     if not m:
         plain = _re.sub(r'<[^>]+>', ' ', html)
@@ -576,7 +575,7 @@ def sie_last_n(series_id: str, n: int = 6):
     return vals[-n:]
 
 def _ffill_by_dates(map_vals: dict, dates: list):
-    # keys are ISO-like strings. choose last available <= date
+    
     from datetime import datetime
     def to_dt(s):
         try:
@@ -598,7 +597,7 @@ def _ffill_by_dates(map_vals: dict, dates: list):
     return out
 
 def _ffill_with_flags(map_vals: dict, dates: list):
-    # Similar a _ffill_by_dates pero devuelve (valores, flags_ffill)
+    
     from datetime import datetime
     def to_dt(s):
         try:
@@ -656,7 +655,7 @@ def _ffill_asof_with_flags_from_map(map_vals: dict, dates: list):
 def _add_iconset_with_fallback(ws, r1, c1, r2, c2):
     """Intenta aplicar iconos de triángulo y, si la versión de XlsxWriter no lo soporta,
     usa un estilo alternativo compatible."""
-    styles = ['3_triangles', '3_arrows', '3_symbols']  # fallback si '3_triangles' no existe
+    styles = ['3_triangles', '3_arrows', '3_symbols']  
     for st in styles:
         try:
             ws.conditional_format(r1, c1, r2, c2, {
@@ -666,7 +665,7 @@ def _add_iconset_with_fallback(ws, r1, c1, r2, c2):
             })
             return True
         except Exception:
-            # probar el siguiente estilo
+            
             continue
     return False
 
@@ -678,7 +677,7 @@ def _ensure_icon_or_color_scale(ws, r1, c1, r2, c2):
     except Exception:
         ok = False
     if not ok:
-        # Fallback visible en prácticamente todas las versiones.
+        
         try:
             ws.conditional_format(r1, c1, r2, c2, {'type': '3_color_scale'})
             ok = True
@@ -734,16 +733,16 @@ def get_uma(inegi_token: str, http_session=None) -> dict:
     from decimal import Decimal, ROUND_HALF_UP
 
     def _to_float(x: str) -> float:
-        # normaliza "3,439.46" o "3 439,46" -> 3439.46
+        
         if x is None:
             return float('nan')
         x = str(x).replace('\u00a0', ' ').strip()
         x = re.sub(r'[^\d,\.\-]', '', x)
-        # si hay más de un separador, quita separadores de miles
+        
         if x.count('.') > 1 or x.count(',') > 1:
             x = x.replace(',', '')
         else:
-            # si usa coma como decimal (p.ej. 3.439,46) cámbiala a punto
+            
             if ',' in x and '.' in x and x.rfind(',') > x.rfind('.'):
                 x = x.replace('.', '').replace(',', '.')
             elif ',' in x and '.' not in x:
@@ -763,9 +762,9 @@ def get_uma(inegi_token: str, http_session=None) -> dict:
 
     status_msgs = []
 
-    # 1) Intento por API de INEGI (si se conocen los IDs exactos)
+    
     try:
-        ids = None  # <- Coloca aquí "id_diaria,id_mensual,id_anual" si ya los tienes confirmados
+        ids = None  
         if ids and inegi_token:
             base = "https://www.inegi.org.mx/app/api/indicadores/desarrolladores"
             url = f"{base}/jsonxml/INDICATOR/{ids}/es/00/true/BISE/2.0/{inegi_token}?type=json"
@@ -792,8 +791,8 @@ def get_uma(inegi_token: str, http_session=None) -> dict:
                     d = vals.get('diario')
                     m = vals.get('mensual')
                     a = vals.get('anual')
-                    # Completar con las relaciones oficiales si faltan
-                    if d is not None and not (isinstance(d, float) and d != d):  # not NaN
+                    
+                    if d is not None and not (isinstance(d, float) and d != d):  
                         if m is None or (isinstance(m, float) and m != m):
                             m = _round2(d * 30.4)
                     if m is not None and not (isinstance(m, float) and m != m):
@@ -808,14 +807,14 @@ def get_uma(inegi_token: str, http_session=None) -> dict:
     except Exception as e:
         status_msgs.append(f"INEGI API error: {e}")
 
-    # 2) Fallback: página oficial de la UMA en INEGI
+    
     try:
         url = "https://www.inegi.org.mx/temas/uma/"
         sess = http_session(20) if callable(http_session) else None
         resp = (sess.get(url, timeout=20) if sess else __import__('requests').get(url, timeout=20))
         html = resp.text
 
-        # Busca la tabla "Valor de la UMA" y toma la primera fila (año más reciente)
+        
         sec = re.search(r'Valor de la UMA.*?<table.*?</table>', html, re.S | re.I)
         if not sec:
             sec = re.search(r'UMA value.*?<table.*?</table>', html, re.S | re.I)
@@ -830,11 +829,11 @@ def get_uma(inegi_token: str, http_session=None) -> dict:
                 if len(nums) >= 4:
                     break
             if len(nums) >= 4:
-                # nums[0] = año; nums[1]=diario; nums[2]=mensual; nums[3]=anual
+                
                 d = _to_float(nums[1])
                 m = _to_float(nums[2])
                 a = _to_float(nums[3])
-                # Verificación / completado con las relaciones oficiales
+                
                 if d and (not m or m != _round2(d * 30.4)):
                     m = _round2(d * 30.4)
                 if m and (not a or a != _round2(m * 12)):
@@ -845,7 +844,7 @@ def get_uma(inegi_token: str, http_session=None) -> dict:
     except Exception as e:
         status_msgs.append(f"INEGI web error: {e}")
 
-    # 3) Si todo falla, devolvemos None para que UI lo maneje como vacío
+    
     return {'diario': None, 'mensual': None, 'anual': None, '_status': ' | '.join(status_msgs)}
 
     def _num(x):
@@ -966,16 +965,16 @@ def get_uma(inegi_token: str, http_session=None) -> dict:
     from decimal import Decimal, ROUND_HALF_UP
 
     def _to_float(x: str) -> float:
-        # normaliza "3,439.46" o "3 439,46" -> 3439.46
+        
         if x is None:
             return float('nan')
         x = str(x).replace('\u00a0', ' ').strip()
         x = re.sub(r'[^\d,\.\-]', '', x)
-        # si hay más de un separador, quita separadores de miles
+        
         if x.count('.') > 1 or x.count(',') > 1:
             x = x.replace(',', '')
         else:
-            # si usa coma como decimal (p.ej. 3.439,46) cámbiala a punto
+            
             if ',' in x and '.' in x and x.rfind(',') > x.rfind('.'):
                 x = x.replace('.', '').replace(',', '.')
             elif ',' in x and '.' not in x:
@@ -995,9 +994,9 @@ def get_uma(inegi_token: str, http_session=None) -> dict:
 
     status_msgs = []
 
-    # 1) Intento por API de INEGI (si se conocen los IDs exactos)
+    
     try:
-        ids = None  # <- Coloca aquí "id_diaria,id_mensual,id_anual" si ya los tienes confirmados
+        ids = None  
         if ids and inegi_token:
             base = "https://www.inegi.org.mx/app/api/indicadores/desarrolladores"
             url = f"{base}/jsonxml/INDICATOR/{ids}/es/00/true/BISE/2.0/{inegi_token}?type=json"
@@ -1024,8 +1023,8 @@ def get_uma(inegi_token: str, http_session=None) -> dict:
                     d = vals.get('diario')
                     m = vals.get('mensual')
                     a = vals.get('anual')
-                    # Completar con las relaciones oficiales si faltan
-                    if d is not None and not (isinstance(d, float) and d != d):  # not NaN
+                    
+                    if d is not None and not (isinstance(d, float) and d != d):  
                         if m is None or (isinstance(m, float) and m != m):
                             m = _round2(d * 30.4)
                     if m is not None and not (isinstance(m, float) and m != m):
@@ -1040,14 +1039,14 @@ def get_uma(inegi_token: str, http_session=None) -> dict:
     except Exception as e:
         status_msgs.append(f"INEGI API error: {e}")
 
-    # 2) Fallback: página oficial de la UMA en INEGI
+    
     try:
         url = "https://www.inegi.org.mx/temas/uma/"
         sess = http_session(20) if callable(http_session) else None
         resp = (sess.get(url, timeout=20) if sess else __import__('requests').get(url, timeout=20))
         html = resp.text
 
-        # Busca la tabla "Valor de la UMA" y toma la primera fila (año más reciente)
+        
         sec = re.search(r'Valor de la UMA.*?<table.*?</table>', html, re.S | re.I)
         if not sec:
             sec = re.search(r'UMA value.*?<table.*?</table>', html, re.S | re.I)
@@ -1062,11 +1061,11 @@ def get_uma(inegi_token: str, http_session=None) -> dict:
                 if len(nums) >= 4:
                     break
             if len(nums) >= 4:
-                # nums[0] = año; nums[1]=diario; nums[2]=mensual; nums[3]=anual
+                
                 d = _to_float(nums[1])
                 m = _to_float(nums[2])
                 a = _to_float(nums[3])
-                # Verificación / completado con las relaciones oficiales
+                
                 if d and (not m or m != _round2(d * 30.4)):
                     m = _round2(d * 30.4)
                 if m and (not a or a != _round2(m * 12)):
@@ -1077,7 +1076,7 @@ def get_uma(inegi_token: str, http_session=None) -> dict:
     except Exception as e:
         status_msgs.append(f"INEGI web error: {e}")
 
-    # 3) Si todo falla, devolvemos None para que UI lo maneje como vacío
+    
     return {'diario': None, 'mensual': None, 'anual': None, '_status': ' | '.join(status_msgs)}
 
     def _num(x):
@@ -1193,15 +1192,15 @@ with st.expander("📄 Selecciona las Hojas del Excel que contendra tu archivo",
     st.session_state["want_charts"] = want_charts
     st.session_state["want_raw"] = want_raw
 
-# Sincroniza flags de Excel con las opciones del UI
+
 do_fred   = st.session_state.get("want_fred", False)
 do_news   = st.session_state.get("want_news", False)
 do_charts = st.session_state.get("want_charts", False)
 do_raw    = st.session_state.get("want_raw", False)
 
-# Parámetros fijos (Opciones retiradas del UI)
+
 movex_win = 5
-margen_pct = 0.20  # 0.20% por lado
+margen_pct = 0.20  
 import os
 UMA_DIARIA = 0.0
 try:
@@ -1240,7 +1239,7 @@ if st.button("Generar Excel"):
     uma = get_uma(INEGI_TOKEN)
     prog.progress(65, text="Obteniendo UMA (INEGI)…")
 
-    # Normaliza claves y aplica fallback si vienen vacías/NaN
+    
     from math import isnan
     def _nan(x):
         try:
@@ -1248,14 +1247,14 @@ if st.button("Generar Excel"):
         except Exception:
             return x is None
 
-    # Coalesce claves 'diaria'/'diario'
+    
     d = uma.get("diaria")
     if _nan(d):
         d = uma.get("diario")
 
-    # Fallback oficial 2025 si no hay valor
+    
     if _nan(d):
-        d = 113.14  # UMA 2025 diaria
+        d = 113.14  
     m = uma.get("mensual")
     a = uma.get("anual")
     if _nan(m) and not _nan(d):
@@ -1295,28 +1294,28 @@ if st.button("Generar Excel"):
     fmt_title   = wb.add_format({'font_name': 'Arial', 'font_size': 14, 'bold': True, 'font_color': '#0D2356', 'align':'center', 'valign':'vcenter'})
 
     fmt_all = wb.add_format({'font_name': 'Arial', 'font_name': 'Arial'})
-    # Formatos adicionales
+    
     fmt_num4_ffill = wb.add_format({'font_name': 'Arial', 'num_format': '0.0000', 'italic': True, 'font_color': '#666666'})
     fmt_num6_ffill = wb.add_format({'font_name': 'Arial', 'num_format': '0.000000', 'italic': True, 'font_color': '#666666'})
     fmt_pct2      = wb.add_format({'font_name': 'Arial', 'num_format': '0.00%'})
     fmt_pct2_ffill= wb.add_format({'font_name': 'Arial', 'num_format': '0.00%', 'italic': True, 'font_color': '#666666'})
-    # Formato para leyendas (columna H)
+    
     fmt_note = wb.add_format({'font_name': 'Arial', 'font_size': 9, 'italic': True, 'font_color': '#666666', 'text_wrap': True})
 
     end = today_cdmx()
-    # Últimos 6 días hábiles (lun-vie), incluyendo hoy si aplica
+    
     header_dates_date = []
     d = end
     while len(header_dates_date) < 6:
-        if d.weekday() < 5:  # 0=lunes, 6=domingo
+        if d.weekday() < 5:  
             header_dates_date.append(d)
         d -= timedelta(days=1)
     header_dates_date = list(reversed(header_dates_date))
-    # Lista paralela en ISO para consultas a diccionarios de series
+    
     header_dates = [x.isoformat() for x in header_dates_date]
 
     def _as_map(pairs): return {d:v for d,v in pairs}
-    # Construir mapas FX con rango que cubra el span del encabezado (con buffer) y luego ffill
+    
     fx_start = (header_dates_date[0] - timedelta(days=30)).isoformat()
     fx_end   = header_dates_date[-1].isoformat()
     def _as_map_from_range(series_key):
@@ -1332,11 +1331,11 @@ if st.button("Generar Excel"):
     m_eur  = _as_map_from_range('EUR_MXN')
     m_jpy  = _as_map_from_range('JPY_MXN')
     m_udis = _as_map_from_range('UDIS')
-    # Alinear a header_dates con forward-fill para evitar huecos en días sin publicación
+    
     fix_vals, fix_fflags = _ffill_with_flags(m_fix, header_dates)
     eur_vals, eur_fflags = _ffill_with_flags(m_eur, header_dates)
     jpy_vals, jpy_fflags = _ffill_with_flags(m_jpy, header_dates)
-    # Usar ventana más amplia para CETES (364 días puede ser poco frecuente)
+    
     cet_start = (header_dates_date[0] - timedelta(days=450)).isoformat()
     cet_end   = header_dates_date[-1].isoformat()
     def _as_map_from_range_cetes(series_key):
@@ -1363,7 +1362,7 @@ if st.button("Generar Excel"):
     compra = [(x*(1 - margen_pct/100) if x is not None else None) for x in movex6]
     venta  = [(x*(1 + margen_pct/100) if x is not None else None) for x in movex6]
 
-    # Monex: sobrescribe SOLO el último día si está disponible
+    
     try:
         _c_mx, _v_mx, _mx_src = get_monex_usd_compra_venta()
         if compra: compra[-1] = _c_mx
@@ -1384,11 +1383,11 @@ if st.button("Generar Excel"):
         return series_pairs[-1][1] if series_pairs else None
 
         
-    # TIIE (Banxico SIE) - usar histórico y alinear por fechas del encabezado
+    
     m_t28  = _as_map_from_range('TIIE_28')
     m_t91  = _as_map_from_range('TIIE_91')
     m_t182 = _as_map_from_range('TIIE_182')
-    # Objetivo (tasa de política monetaria)
+    
     _obs_obj = sie_range('SF61745', fx_start, fx_end)
     m_obj = {}
     for o in _obs_obj:
@@ -1403,10 +1402,10 @@ if st.button("Generar Excel"):
     tiie_obj, tiie_obj_f = _ffill_with_flags(m_obj, header_dates)
 
 
-    # --- Fallback robusto para TIIE 182 días ---
+    
     try:
-        # Si todo quedó en None (no hubo match de fechas o no hay histórico),
-        # 
+        
+        
         if all(v is None for v in tiie182):
             v182_op = None
             try:
@@ -1414,10 +1413,10 @@ if st.button("Generar Excel"):
             except Exception:
                 v182_op = None
             if v182_op is not None:
-                # Replicamos el oportuno a las 6 columnas
+                
                 tiie182 = [round(float(v182_op), 4)] * len(header_dates)
             else:
-                # Como segunda opción, tomamos el último 'last_n' y replicamos
+                
                 try:
                     _pairs182 = sie_last_n(SIE_SERIES["TIIE_182"], 6, BANXICO_TOKEN)
                     _last = _pairs182[-1][1] if _pairs182 else None
@@ -1427,7 +1426,7 @@ if st.button("Generar Excel"):
                     pass
     except Exception:
         pass
-    # --- /fallback ---
+    
     ws = wb.add_worksheet("Indicadores")
     ws.merge_range('B1:G1', 'INDICADORES DE TIPO DE CAMBIO', fmt_title)
     ws.set_row(0, 42)
@@ -1437,7 +1436,7 @@ if st.button("Generar Excel"):
         pass
 
     ws.set_column(0, 6, 16)
-    # ULTIMA MODIFICACION
+    
     try:
         ws.insert_image(
         'A1',
@@ -1452,9 +1451,9 @@ if st.button("Generar Excel"):
     except Exception:
         pass
 
-    # Claridad inmediata: anchos y congelar encabezado (hasta B3)
-    ws.set_column(0, 0, 22)   # columna A (rótulos)
-    ws.set_column(1, 7, 13)   # columnas B..H (fechas y sparklines)
+    
+    ws.set_column(0, 0, 22)   
+    ws.set_column(1, 7, 13)   
     ws.freeze_panes(3, 1)
     try:
         ws.set_landscape()
@@ -1466,7 +1465,7 @@ if st.button("Generar Excel"):
     except Exception:
         pass
 
-    # Leyenda para arrastres (ffill)
+    
     ws.write(32, 7, '* Valor copiado cuando no hay publicación del día', wb.add_format({'font_name': 'Arial', 'italic': True, 'font_color': '#666'}))
 
 
@@ -1482,12 +1481,12 @@ if st.button("Generar Excel"):
     for i, v in enumerate(fix_vals):
         ws.write(6, 1+i, v, fmt_num4_ffill if (fix_fflags[i]) else fmt_num4)
 
-    # === Formato condicional USD/MXN (iconos + fallback) ===
+    
 
 
-    # Iconos (triángulos) sobre USD/MXN (B7:G7)
+    
 
-    # --- Leyenda FIX Banxico para USD en H7 ---
+    
     try:
         need_legend = False
         _today = today_cdmx()
@@ -1528,7 +1527,7 @@ if st.button("Generar Excel"):
     ws.write(9, 0, "Venta:")
     for i, v in enumerate(venta):
         ws.write(9, 1+i, v, fmt_num4)
-    # Asegura explícitamente las celdas G9/G10 (columna 6, fila 8 y 9)
+    
     try:
         if compra: ws.write(8, 6, compra[-1], fmt_num4)
         if venta:  ws.write(9, 6, venta[-1],  fmt_num4)
@@ -1541,12 +1540,12 @@ if st.button("Generar Excel"):
     for i, v in enumerate(jpy_vals):
         ws.write(12, 1+i, v, fmt_num4_ffill if (jpy_fflags[i]) else fmt_num4)
 
-    # === Formato condicional JPY/MXN (iconos + fallback) ===
+    
 
 
-    # Iconos (triángulos) sobre JPY/MXN (B13:G13)
+    
 
-    # --- Leyenda FIX Banxico para JPY en H13 ---
+    
     try:
         need_legend_jpy = False
         _today = today_cdmx()
@@ -1588,13 +1587,13 @@ if st.button("Generar Excel"):
     for i, v in enumerate(eur_vals):
         ws.write(16, 1+i, v, fmt_num4_ffill if (eur_fflags[i]) else fmt_num4)
 
-    # === Formato condicional EUR/MXN (iconos + fallback) ===
+    
 
 
-    # Iconos (triángulos) sobre EUR/MXN (B17:G17)
+    
 
 
-    # # --- Leyenda FIX Banxico para EUR en H17 ---
+    
     try:
         need_legend_eur = False
         _today = today_cdmx()
@@ -1632,7 +1631,7 @@ if st.button("Generar Excel"):
     for i, v in enumerate(eur_usd):
         ws.write(17, 1+i, v, fmt_num6)
 
-    # === Formato condicional SOLO FLECHAS en B..G ===
+    
     try:
         ws.conditional_format(6, 1, 6, 6, {'type': 'icon_set', 'icon_style': '3_arrows', 'icons_only': False})
     except Exception:
@@ -1663,7 +1662,7 @@ if st.button("Generar Excel"):
         pass
     ws.write(19, 0, "UDIS:", fmt_bold)
     ws.write(21, 0, "UDIS: ")
-    # Trae rango suficiente para cubrir el span de header_dates (días hábiles)
+    
     udi_start = (header_dates_date[0] - timedelta(days=30)).isoformat()
     udi_end   = header_dates_date[-1].isoformat()
     udi_obs   = sie_range(SIE_SERIES["UDIS"], udi_start, udi_end)
@@ -1705,15 +1704,15 @@ if st.button("Generar Excel"):
         ws.write(34, 1+i, v2, fmt_pct2_ffill if (cetes182_f[i]) else fmt_pct2)
         v3 = (cetes364[i]/100.0) if (cetes364[i] is not None) else None
         ws.write(35, 1+i, v3, fmt_pct2_ffill if (cetes364_f[i]) else fmt_pct2)
-    # === ESTADOS UNIDOS (tabla mensual) ===
+    
     ws.write(43, 0, "ESTADOS UNIDOS:", fmt_section)
 
     ws.write(44, 0, "MES", fmt_hdr)
     ws.write(44, 1, "INFLACIÓN", fmt_hdr)
     ws.write(44, 2, "TASA DE INTERES", fmt_hdr)
-    ws.set_column(2, 2, 22)  # Columna C más ancha para el título
-    ws.set_column(3, 6, 14)  # Ensancha D..G para la leyenda
-    ws.set_column(7, 7, 48)  # Columna H más ancha para leyenda
+    ws.set_column(2, 2, 22)  
+    ws.set_column(3, 6, 14)  
+    ws.set_column(7, 7, 48)  
 
 
     from datetime import date as _date
@@ -1745,11 +1744,11 @@ if st.button("Generar Excel"):
 
     m_cpi = _last_per_month(cpi_obs)
     m_fed = _last_per_month(ff_obs)
-    # Si no hay dato de inflación para el mes en curso, mostramos leyenda en D46
+    
     try:
         _m_actual = _today.month
         if m_cpi.get(_m_actual) is None:
-            # Formato de nota discreta
+            
             try:
                 fmt_note = wb.add_format({'font_size': 9, 'italic': True, 'font_color': '#666666', 'text_wrap': True, 'valign': 'top'})
             except Exception:
@@ -1759,7 +1758,7 @@ if st.button("Generar Excel"):
         pass
 
 
-    base_row = 45  # Excel 46..57
+    base_row = 45  
     for i, (mes_num, mes_nom) in enumerate(_meses):
         r = base_row + i
         ws.write(r, 0, mes_nom)
@@ -1768,7 +1767,7 @@ if st.button("Generar Excel"):
         fed_v = m_fed.get(mes_num)
         ws.write(r, 2, (fed_v/100.0) if (fed_v is not None) else None, fmt_pct2)
     ws.write(37, 0, "UMA:", fmt_section)
-    # --- Escribir UMA como moneda en columnas B..G y leyenda en H ---
+    
     fmt_money_local = wb.add_format({'font_name': 'Arial', 'num_format': '$#,##0.00'})
     def _write_uma_row(row, label, val):
         ws.write(row, 0, label)
@@ -1776,7 +1775,7 @@ if st.button("Generar Excel"):
             from math import isnan
             v = float(val) if val is not None else None
             if v is not None and not isnan(v):
-                for c in range(1, 7):   # B..G
+                for c in range(1, 7):   
                     ws.write_number(row, c, round(v, 2), fmt_money_local)
             else:
                 for c in range(1, 7):
@@ -1793,7 +1792,7 @@ if st.button("Generar Excel"):
     _write_uma_row(40, "Mensual:", m)
     _write_uma_row(41, "Anual:",   a)
 
-    # Leyenda en columna H explicando el arrastre B→G
+    
     try:
         note_txt = ("UMA: valor vigente anual publicado por INEGI. "
                     "Se replica de B→G porque no cambia día a día; "
@@ -1979,9 +1978,9 @@ except Exception:
     pass
 
 try:
-    # === Hoja 'Lógica de datos' (siempre en ruta normal) ===
+    
     try:
-        # Reutiliza formatos si existen; si no, crea mínimos
+        
         try:
             fmt_all = fmt_all
         except NameError:
@@ -2007,7 +2006,7 @@ try:
         wsh_ld.write(0, 1, "Contenido", fmt_hdr)
     
         row = 1
-        # Contenido detallado
+        
         wsh_ld.write(row, 0, "Propósito", fmt_bold); wsh_ld.write(row, 1, "Concentrar indicadores (FX, UDIS, TIIE, CETES) para los últimos 6 días hábiles.", fmt_wrap); row += 1
         wsh_ld.write(row, 0, "Flujo de generación", fmt_bold); wsh_ld.write(row, 1, "1) Encabezado con días hábiles.\n2) Consulta Banxico SIE por rango.\n3) Normalización numérica.\n4) Forward‑fill por fecha.", fmt_wrap); row += 1
         wsh_ld.write(row, 0, "Fuentes / Series SIE", fmt_bold); wsh_ld.write(row, 1, "USD/MXN FIX (SF43718), EUR/MXN (SF46410), JPY/MXN (SF46406), UDIS (SP68257), CETES 28/91/182/364 (SF60634/5/6/7), TIIE 28/91/182 (SF60653/4/5), Tasa objetivo (SF61745).", fmt_wrap); row += 1
@@ -2018,11 +2017,11 @@ try:
         wsh_ld.write(row, 0, "Versión", fmt_bold); wsh_ld.write(row, 1, "Indicadores de Tipo de Cambio Ver.3.0", fmt_wrap); row += 1
     
     except Exception:
-        # No bloquear la generación del archivo si falla esta hoja
+        
         pass
-    # === Hoja "Metadatos" (crear siempre, al final) ===
+    
     try:
-        # Reutiliza formatos si existen; si no, crea mínimos
+        
         try:
             fmt_all = fmt_all
         except NameError:
@@ -2032,13 +2031,13 @@ try:
         except NameError:
             fmt_bold = wb.add_format({"font_name": "Arial", "bold": True})
     
-        # Crear hoja; si ya existe, usar nombre alterno
+        
         try:
             wsm = wb.add_worksheet("Metadatos")
         except Exception:
             wsm = wb.add_worksheet("Meta datos")
     
-        # Presentación básica
+        
         try:
             wsm.set_column(0, 0, 28, fmt_all)
             wsm.set_column(1, 1, 48, fmt_all)
@@ -2046,7 +2045,7 @@ try:
         except Exception:
             pass
     
-        # Contenido
+        
         from datetime import datetime
         ts = None
         try:
@@ -2057,7 +2056,7 @@ try:
             ("Generado", ts),
             ("Zona horaria", "America/Mexico_City"),
         ]
-        # Series SIE si existe el dict
+        
         try:
             rows.extend([
                 ("SIE USD/MXN", SIE_SERIES.get("USD_FIX","")),
@@ -2082,7 +2081,7 @@ try:
                 wsm.write(i, 0, k)
             wsm.write(i, 1, v)
     except Exception:
-        # No bloquear la generación del archivo si falla esta hoja
+        
         pass
     wb.close()
     try:
@@ -2122,7 +2121,7 @@ try:
 except Exception:
     pass
 
-    # Hoja Manual / Ayuda para usuarios
+    
     try:
         wsh = wb.add_worksheet("Manual")
         wsh.set_column(0, 0, 28, fmt_all)
@@ -2145,4 +2144,3 @@ except Exception:
             wsh.write(i,0,k, fmt_bold); wsh.write(i,1,v, fmt_wrap)
     except Exception:
         pass
-
