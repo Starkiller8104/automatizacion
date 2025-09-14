@@ -670,6 +670,22 @@ def _add_iconset_with_fallback(ws, r1, c1, r2, c2):
             continue
     return False
 
+def _ensure_icon_or_color_scale(ws, r1, c1, r2, c2):
+    """Garantiza algún formato condicional visible. Intenta iconos; si no, aplica 3_color_scale."""
+    ok = False
+    try:
+        ok = _add_iconset_with_fallback(ws, r1, c1, r2, c2)
+    except Exception:
+        ok = False
+    if not ok:
+        # Fallback visible en prácticamente todas las versiones.
+        try:
+            ws.conditional_format(r1, c1, r2, c2, {'type': '3_color_scale'})
+            ok = True
+        except Exception:
+            ok = False
+    return ok
+
 
 def rolling_movex_for_last6(window:int=20):
     end = today_cdmx()
@@ -1467,7 +1483,7 @@ if st.button("Generar Excel"):
         ws.write(6, 1+i, v, fmt_num4_ffill if (fix_fflags[i]) else fmt_num4)
     # Iconos (triángulos) sobre USD/MXN (B7:G7)
     try:
-        _add_iconset_with_fallback(ws, 6, 1, 6, 6)
+        _ensure_icon_or_color_scale(ws, 6, 1, 6, 6)
     except Exception:
         pass
     # --- Leyenda FIX Banxico para USD en H7 ---
@@ -1525,7 +1541,7 @@ if st.button("Generar Excel"):
         ws.write(12, 1+i, v, fmt_num4_ffill if (jpy_fflags[i]) else fmt_num4)
     # Iconos (triángulos) sobre JPY/MXN (B13:G13)
     try:
-        _add_iconset_with_fallback(ws, 12, 1, 12, 6)
+        _ensure_icon_or_color_scale(ws, 12, 1, 12, 6)
     except Exception:
         pass
     # --- Leyenda FIX Banxico para JPY en H13 ---
@@ -1571,7 +1587,7 @@ if st.button("Generar Excel"):
         ws.write(16, 1+i, v, fmt_num4_ffill if (eur_fflags[i]) else fmt_num4)
     # Iconos (triángulos) sobre EUR/MXN (B17:G17)
     try:
-        _add_iconset_with_fallback(ws, 16, 1, 16, 6)
+        _ensure_icon_or_color_scale(ws, 16, 1, 16, 6)
     except Exception:
         pass
 
@@ -2096,7 +2112,6 @@ except Exception:
             wsh.write(i,0,k, fmt_bold); wsh.write(i,1,v, fmt_wrap)
     except Exception:
         pass
-
 
 
 
