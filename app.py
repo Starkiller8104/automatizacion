@@ -597,7 +597,34 @@ def _ffill_by_dates(map_vals: dict, dates: list):
         out.append(last)
     return out
 
-def _ffill_with_flags
+def _ffill_with_flags(map_vals: dict, dates: list):
+    # Similar a _ffill_by_dates pero devuelve (valores, flags_ffill)
+    from datetime import datetime
+    def to_dt(s):
+        try:
+            if isinstance(s, str) and "/" in s:
+                return datetime.strptime(s, "%d/%m/%Y").date()
+            return datetime.fromisoformat(str(s)).date()
+        except Exception:
+            return None
+    normalized = {}
+    for k, v in map_vals.items():
+        kd = to_dt(k)
+        if kd:
+            normalized[kd.isoformat()] = v
+    out_vals, out_flags = [], []
+    last = None
+    for ds in dates:
+        key = ds if isinstance(ds, str) else (ds.isoformat() if ds else None)
+        if key in normalized and normalized[key] is not None:
+            last = normalized[key]
+            out_vals.append(last)
+            out_flags.append(False)
+        else:
+            out_vals.append(last)
+            out_flags.append(last is not None)
+    return out_vals, out_flags
+
 
 def _ffill_asof_with_flags_from_map(map_vals: dict, dates: list):
     """ASOF: para cada fecha de encabezado toma el último valor disponible (<= fecha).
@@ -1860,6 +1887,8 @@ except Exception:
             wsh.write(i,0,k, fmt_bold); wsh.write(i,1,v, fmt_wrap)
     except Exception:
         pass
+
+
 
 
 
