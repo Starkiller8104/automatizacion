@@ -1245,7 +1245,6 @@ if st.button("Generar Excel"):
         })
     except Exception:
         pass
-else fmt_num4)
     # --- Leyenda FIX Banxico para USD en H7 ---
     try:
         need_legend = False
@@ -1308,7 +1307,6 @@ else fmt_num4)
         })
     except Exception:
         pass
-else fmt_num4)
     # --- Leyenda FIX Banxico para JPY en H13 ---
     try:
         need_legend_jpy = False
@@ -1359,7 +1357,6 @@ else fmt_num4)
         })
     except Exception:
         pass
-else fmt_num4)
 
     # # --- Leyenda FIX Banxico para EUR en H17 ---
     try:
@@ -1882,8 +1879,6 @@ except Exception:
             wsh.write(i,0,k, fmt_bold); wsh.write(i,1,v, fmt_wrap)
     except Exception:
         pass
-
-
 
 
 
