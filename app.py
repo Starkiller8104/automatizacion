@@ -1483,16 +1483,10 @@ if st.button("Generar Excel"):
         ws.write(6, 1+i, v, fmt_num4_ffill if (fix_fflags[i]) else fmt_num4)
 
     # === Formato condicional USD/MXN (iconos + fallback) ===
-    try:
-        except Exception:
-        pass
-    try:
-        except Exception:
-        pass
+
+
     # Iconos (triángulos) sobre USD/MXN (B7:G7)
-    try:
-        except Exception:
-        pass
+
     # --- Leyenda FIX Banxico para USD en H7 ---
     try:
         need_legend = False
@@ -1548,16 +1542,10 @@ if st.button("Generar Excel"):
         ws.write(12, 1+i, v, fmt_num4_ffill if (jpy_fflags[i]) else fmt_num4)
 
     # === Formato condicional JPY/MXN (iconos + fallback) ===
-    try:
-        except Exception:
-        pass
-    try:
-        except Exception:
-        pass
+
+
     # Iconos (triángulos) sobre JPY/MXN (B13:G13)
-    try:
-        except Exception:
-        pass
+
     # --- Leyenda FIX Banxico para JPY en H13 ---
     try:
         need_legend_jpy = False
@@ -1601,16 +1589,10 @@ if st.button("Generar Excel"):
         ws.write(16, 1+i, v, fmt_num4_ffill if (eur_fflags[i]) else fmt_num4)
 
     # === Formato condicional EUR/MXN (iconos + fallback) ===
-    try:
-        except Exception:
-        pass
-    try:
-        except Exception:
-        pass
+
+
     # Iconos (triángulos) sobre EUR/MXN (B17:G17)
-    try:
-        except Exception:
-        pass
+
 
     # # --- Leyenda FIX Banxico para EUR en H17 ---
     try:
