@@ -1440,18 +1440,32 @@ if st.button("Generar Excel"):
     for i, d in enumerate(header_dates_date):
         ws.write_datetime(1, 1+i, _dt(d.year, d.month, d.day), fmt_date_dm)
 
-    ws.write(3, 0, "TIPOS DE CAMBIO:", fmt_section)
+    
+def _add_iconset_with_fallback(ws, r1, c1, r2, c2):
+    """Intenta aplicar iconos de triángulo y, si la versión de XlsxWriter no lo soporta,
+    usa un estilo alternativo compatible."""
+    styles = ['3_triangles', '3_arrows', '3_symbols']  # fallback si '3_triangles' no existe
+    for st in styles:
+        try:
+            ws.conditional_format(r1, c1, r2, c2, {
+                'type': 'icon_set',
+                'icon_style': st,
+                'icons_only': False
+            })
+            return True
+        except Exception:
+            # probar el siguiente estilo
+            continue
+    return False
+
+ws.write(3, 0, "TIPOS DE CAMBIO:", fmt_section)
     ws.write(5, 0, "DÓLAR AMERICANO.", fmt_bold)
     ws.write(6, 0, "Dólar/Pesos:")
     for i, v in enumerate(fix_vals):
         ws.write(6, 1+i, v, fmt_num4_ffill if (fix_fflags[i]) else fmt_num4)
     # Iconos (triángulos) sobre USD/MXN (B7:G7)
     try:
-        ws.conditional_format(6, 1, 6, 6, {
-            'type': 'icon_set',
-            'icon_style': '3_triangles',
-            'icons_only': False
-        })
+        _add_iconset_with_fallback(ws, 6, 1, 6, 6)
     except Exception:
         pass
     # --- Leyenda FIX Banxico para USD en H7 ---
@@ -1509,11 +1523,7 @@ if st.button("Generar Excel"):
         ws.write(12, 1+i, v, fmt_num4_ffill if (jpy_fflags[i]) else fmt_num4)
     # Iconos (triángulos) sobre JPY/MXN (B13:G13)
     try:
-        ws.conditional_format(12, 1, 12, 6, {
-            'type': 'icon_set',
-            'icon_style': '3_triangles',
-            'icons_only': False
-        })
+        _add_iconset_with_fallback(ws, 12, 1, 12, 6)
     except Exception:
         pass
     # --- Leyenda FIX Banxico para JPY en H13 ---
@@ -1559,11 +1569,7 @@ if st.button("Generar Excel"):
         ws.write(16, 1+i, v, fmt_num4_ffill if (eur_fflags[i]) else fmt_num4)
     # Iconos (triángulos) sobre EUR/MXN (B17:G17)
     try:
-        ws.conditional_format(16, 1, 16, 6, {
-            'type': 'icon_set',
-            'icon_style': '3_triangles',
-            'icons_only': False
-        })
+        _add_iconset_with_fallback(ws, 16, 1, 16, 6)
     except Exception:
         pass
 
@@ -2088,7 +2094,6 @@ except Exception:
             wsh.write(i,0,k, fmt_bold); wsh.write(i,1,v, fmt_wrap)
     except Exception:
         pass
-
 
 
 
