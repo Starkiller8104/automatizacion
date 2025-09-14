@@ -1481,6 +1481,16 @@ if st.button("Generar Excel"):
     ws.write(6, 0, "Dólar/Pesos:")
     for i, v in enumerate(fix_vals):
         ws.write(6, 1+i, v, fmt_num4_ffill if (fix_fflags[i]) else fmt_num4)
+
+    # === Formato condicional USD/MXN (iconos + fallback) ===
+    try:
+        ws.conditional_format(6, 1, 6, 6, {'type': 'icon_set', 'icon_style': '3_arrows', 'icons_only': False})
+    except Exception:
+        pass
+    try:
+        ws.conditional_format(6, 1, 6, 6, {'type': '3_color_scale'})
+    except Exception:
+        pass
     # Iconos (triángulos) sobre USD/MXN (B7:G7)
     try:
         _ensure_icon_or_color_scale(ws, 6, 1, 6, 6)
@@ -1539,6 +1549,16 @@ if st.button("Generar Excel"):
     ws.write(12, 0, "Yen Japonés/Peso:")
     for i, v in enumerate(jpy_vals):
         ws.write(12, 1+i, v, fmt_num4_ffill if (jpy_fflags[i]) else fmt_num4)
+
+    # === Formato condicional JPY/MXN (iconos + fallback) ===
+    try:
+        ws.conditional_format(12, 1, 12, 6, {'type': 'icon_set', 'icon_style': '3_arrows', 'icons_only': False})
+    except Exception:
+        pass
+    try:
+        ws.conditional_format(12, 1, 12, 6, {'type': '3_color_scale'})
+    except Exception:
+        pass
     # Iconos (triángulos) sobre JPY/MXN (B13:G13)
     try:
         _ensure_icon_or_color_scale(ws, 12, 1, 12, 6)
@@ -1585,6 +1605,16 @@ if st.button("Generar Excel"):
     ws.write(16, 0, "Euro/Peso:")
     for i, v in enumerate(eur_vals):
         ws.write(16, 1+i, v, fmt_num4_ffill if (eur_fflags[i]) else fmt_num4)
+
+    # === Formato condicional EUR/MXN (iconos + fallback) ===
+    try:
+        ws.conditional_format(16, 1, 16, 6, {'type': 'icon_set', 'icon_style': '3_arrows', 'icons_only': False})
+    except Exception:
+        pass
+    try:
+        ws.conditional_format(16, 1, 16, 6, {'type': '3_color_scale'})
+    except Exception:
+        pass
     # Iconos (triángulos) sobre EUR/MXN (B17:G17)
     try:
         _ensure_icon_or_color_scale(ws, 16, 1, 16, 6)
@@ -2112,6 +2142,5 @@ except Exception:
             wsh.write(i,0,k, fmt_bold); wsh.write(i,1,v, fmt_wrap)
     except Exception:
         pass
-
 
 
