@@ -652,6 +652,215 @@ def _ffill_asof_with_flags_from_map(map_vals: dict, dates: list):
         out_flags.append((d not in exact) and (last is not None))
     return out_vals, out_flags
 
+def rolling_movex_for_last6(window:int=20):
+    end = today_cdmx()
+    start = end - timedelta(days=2*365)
+    obs = sie_range(SIE_SERIES["USD_FIX"], start.isoformat(), end.isoformat())
+    vals = []
+    for o in obs:
+        f = o.get("fecha"); v = try_float(o.get("dato"))
+        if f and (v is not None):
+            vals.append((f, v))
+    if not vals:
+        return []
+    vals.sort(key=lambda x: parse_any_date(x[0]) or datetime.utcnow())
+    series = [v for _, v in vals]
+    out = []
+    for i in range(len(series)):
+        sub = series[max(0, i-window+1): i+1]
+        out.append(sum(sub)/len(sub) if sub else None)
+    return out
+
+SIE_SERIES = {
+    "USD_FIX":   "SF43718",
+    "EUR_MXN":   "SF46410",
+    "JPY_MXN":   "SF46406",
+    "UDIS":      "SP68257",
+    "TIIE_28": "SF60648",
+    "TIIE_91": "SF60649",
+    "TIIE_182": "SF60650",
+
+    "CETES_28":  "SF43936",
+    "CETES_91":  "SF43939",
+    "CETES_182": "SF43942",
+    "CETES_364": "SF43945",
+}
+
+@st.cache_data(ttl=60*60)
+def get_uma(inegi_token: str, http_session=None) -> dict:
+    """
+    Obtiene UMA (diaria, mensual, anual).
+    1) Intenta API de INEGI si se definen IDs explícitos (variable local 'ids').
+    2) Si la API no responde / no hay IDs, hace fallback a la página oficial de INEGI (scraping ligero).
+    Retorna:
+        {'diario': float|None, 'mensual': float|None, 'anual': float|None, '_status': str}
+    """
+    import re, json
+    from decimal import Decimal, ROUND_HALF_UP
+
+    def _to_float(x: str) -> float:
+        # normaliza "3,439.46" o "3 439,46" -> 3439.46
+        if x is None:
+            return float('nan')
+        x = str(x).replace('\u00a0', ' ').strip()
+        x = re.sub(r'[^\d,\.\-]', '', x)
+        # si hay más de un separador, quita separadores de miles
+        if x.count('.') > 1 or x.count(',') > 1:
+            x = x.replace(',', '')
+        else:
+            # si usa coma como decimal (p.ej. 3.439,46) cámbiala a punto
+            if ',' in x and '.' in x and x.rfind(',') > x.rfind('.'):
+                x = x.replace('.', '').replace(',', '.')
+            elif ',' in x and '.' not in x:
+                x = x.replace(',', '.')
+            else:
+                x = x.replace(',', '')
+        try:
+            return float(x)
+        except Exception:
+            return float('nan')
+
+    def _round2(v: float) -> float:
+        try:
+            return float(Decimal(str(v)).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP))
+        except Exception:
+            return float('nan')
+
+    status_msgs = []
+
+    # 1) Intento por API de INEGI (si se conocen los IDs exactos)
+    try:
+        ids = None  # <- Coloca aquí "id_diaria,id_mensual,id_anual" si ya los tienes confirmados
+        if ids and inegi_token:
+            base = "https://www.inegi.org.mx/app/api/indicadores/desarrolladores"
+            url = f"{base}/jsonxml/INDICATOR/{ids}/es/00/true/BISE/2.0/{inegi_token}?type=json"
+            sess = http_session(20) if callable(http_session) else None
+            resp = (sess.get(url, timeout=20) if sess else __import__('requests').get(url, timeout=20))
+            if resp.status_code == 200:
+                data = resp.json()
+                series = data.get('Series') or data.get('series') or []
+                vals = {}
+                for srs in series:
+                    obs = srs.get('OBSERVATIONS') or srs.get('observations') or []
+                    if obs:
+                        val = obs[0].get('OBS_VALUE') or obs[0].get('value') or obs[0].get('obs_value')
+                        titulo = (srs.get('TITLE') or srs.get('title') or '').lower()
+                        if not titulo:
+                            titulo = f"{srs.get('UNIT','')}-{srs.get('INDICADOR', srs.get('INDICATOR',''))}".lower()
+                        if 'diar' in titulo:
+                            vals['diario'] = _to_float(str(val))
+                        elif 'mensu' in titulo:
+                            vals['mensual'] = _to_float(str(val))
+                        elif 'anual' in titulo or 'annual' in titulo:
+                            vals['anual'] = _to_float(str(val))
+                if vals:
+                    d = vals.get('diario')
+                    m = vals.get('mensual')
+                    a = vals.get('anual')
+                    # Completar con las relaciones oficiales si faltan
+                    if d is not None and not (isinstance(d, float) and d != d):  # not NaN
+                        if m is None or (isinstance(m, float) and m != m):
+                            m = _round2(d * 30.4)
+                    if m is not None and not (isinstance(m, float) and m != m):
+                        if a is None or (isinstance(a, float) and a != a):
+                            a = _round2(m * 12)
+                    status_msgs.append("INEGI API OK")
+                    return {'diario': d, 'mensual': m, 'anual': a, '_status': ' | '.join(status_msgs)}
+            else:
+                status_msgs.append(f"INEGI API HTTP {resp.status_code}")
+        else:
+            status_msgs.append("INEGI API omitida (sin IDs de indicador)")
+    except Exception as e:
+        status_msgs.append(f"INEGI API error: {e}")
+
+    # 2) Fallback: página oficial de la UMA en INEGI
+    try:
+        url = "https://www.inegi.org.mx/temas/uma/"
+        sess = http_session(20) if callable(http_session) else None
+        resp = (sess.get(url, timeout=20) if sess else __import__('requests').get(url, timeout=20))
+        html = resp.text
+
+        # Busca la tabla "Valor de la UMA" y toma la primera fila (año más reciente)
+        sec = re.search(r'Valor de la UMA.*?<table.*?</table>', html, re.S | re.I)
+        if not sec:
+            sec = re.search(r'UMA value.*?<table.*?</table>', html, re.S | re.I)
+
+        if sec:
+            cells = re.findall(r'<td[^>]*>(.*?)</td>', sec.group(0), re.S | re.I)
+            cells = [re.sub(r'<.*?>', ' ', c).strip() for c in cells]
+            nums = []
+            for c in cells:
+                if re.search(r'\d', c):
+                    nums.append(c)
+                if len(nums) >= 4:
+                    break
+            if len(nums) >= 4:
+                # nums[0] = año; nums[1]=diario; nums[2]=mensual; nums[3]=anual
+                d = _to_float(nums[1])
+                m = _to_float(nums[2])
+                a = _to_float(nums[3])
+                # Verificación / completado con las relaciones oficiales
+                if d and (not m or m != _round2(d * 30.4)):
+                    m = _round2(d * 30.4)
+                if m and (not a or a != _round2(m * 12)):
+                    a = _round2(m * 12)
+                status_msgs.append("INEGI web OK (fallback)")
+                return {'diario': d, 'mensual': m, 'anual': a, '_status': ' | '.join(status_msgs)}
+        status_msgs.append("INEGI web sin tabla")
+    except Exception as e:
+        status_msgs.append(f"INEGI web error: {e}")
+
+    # 3) Si todo falla, devolvemos None para que UI lo maneje como vacío
+    return {'diario': None, 'mensual': None, 'anual': None, '_status': ' | '.join(status_msgs)}
+
+    def _num(x):
+        try:
+            return float(str(x).replace(",", ""))
+        except:
+            return None
+
+    last_err = None
+    for u in urls:
+        try:
+            r = http_session(20).get(u, timeout=20)
+            if r.status_code != 200:
+                last_err = f"HTTP {r.status_code}"
+                continue
+            data = r.json()
+            series = data.get("Series") or data.get("series") or []
+            if not series:
+                last_err = "Sin 'Series'"; continue
+
+            def last_obs(s):
+                obs = s.get("OBSERVATIONS") or s.get("observations") or []
+                return obs[-1] if obs else None
+
+            d_obs = last_obs(series[0]); m_obs = last_obs(series[1]) if len(series)>1 else None
+            a_obs = last_obs(series[2]) if len(series)>2 else None
+
+            def get_v(o):
+                if not o: return None
+                return _num(o.get("OBS_VALUE") or o.get("value"))
+            def get_f(o):
+                if not o: return None
+                return o.get("TIME_PERIOD") or o.get("periodo") or o.get("time_period") or o.get("fecha")
+
+            return {
+                "fecha": get_f(d_obs) or get_f(m_obs) or get_f(a_obs),
+                "diaria":  get_v(d_obs),
+                "mensual": get_v(m_obs),
+                "anual":   get_v(a_obs),
+                "_status": "ok",
+                "_source": "INEGI",
+            }
+        except Exception as e:
+            last_err = str(e)
+            continue
+
+    return {"fecha": None, "diaria": None, "mensual": None, "anual": None,
+            "_status": f"err: {last_err}", "_source": "fallback"}
+
+
 def _ffill_asof_with_flags_from_map(map_vals: dict, dates: list):
     """ASOF: para cada fecha de encabezado toma el último valor disponible (<= fecha).
     Devuelve (valores, flags_ffill) donde flag=True indica valor por arrastre."
