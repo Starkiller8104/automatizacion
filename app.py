@@ -1607,7 +1607,32 @@ if st.button("Generar Excel"):
         try:
             eur_fecha_str, _ = sie_latest(SIE_SERIES["EUR_MXN"])
             _de = parse_any_date(eur_fecha_str)
-            i    # === Formato condicional SOLO FLECHAS (B..G) ===
+
+            if _de and _de.date() != _today:
+                need_legend_eur = True
+        except Exception:
+            pass
+        if need_legend_eur:
+            _msge = "El valor mostrado corresponde al último dato publicado por Banxico. El FIX del día se publica alrededor de las 12:00 p.m."
+            try:
+                if _de:
+                    _msge += " Último dato: " + _de.strftime("%d/%m/%Y")
+            except Exception:
+                pass
+            ws.write(16, 7, _msge, fmt_note)
+            try:
+                ws.set_column(7, 7, 48)
+                ws.set_row(16, 48)
+            except Exception:
+                pass
+    except Exception:
+        pass
+
+    ws.write(17, 0, "Euro/Dólar:")
+    for i, v in enumerate(eur_usd):
+        ws.write(17, 1+i, v, fmt_num6)
+
+    # === Formato condicional SOLO FLECHAS en B..G ===
     try:
         ws.conditional_format(6, 1, 6, 6, {'type': 'icon_set', 'icon_style': '3_arrows', 'icons_only': False})
     except Exception:
@@ -1636,30 +1661,6 @@ if st.button("Generar Excel"):
         ws.conditional_format(17, 1, 17, 6, {'type': 'icon_set', 'icon_style': '3_arrows', 'icons_only': False})
     except Exception:
         pass
-f _de and _de.date() != _today:
-                need_legend_eur = True
-        except Exception:
-            pass
-        if need_legend_eur:
-            _msge = "El valor mostrado corresponde al último dato publicado por Banxico. El FIX del día se publica alrededor de las 12:00 p.m."
-            try:
-                if _de:
-                    _msge += " Último dato: " + _de.strftime("%d/%m/%Y")
-            except Exception:
-                pass
-            ws.write(16, 7, _msge, fmt_note)
-            try:
-                ws.set_column(7, 7, 48)
-                ws.set_row(16, 48)
-            except Exception:
-                pass
-    except Exception:
-        pass
-
-    ws.write(17, 0, "Euro/Dólar:")
-    for i, v in enumerate(eur_usd):
-        ws.write(17, 1+i, v, fmt_num6)
-
     ws.write(19, 0, "UDIS:", fmt_bold)
     ws.write(21, 0, "UDIS: ")
     # Trae rango suficiente para cubrir el span de header_dates (días hábiles)
@@ -2144,5 +2145,4 @@ except Exception:
             wsh.write(i,0,k, fmt_bold); wsh.write(i,1,v, fmt_wrap)
     except Exception:
         pass
-
 
