@@ -597,7 +597,35 @@ def _ffill_by_dates(map_vals: dict, dates: list):
         out.append(last)
     return out
 
-def _ffill_with_flags(map_vals: dict, dates: list):
+def _ffill_with_flags
+
+def _ffill_asof_with_flags_from_map(map_vals: dict, dates: list):
+    """ASOF: para cada fecha de encabezado toma el último valor disponible (<= fecha).
+    Devuelve (valores, flags_ffill) donde flag=True indica valor por arrastre."
+    """
+    from datetime import datetime
+    def to_dt(s):
+        try:
+            if isinstance(s, str) and "/" in s:
+                return datetime.strptime(s, "%d/%m/%Y").date()
+            return datetime.fromisoformat(str(s)).date()
+        except Exception:
+            return None
+    pairs = sorted([(to_dt(k), v) for k, v in map_vals.items() if to_dt(k)], key=lambda x: x[0])
+    exact = {to_dt(k) for k in map_vals.keys() if to_dt(k)}
+    out_vals, out_flags, i, last = [], [], 0, None
+    for ds in dates:
+        d = to_dt(ds)
+        if d is None:
+            out_vals.append(None); out_flags.append(False); continue
+        while i < len(pairs) and pairs[i][0] <= d:
+            last = pairs[i][1]
+            i += 1
+        out_vals.append(last)
+        out_flags.append((d not in exact) and (last is not None))
+    return out_vals, out_flags
+
+(map_vals: dict, dates: list):
     # Similar a _ffill_by_dates pero devuelve (valores, flags_ffill)
     from datetime import datetime
     def to_dt(s):
@@ -1054,38 +1082,11 @@ if st.button("Generar Excel"):
             if _f and (_v is not None):
                 m[_f.date().isoformat()] = _v
         return m
-
-    # Helper: ASOF ffill with flags (marca True si el valor viene por arrastre y la fecha no coincide exacta)
-    def _ffill_asof_with_flags_from_map(map_vals: dict, dates: list):
-        from datetime import datetime
-        def to_dt(s):
-            try:
-                if isinstance(s, str) and "/" in s:
-                    return datetime.strptime(s, "%d/%m/%Y").date()
-                return datetime.fromisoformat(str(s)).date()
-            except Exception:
-                return None
-        pairs = sorted([(to_dt(k), v) for k, v in map_vals.items() if to_dt(k)], key=lambda x: x[0])
-        exact = {to_dt(k) for k in map_vals.keys() if to_dt(k)}
-        out_vals, out_flags = [], []
-        last = None
-        i = 0
-        for ds in dates:
-            d = to_dt(ds)
-            if d is None:
-                out_vals.append(None); out_flags.append(False); continue
-            while i < len(pairs) and pairs[i][0] <= d:
-                last = pairs[i][1]
-                i += 1
-            out_vals.append(last)
-            out_flags.append((d not in exact) and (last is not None))
-        return out_vals, out_flags
     m_c28  = _as_map_from_range_cetes('CETES_28')
     m_c91  = _as_map_from_range_cetes('CETES_91')
     m_c182 = _as_map_from_range_cetes('CETES_182')
     m_c364 = _as_map_from_range_cetes('CETES_364')
-
-    cetes28, cetes28_f = _ffill_asof_with_flags_from_map(m_c28, header_dates)
+cetes28, cetes28_f = _ffill_asof_with_flags_from_map(m_c28, header_dates)
     cetes91, cetes91_f = _ffill_asof_with_flags_from_map(m_c91, header_dates)
     cetes182, cetes182_f = _ffill_asof_with_flags_from_map(m_c182, header_dates)
     cetes364, cetes364_f = _ffill_asof_with_flags_from_map(m_c364, header_dates)
@@ -1212,7 +1213,17 @@ if st.button("Generar Excel"):
     ws.write(5, 0, "DÓLAR AMERICANO.", fmt_bold)
     ws.write(6, 0, "Dólar/Pesos:")
     for i, v in enumerate(fix_vals):
-        ws.write(6, 1+i, v, fmt_num4_ffill if (fix_fflags[i]) else fmt_num4)
+        ws.write(6, 1+i, v, fmt_num4_ffill if (fix_fflags[i]) 
+    # Iconos (triángulos) sobre USD/MXN (B7:G7)
+    try:
+        ws.conditional_format(6, 1, 6, 6, {
+            'type': 'icon_set',
+            'icon_style': '3_triangles',
+            'icons_only': False
+        })
+    except Exception:
+        pass
+else fmt_num4)
     # --- Leyenda FIX Banxico para USD en H7 ---
     try:
         need_legend = False
@@ -1231,7 +1242,7 @@ if st.button("Generar Excel"):
         except Exception:
             pass
         if need_legend:
-            _msg = "El valor mostrado corresponde al último dato publicado por Banxico. El FIX del día se publica alrededor de las 12:00 p.m."
+            _msg = "Nota: Si generas el reporte antes de las 12:00 p.m. (hora CDMX), el tipo de cambio mostrará el último FIX disponible (posiblemente del día anterior). Banxico publica el FIX del día alrededor de las 12:00 p.m."
             try:
                 if _d:
                     _msg += " Último dato: " + _d.strftime("%d/%m/%Y")
@@ -1265,7 +1276,17 @@ if st.button("Generar Excel"):
     ws.write(11, 0, "YEN JAPONÉS.", fmt_bold)
     ws.write(12, 0, "Yen Japonés/Peso:")
     for i, v in enumerate(jpy_vals):
-        ws.write(12, 1+i, v, fmt_num4_ffill if (jpy_fflags[i]) else fmt_num4)
+        ws.write(12, 1+i, v, fmt_num4_ffill if (jpy_fflags[i]) 
+    # Iconos (triángulos) sobre JPY/MXN (B13:G13)
+    try:
+        ws.conditional_format(12, 1, 12, 6, {
+            'type': 'icon_set',
+            'icon_style': '3_triangles',
+            'icons_only': False
+        })
+    except Exception:
+        pass
+else fmt_num4)
     # --- Leyenda FIX Banxico para JPY en H13 ---
     try:
         need_legend_jpy = False
@@ -1306,35 +1327,19 @@ if st.button("Generar Excel"):
     ws.write(15, 0, "EURO.", fmt_bold)
     ws.write(16, 0, "Euro/Peso:")
     for i, v in enumerate(eur_vals):
-        ws.write(16, 1+i, v, fmt_num4_ffill if (eur_fflags[i]) else fmt_num4)
-
-    # Indicadores con triángulos en columna H (verde cuando baja)
-    # Prepara formatos
+        ws.write(16, 1+i, v, fmt_num4_ffill if (eur_fflags[i]) 
+    # Iconos (triángulos) sobre EUR/MXN (B17:G17)
     try:
-        fmt_tri_base   = wb.add_format({'font_size': 13, 'align': 'left'})
-        fmt_tri_green  = wb.add_format({'font_size': 13, 'align': 'left', 'font_color': '#008A00'})
-        fmt_tri_red    = wb.add_format({'font_size': 13, 'align': 'left', 'font_color': '#D00000'})
-        fmt_tri_yellow = wb.add_format({'font_size': 13, 'align': 'left', 'font_color': '#C9A300'})
+        ws.conditional_format(16, 1, 16, 6, {
+            'type': 'icon_set',
+            'icon_style': '3_triangles',
+            'icons_only': False
+        })
     except Exception:
         pass
+else fmt_num4)
 
-    # Filas objetivo (0-based): mismas que usabas con icon sets
-    _rows = (6, 8, 9, 12, 13, 16, 17)
-    # Asegura ancho de H para ver el símbolo
-    ws.set_column(7, 7, 48)
-
-    for _r in _rows:
-        # Fórmula: compara G (hoy) vs F (ayer). ▼ verde si bajó; ▲ roja si subió; — si casi igual.
-        _excel_r = _r + 1  # 1-based Excel
-        _formula = f'=IF(OR(ISBLANK(G{_excel_r}),ISBLANK(F{_excel_r})), "", IF(G{_excel_r}-F{_excel_r}<-0.0000001, "▼", IF(G{_excel_r}-F{_excel_r}>0.0000001, "▲", "—")))'
-        ws.write_formula(_r, 7, _formula, fmt_tri_base)
-
-        # Colorea según símbolo
-        ws.conditional_format(_r, 7, _r, 7, {'type': 'text', 'criteria': 'containing', 'value': '▼', 'format': fmt_tri_green})
-        ws.conditional_format(_r, 7, _r, 7, {'type': 'text', 'criteria': 'containing', 'value': '▲', 'format': fmt_tri_red})
-        ws.conditional_format(_r, 7, _r, 7, {'type': 'text', 'criteria': 'containing', 'value': '—', 'format': fmt_tri_yellow})
-
-# --- Leyenda FIX Banxico para EUR en H17 ---
+    # # --- Leyenda FIX Banxico para EUR en H17 ---
     try:
         need_legend_eur = False
         _today = today_cdmx()
@@ -1855,6 +1860,9 @@ except Exception:
             wsh.write(i,0,k, fmt_bold); wsh.write(i,1,v, fmt_wrap)
     except Exception:
         pass
+
+
+
 
 
 
