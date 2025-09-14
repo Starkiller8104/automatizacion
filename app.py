@@ -1108,7 +1108,7 @@ if st.button("Generar Excel"):
     m_c91  = _as_map_from_range_cetes('CETES_91')
     m_c182 = _as_map_from_range_cetes('CETES_182')
     m_c364 = _as_map_from_range_cetes('CETES_364')
-cetes28, cetes28_f = _ffill_asof_with_flags_from_map(m_c28, header_dates)
+    cetes28, cetes28_f = _ffill_asof_with_flags_from_map(m_c28, header_dates)
     cetes91, cetes91_f = _ffill_asof_with_flags_from_map(m_c91, header_dates)
     cetes182, cetes182_f = _ffill_asof_with_flags_from_map(m_c182, header_dates)
     cetes364, cetes364_f = _ffill_asof_with_flags_from_map(m_c364, header_dates)
@@ -1882,6 +1882,7 @@ except Exception:
             wsh.write(i,0,k, fmt_bold); wsh.write(i,1,v, fmt_wrap)
     except Exception:
         pass
+
 
 
 
