@@ -628,6 +628,32 @@ def _ffill_with_flags(map_vals: dict, dates: list):
 
 def _ffill_asof_with_flags_from_map(map_vals: dict, dates: list):
     """ASOF: para cada fecha de encabezado toma el último valor disponible (<= fecha).
+    Devuelve (valores, flags_ffill) donde flag=True indica valor por arrastre.
+    """
+    from datetime import datetime
+    def to_dt(s):
+        try:
+            if isinstance(s, str) and "/" in s:
+                return datetime.strptime(s, "%d/%m/%Y").date()
+            return datetime.fromisoformat(str(s)).date()
+        except Exception:
+            return None
+    pairs = sorted([(to_dt(k), v) for k, v in map_vals.items() if to_dt(k)], key=lambda x: x[0])
+    exact = {to_dt(k) for k in map_vals.keys() if to_dt(k)}
+    out_vals, out_flags, i, last = [], [], 0, None
+    for ds in dates:
+        d = to_dt(ds)
+        if d is None:
+            out_vals.append(None); out_flags.append(False); continue
+        while i < len(pairs) and pairs[i][0] <= d:
+            last = pairs[i][1]
+            i += 1
+        out_vals.append(last)
+        out_flags.append((d not in exact) and (last is not None))
+    return out_vals, out_flags
+
+def _ffill_asof_with_flags_from_map(map_vals: dict, dates: list):
+    """ASOF: para cada fecha de encabezado toma el último valor disponible (<= fecha).
     Devuelve (valores, flags_ffill) donde flag=True indica valor por arrastre."
     """
     from datetime import datetime
@@ -652,37 +678,6 @@ def _ffill_asof_with_flags_from_map(map_vals: dict, dates: list):
         out_flags.append((d not in exact) and (last is not None))
     return out_vals, out_flags
 
-(map_vals: dict, dates: list):
-    # Similar a _ffill_by_dates pero devuelve (valores, flags_ffill)
-    from datetime import datetime
-    def to_dt(s):
-        try:
-            if isinstance(s, str) and "/" in s:
-                return datetime.strptime(s, "%d/%m/%Y").date()
-            return datetime.fromisoformat(str(s)).date()
-        except Exception:
-            return None
-    normalized = {}
-    for k, v in map_vals.items():
-        kd = to_dt(k)
-        if kd:
-            normalized[kd.isoformat()] = v
-    out_vals, out_flags = [], []
-    last = None
-    for ds in dates:
-        key = ds if isinstance(ds, str) else (ds.isoformat() if ds else None)
-        if key in normalized and normalized[key] is not None:
-            last = normalized[key]
-            out_vals.append(last)
-            out_flags.append(False)
-        else:
-            out_vals.append(last)
-            out_flags.append(last is not None)
-    return out_vals, out_flags
-
-def rolling_movex_for_last6(window:int=20):
-    end = today_cdmx()
-    start = end - timedelta(days=2*365)
     obs = sie_range(SIE_SERIES["USD_FIX"], start.isoformat(), end.isoformat())
     vals = []
     for o in obs:
@@ -1887,7 +1882,6 @@ except Exception:
             wsh.write(i,0,k, fmt_bold); wsh.write(i,1,v, fmt_wrap)
     except Exception:
         pass
-
 
 
 
