@@ -652,6 +652,25 @@ def _ffill_asof_with_flags_from_map(map_vals: dict, dates: list):
         out_flags.append((d not in exact) and (last is not None))
     return out_vals, out_flags
 
+
+def _add_iconset_with_fallback(ws, r1, c1, r2, c2):
+    """Intenta aplicar iconos de triángulo y, si la versión de XlsxWriter no lo soporta,
+    usa un estilo alternativo compatible."""
+    styles = ['3_triangles', '3_arrows', '3_symbols']  # fallback si '3_triangles' no existe
+    for st in styles:
+        try:
+            ws.conditional_format(r1, c1, r2, c2, {
+                'type': 'icon_set',
+                'icon_style': st,
+                'icons_only': False
+            })
+            return True
+        except Exception:
+            # probar el siguiente estilo
+            continue
+    return False
+
+
 def rolling_movex_for_last6(window:int=20):
     end = today_cdmx()
     start = end - timedelta(days=2*365)
@@ -1441,24 +1460,7 @@ if st.button("Generar Excel"):
         ws.write_datetime(1, 1+i, _dt(d.year, d.month, d.day), fmt_date_dm)
 
     
-def _add_iconset_with_fallback(ws, r1, c1, r2, c2):
-    """Intenta aplicar iconos de triángulo y, si la versión de XlsxWriter no lo soporta,
-    usa un estilo alternativo compatible."""
-    styles = ['3_triangles', '3_arrows', '3_symbols']  # fallback si '3_triangles' no existe
-    for st in styles:
-        try:
-            ws.conditional_format(r1, c1, r2, c2, {
-                'type': 'icon_set',
-                'icon_style': st,
-                'icons_only': False
-            })
-            return True
-        except Exception:
-            # probar el siguiente estilo
-            continue
-    return False
-
-ws.write(3, 0, "TIPOS DE CAMBIO:", fmt_section)
+    ws.write(3, 0, "TIPOS DE CAMBIO:", fmt_section)
     ws.write(5, 0, "DÓLAR AMERICANO.", fmt_bold)
     ws.write(6, 0, "Dólar/Pesos:")
     for i, v in enumerate(fix_vals):
@@ -2094,8 +2096,6 @@ except Exception:
             wsh.write(i,0,k, fmt_bold); wsh.write(i,1,v, fmt_wrap)
     except Exception:
         pass
-
-
 
 
 
