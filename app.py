@@ -1216,7 +1216,16 @@ _render_sidebar_status()
 if st.button("Generar Excel"):
     prog = st.progress(0, text="Iniciando…")
     prog.progress(5, text="Preparando entorno…")
-    def pad6(lst): return ([None]*(6-len(lst))
+    def pad6(lst):
+    """Left-pad a list with None to length 6; if longer, keep the last 6."""
+    try:
+        n = len(lst)
+    except Exception:
+        return [None]*6
+    if n >= 6:
+        return list(lst)[-6:]
+    return [None]*(6 - n) + list(lst)
+
 
 st.download_button(
     "Descargar Excel",
