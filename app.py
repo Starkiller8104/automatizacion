@@ -1216,7 +1216,15 @@ _render_sidebar_status()
 if st.button("Generar Excel"):
     prog = st.progress(0, text="Iniciando…")
     prog.progress(5, text="Preparando entorno…")
-    def pad6(lst): return ([None]*(6-len(lst)))+lst if len(lst) < 6 else lst[-6:]
+    def pad6(lst): return ([None]*(6-len(lst))
+
+st.download_button(
+    "Descargar Excel",
+    data=export_indicadores_template_bytes(),
+    file_name=f"Indicadores {today_cdmx().strftime('%Y-%m-%d %H%M%S')}.xlsx",
+    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+)
+)+lst if len(lst) < 6 else lst[-6:]
     none6 = [None]*6
 
     fix6 = pad6([v for _, v in sie_last_n(SIE_SERIES["USD_FIX"], n=6)])
