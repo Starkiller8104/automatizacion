@@ -2105,10 +2105,8 @@ except Exception:
 
 
 
-ENABLE_LEGACY_EXPORT = False
-if ENABLE_LEGACY_EXPORT:
-    try:
-        xbytes = st.session_state.get('xlsx_bytes')
+try:
+    xbytes = st.session_state.get('xlsx_bytes')
     if xbytes:
         st.download_button(
             'Descargar Excel',
@@ -2444,5 +2442,6 @@ def export_indicadores_template_bytes(template_path: str = _TEMPLATE_PATH):
     except Exception:
         pass
     return content
+
 
 
