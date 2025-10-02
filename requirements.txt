@@ -8,5 +8,6 @@ openpyxl
 pytz
 Pillow>=9.5.0
 XlsxWriter>=3.2.0
+openpyxl>=3.1.2
 
 
