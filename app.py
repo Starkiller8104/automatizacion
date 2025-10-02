@@ -2104,28 +2104,6 @@ except Exception:
     file_name="Indicadores " + today_cdmx().strftime("%Y-%m-%d %H%M%S") + ".xlsx",
     mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
 )
-, file_name=f"Indicadores {today_cdmx().strftime('%Y-%m-%d %H%M%S')}.xlsx",
-        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        )
-    
-
-
-
-try:
-    xbytes = st.session_state.get('xlsx_bytes')
-    if xbytes:
-        st.download_button(
-    "Descargar Excel",
-    data=export_indicadores_template_bytes(),
-    file_name="Indicadores " + today_cdmx().strftime("%Y-%m-%d %H%M%S") + ".xlsx",
-    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-)
-}.xlsx",
-            mime='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-            use_container_width=True
-        )
-except Exception:
-    pass
 
     
     try:
@@ -2451,4 +2429,5 @@ def export_indicadores_template_bytes(template_path: str = _TEMPLATE_PATH):
     except Exception:
         pass
     return content
+
 
