@@ -2098,12 +2098,25 @@ except NameError:
     pass
 except Exception:
     pass
-    st.download_button(
-    "Descargar Excel",
-    data=export_indicadores_template_bytes(),
-    file_name="Indicadores " + today_cdmx().strftime("%Y-%m-%d %H%M%S") + ".xlsx",
-    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-)
+    st.download_button("Descargar Excel", data=export_indicadores_template_bytes(_TEMPLATE_PATH), file_name=f"Indicadores {today_cdmx().strftime('%Y-%m-%d %H%M%S')}.xlsx",
+        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        )
+    
+
+
+
+try:
+    xbytes = st.session_state.get('xlsx_bytes')
+    if xbytes:
+        st.download_button(
+            'Descargar Excel',
+            data=xbytes,
+            file_name=f"indicadores_{today_cdmx()}.xlsx",
+            mime='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+            use_container_width=True
+        )
+except Exception:
+    pass
 
     
     try:
@@ -2430,5 +2443,28 @@ def export_indicadores_template_bytes(template_path: str = _TEMPLATE_PATH):
         pass
     return content
 
+
+
+# === Descarga SIEMPRE visible ===
+try:
+    _ = st.session_state
+except Exception:
+    pass
+
+if "xlsx_bytes" not in st.session_state:
+    st.session_state["xlsx_bytes"] = None
+
+st.markdown("---")
+st.subheader("Descarga")
+
+# Generación directa desde la plantilla (no depende del botón Generar)
+_dl_bytes = export_indicadores_template_bytes()
+st.download_button(
+    "Descargar Excel",
+    data=_dl_bytes,
+    file_name="Indicadores " + today_cdmx().strftime("%Y-%m-%d %H%M%S") + ".xlsx",
+    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    key="dl_indicadores_template_always",
+)
 
 
