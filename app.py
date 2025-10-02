@@ -2210,83 +2210,83 @@ def _series_maps_for_template(days):
     return {'dates': days,'fix':fix_vals,'eur':eur_vals,'jpy':jpy_vals,'udis':udis_vals,
             'c28':c28,'c91':c91,'c182':c182,'c364':c364,'t28':t28,'t91':t91,'t182':t182,'tobj':tobj,'uma':uma_dict}
 
+def export_indicadores_template_bytes(template_path: str):
+    # Writer v3 que llena B..G (6 días) y MONEX compra/venta (F/G) según lógica de la app
+    from app_writer_layout_v3 import write_layout_v3
+    days = _build_header_dates_6b()
+    S = _series_maps_for_template(days)
 
+    # MONEX: reutiliza funciones/vars de la app si existen
+    try:
+        mv = rolling_movex_for_last6(window=movex_win)
+    except Exception:
+        mv = None
+    try:
+        mpct = float(margen_pct)
+    except Exception:
+        mpct = 0.20
 
-def _build_header_dates_6b():
-    """6 días hábiles (B..G), G = hoy (horario CDMX según tu today_cdmx())."""
-    from datetime import timedelta
-    end = today_cdmx()
-    days = []
-    d = end
-    while len(days) < 6:
-        if d.weekday() < 5:
-            days.append(d)
-        d -= timedelta(days=1)
-    return list(reversed(days))
-
-def _series_maps_for_template(days):
-    """Usa tus mismas utilidades (sie_range, _ffill_*, get_uma) para armar las series."""
-    header_dates = [x.isoformat() for x in days]
-
-    def _as_map_from_range(series_key, start, end):
-        obs = sie_range(SIE_SERIES[series_key], start, end)
-        m = {}
-        for o in obs:
-            _f = parse_any_date(o.get('fecha'))
-            _v = try_float(o.get('dato'))
-            if _f and (_v is not None):
-                m[_f.date().isoformat()] = _v
-        return m
-
-    start = days[0].isoformat(); end = days[-1].isoformat()
-    m_fix  = _as_map_from_range('USD_FIX', start, end)
-    m_eur  = _as_map_from_range('EUR_MXN', start, end)
-    m_jpy  = _as_map_from_range('JPY_MXN', start, end)
-    m_udis = _as_map_from_range('UDIS',    start, end)
-
-    fix_vals, _  = _ffill_with_flags(m_fix, header_dates)
-    eur_vals, _  = _ffill_with_flags(m_eur, header_dates)
-    jpy_vals, _  = _ffill_with_flags(m_jpy, header_dates)
-    udis_vals,_  = _ffill_with_flags(m_udis, header_dates)
-
-    # CETES asof (ventana amplia)
-    from datetime import timedelta as _td
-    cet_start = (days[0] - _td(days=450)).isoformat()
-    cet_end   = days[-1].isoformat()
-    def _asof(series_key):
-        m = _as_map_from_range(series_key, cet_start, cet_end)
-        vals,_ = _ffill_asof_with_flags_from_map(m, header_dates)
-        return vals
-    c28  = _asof('CETES_28'); c91 = _asof('CETES_91'); c182 = _asof('CETES_182'); c364 = _asof('CETES_364')
-
-    # TIIE y objetivo
-    fx_start = start; fx_end = end
-    m_t28  = _as_map_from_range('TIIE_28',  fx_start, fx_end)
-    m_t91  = _as_map_from_range('TIIE_91',  fx_start, fx_end)
-    m_t182 = _as_map_from_range('TIIE_182', fx_start, fx_end)
-    _obs_obj = sie_range('SF61745', fx_start, fx_end)
-    m_obj = {}
-    for o in _obs_obj:
-        _f = parse_any_date(o.get('fecha'))
-        _v = try_float(o.get('dato'))
-        if _f and (_v is not None):
-            m_obj[_f.date().isoformat()] = _v
-    t28,_  = _ffill_with_flags(m_t28,  header_dates)
-    t91,_  = _ffill_with_flags(m_t91,  header_dates)
-    t182,_ = _ffill_with_flags(m_t182, header_dates)
-    tobj,_ = _ffill_with_flags(m_obj,   header_dates)
-
-    uma = get_uma()
-    uma_dict = {'diario': uma.get('diario'), 'mensual': uma.get('mensual'), 'anual': uma.get('anual')}
-
-    return {
-        'dates': days,
-        'fix': fix_vals, 'eur': eur_vals, 'jpy': jpy_vals, 'udis': udis_vals,
-        'c28': c28, 'c91': c91, 'c182': c182, 'c364': c364,
-        't28': t28, 't91': t91, 't182': t182, 'tobj': tobj,
-        'uma': uma_dict
+    payload = {
+        "DOLAR": {
+            "5": {"F": S['fix'][-2] if len(S['fix'])>=2 else None,
+                  "G": S['fix'][-1] if S['fix'] else None},
+        },
+        "YEN": {
+            "10": {"F": S['jpy'][-2] if len(S['jpy'])>=2 else None,
+                   "G": S['jpy'][-1] if S['jpy'] else None},
+            "11": {"G": ( (S['fix'][-1]/S['jpy'][-1]) if (S['fix'] and S['jpy'] and S['fix'][-1] and S['jpy'][-1]) else None)},
+        },
+        "EURO": {
+            "14": {"F": S['eur'][-2] if len(S['eur'])>=2 else None,
+                   "G": S['eur'][-1] if S['eur'] else None},
+            "15": {"G": ( (S['eur'][-1]/S['fix'][-1]) if (S['eur'] and S['fix'] and S['eur'][-1] and S['fix'][-1]) else None)},
+        },
+        "UDIS": {"18": {"F": S['udis'][-2] if len(S['udis'])>=2 else None,
+                        "G": S['udis'][-1] if S['udis'] else None}},
+        "TIIE": {
+            "21": {"G": ( (S['tobj'][-1]/100.0) if S['tobj'] and S['tobj'][-1] is not None else None)},
+            "22": {"G": ( (S['t28'][-1] /100.0) if S['t28'] and S['t28'][-1] is not None else None)},
+            "23": {"G": ( (S['t91'][-1] /100.0) if S['t91'] and S['t91'][-1] is not None else None)},
+            "24": {"G": ( (S['t182'][-1]/100.0) if S['t182'] and S['t182'][-1] is not None else None)},
+        },
+        "CETES": {
+            "27": {"G": ( (S['c28'][-1] /100.0) if S['c28'] and S['c28'][-1] is not None else None)},
+            "28": {"G": ( (S['c91'][-1] /100.0) if S['c91'] and S['c91'][-1] is not None else None)},
+            "29": {"G": ( (S['c182'][-1]/100.0) if S['c182'] and S['c182'][-1] is not None else None)},
+            "30": {"G": ( (S['c364'][-1]/100.0) if S['c364'] and S['c364'][-1] is not None else None)},
+        },
+        "UMA": {"33":{"G":S['uma'].get('diario')}, "34":{"G":S['uma'].get('mensual')}, "35":{"G":S['uma'].get('anual')}},
     }
 
+    if mv and isinstance(mv, (list, tuple)) and len(mv) >= 2:
+        compra = [(x*(1 - mpct/100) if x is not None else None) for x in mv]
+        venta  = [(x*(1 + mpct/100) if x is not None else None) for x in mv]
+        c_y = compra[-2] if len(compra)>=2 else None; c_h = compra[-1] if compra else None
+        v_y = venta[-2]  if len(venta)>=2  else None; v_h = venta[-1]  if venta  else None
+        if c_y is not None: payload["DOLAR"].setdefault("6",{})["F"] = c_y
+        if c_h is not None: payload["DOLAR"].setdefault("6",{})["G"] = c_h
+        if v_y is not None: payload["DOLAR"].setdefault("7",{})["F"] = v_y
+        if v_h is not None: payload["DOLAR"].setdefault("7",{})["G"] = v_h
+
+    import io, tempfile, os
+    tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".xlsx")
+    tmp.close()
+    header_dates = _build_header_dates_6b()
+    write_layout_v3 = None
+    try:
+        from app_writer_layout_v3 import write_layout_v3 as _writer
+        write_layout_v3 = _writer
+    except Exception as e:
+        raise RuntimeError(f"Falta app_writer_layout_v3.py en el mismo directorio: {e}")
+    write_layout_v3(_TEMPLATE_PATH if not template_path else template_path, tmp.name, header_dates=header_dates, payload=payload)
+    with open(tmp.name, "rb") as f:
+        content = f.read()
+    try:
+        os.unlink(tmp.name)
+    except Exception:
+        pass
+    return content
+    #borrar si no sirve
 
 
 # === Exportar 'Indicadores' desde plantilla (B..G fechas) + MONEX compra/venta ===
@@ -2340,7 +2340,7 @@ def _series_maps_for_template(days):
     t91,_  = _ffill_with_flags(m_t91,  header_dates)
     t182,_ = _ffill_with_flags(m_t182, header_dates)
     tobj,_ = _ffill_with_flags(m_obj,   header_dates)
-    uma = get_uma(); uma_dict = {'diario': uma.get('diario'), 'mensual': uma.get('mensual'), 'anual': uma.get('anual')}
+    uma = get_uma(); uma_dict = {'diario': uma.get('diario'), 'mensual': una.get('mensual'), 'anual': una.get('anual')}
     return {'dates':days,'fix':fix_vals,'eur':eur_vals,'jpy':jpy_vals,'udis':udis_vals,'c28':c28,'c91':c91,'c182':c182,'c364':c364,'t28':t28,'t91':t91,'t182':t182,'tobj':tobj,'uma':uma_dict}
 
 def export_indicadores_template_bytes(template_path: str = _TEMPLATE_PATH):
@@ -2384,5 +2384,4 @@ def export_indicadores_template_bytes(template_path: str = _TEMPLATE_PATH):
     try: os.unlink(tmp.name)
     except Exception: pass
     return content
-
 
