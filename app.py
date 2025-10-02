@@ -5,23 +5,21 @@ import json
 import math
 import time
 import tempfile
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, date
 from pathlib import Path
 
 import streamlit as st
 
-# ==========================================================
+# ======================
 # Config / Branding
-# ==========================================================
+# ======================
 st.set_page_config(page_title="Indicadores IMEMSA", layout="wide")
-
 LOGO_PATH = str((Path(__file__).parent / "logo.png").resolve())
-TEMPLATE_PATH = str((Path(__file__).parent / "Indicadores_template.xlsx").resolve())
+TEMPLATE_PATH = str((Path(__file__).parent / "Indicadores_template_2col.xlsx").resolve())  # Usa el nuevo archivo (renómbralo así)
 
-# ==========================================================
-# Password gate (simple)
-# - Usa st.secrets['app_password'] o env APP_PASSWORD
-# ==========================================================
+# ======================
+# Password (opcional)
+# ======================
 APP_PASSWORD = None
 try:
     APP_PASSWORD = st.secrets.get("app_password")
@@ -32,31 +30,25 @@ if not APP_PASSWORD:
 
 def _password_ok(p: str) -> bool:
     if not APP_PASSWORD:
-        return True  # si no hay password configurada, no se bloquea
-    try:
-        return str(p) == str(APP_PASSWORD)
-    except Exception:
-        return False
+        return True
+    return str(p) == str(APP_PASSWORD)
 
 if "auth_ok" not in st.session_state:
     st.session_state["auth_ok"] = False
 
-with st.container():
-    cols = st.columns([1, 4])
-    with cols[0]:
-        try:
-            st.image(LOGO_PATH, caption=None, use_container_width=True)
-        except Exception:
-            pass
-    with cols[1]:
-        st.markdown("# Indicadores (últimos 5 días hábiles) + Descarga")
+cols = st.columns([1, 4])
+with cols[0]:
+    try:
+        st.image(LOGO_PATH, use_container_width=True)
+    except Exception:
+        pass
+with cols[1]:
+    st.markdown("# Indicadores (día actual y día anterior)")
 
-    # Barra divisoria
-    st.markdown("---")
+st.markdown("---")
 
-# Login box
 if not st.session_state["auth_ok"]:
-    with st.form("login_form", clear_on_submit=False):
+    with st.form("login_form"):
         st.subheader("Acceso")
         pwd = st.text_input("Password", type="password")
         submit = st.form_submit_button("Entrar")
@@ -68,9 +60,9 @@ if not st.session_state["auth_ok"]:
                 st.error("Password incorrecto")
     st.stop()
 
-# ==========================================================
-# Utilidades de fecha / zona horaria
-# ==========================================================
+# ======================
+# Utilidades fecha
+# ======================
 def today_cdmx():
     try:
         import pytz
@@ -79,29 +71,21 @@ def today_cdmx():
     except Exception:
         return datetime.now()
 
-def last_5_business_days(end=None):
-    end = (end or today_cdmx()).date()
+def business_days_back(n=10, end_date=None):
+    end = (end_date or today_cdmx().date())
     days = []
     d = end
-    while len(days) < 5:
+    while len(days) < n:
         if d.weekday() < 5:
             days.append(d)
         d -= timedelta(days=1)
-    return list(reversed(days))  # [C,D,E,F,G], G = hoy
+    return days  # en orden descendente
 
-# ==========================================================
+# ======================
 # Helpers robustos
-# ==========================================================
+# ======================
 def _has(name: str) -> bool:
     return name in globals()
-
-def _try_float(x):
-    try:
-        if x is None or (isinstance(x, str) and x.strip() == ""):
-            return None
-        return float(str(x).replace(",", ""))
-    except Exception:
-        return None
 
 def _parse_any_date(s):
     try:
@@ -113,24 +97,13 @@ def _parse_any_date(s):
         except Exception:
             return None
 
-def _safe_get_uma():
-    if _has("get_uma"):
-        try:
-            return get_uma()
-        except Exception:
-            try:
-                return getattr(get_uma, "__wrapped__", get_uma)()
-            except Exception:
-                pass
-    return {"diario": None, "mensual": None, "anual": None}
-
-def _safe_rolling_movex(window=None):
-    if _has("rolling_movex_for_last6"):
-        try:
-            return rolling_movex_for_last6(window=window) if window else rolling_movex_for_last6()
-        except Exception:
+def _try_float(x):
+    try:
+        if x is None or (isinstance(x, str) and x.strip() == ""):
             return None
-    return None
+        return float(str(x).replace(",", ""))
+    except Exception:
+        return None
 
 def _sie_range(series_id: str, start: str, end: str):
     if _has("sie_range"):
@@ -145,10 +118,8 @@ def _sie_range(series_id: str, start: str, end: str):
         token = None
     if not token:
         token = os.environ.get("BANXICO_TOKEN")
-
     if not token:
         return []
-
     import requests
     url = f"https://www.banxico.org.mx/SieAPIRest/service/v1/series/{series_id}/datos/{start}/{end}?token={token}"
     try:
@@ -184,197 +155,283 @@ def SIE(id_key: str) -> str:
             pass
     return DEFAULT_SIE_SERIES[id_key]
 
-# ==========================================================
-# Writer (plantilla)
-# ==========================================================
-from app_writer_layout_v3 import write_layout_v3
+def _safe_get_uma():
+    if _has("get_uma"):
+        try:
+            return get_uma()
+        except Exception:
+            try:
+                return getattr(get_uma, "__wrapped__", get_uma)()
+            except Exception:
+                pass
+    return {"diario": None, "mensual": None, "anual": None}
 
-# ==========================================================
-# Series para la plantilla (5 días hábiles C..G)
-# ==========================================================
-def _series_maps_for_template(days):
-    header_dates = [d.isoformat() for d in days]
+def _safe_rolling_movex(window=None):
+    if _has("rolling_movex_for_last6"):
+        try:
+            return rolling_movex_for_last6(window=window) if window else rolling_movex_for_last6()
+        except Exception:
+            return None
+    return None
 
-    def _as_map(series_key: str, start: str, end: str):
+# ======================
+# Lógica 2 columnas
+# ======================
+def _latest_and_previous_value_dates():
+    """Regresa (prev_date, latest_date) basadas en FIX (<= hoy)."""
+    end = today_cdmx().date()
+    # mirar 20 días hábiles hacia atrás
+    lookback = business_days_back(20, end)
+    start = lookback[-1].isoformat()
+    obs = _sie_range(SIE("USD_FIX"), start, end.isoformat())
+    have = []
+    for o in obs:
+        d = _parse_any_date(o.get("fecha"))
+        v = _try_float(o.get("dato"))
+        if d and (v is not None):
+            dd = d.date()
+            if dd <= end:
+                have.append(dd)
+    have = sorted(set(have))
+    if not have:
+        # fallback: hoy y hoy-1 hábil
+        latest = end
+        prev = next(d for d in business_days_back(10, end) if d < end)
+        return (prev, latest)
+    latest = have[-1]
+    prevs = [d for d in have if d < latest]
+    if prevs:
+        prev = prevs[-1]
+    else:
+        prev = next(d for d in business_days_back(10, latest) if d < latest)
+    return (prev, latest)
+
+def _series_values_for_dates(d_prev: date, d_latest: date):
+    """Devuelve los valores as-of para ambas fechas (prev y latest)."""
+    start = (d_prev - timedelta(days=450)).isoformat()
+    end = d_latest.isoformat()
+
+    def _as_map(series_key):
         obs = _sie_range(SIE(series_key), start, end)
         m = {}
         for o in obs or []:
-            _f = _parse_any_date(o.get("fecha"))
-            _v = _try_float(o.get("dato"))
-            if _f and (_v is not None):
-                m[_f.date().isoformat()] = _v
+            d = _parse_any_date(o.get("fecha")); v = _try_float(o.get("dato"))
+            if d and (v is not None):
+                m[d.date().isoformat()] = v
         return m
 
-    start = days[0].isoformat(); end = days[-1].isoformat()
+    def _asof(m, d):
+        # último <= d
+        keys = sorted(k for k in m.keys() if k <= d.isoformat())
+        return (m[keys[-1]] if keys else None)
 
-    m_fix  = _as_map("USD_FIX", start, end)
-    m_eur  = _as_map("EUR_MXN", start, end)
-    m_jpy  = _as_map("JPY_MXN", start, end)
-    m_udis = _as_map("UDIS",    start, end)
-
-    def _ffill(values_map):
-        vals, last = [], None
-        for d in header_dates:
-            if d in values_map:
-                last = values_map[d]
-            vals.append(last)
-        return vals
-
-    fix_vals  = _ffill(m_fix)
-    eur_vals  = _ffill(m_eur)
-    jpy_vals  = _ffill(m_jpy)
-    udis_vals = _ffill(m_udis)
-
-    cet_start = (days[0] - timedelta(days=450)).isoformat()
-    def _asof(series_key: str):
-        m = _as_map(series_key, cet_start, end)
-        vals, last = [], None
-        for d in header_dates:
-            if d in m:
-                last = m[d]
-            vals.append(last)
-        return vals
-
-    c28  = _asof("CETES_28")
-    c91  = _asof("CETES_91")
-    c182 = _asof("CETES_182")
-    c364 = _asof("CETES_364")
-
-    t28  = _asof("TIIE_28")
-    t91  = _asof("TIIE_91")
-    t182 = _asof("TIIE_182")
-    tobj = _asof("OBJETIVO")
+    m_fix  = _as_map("USD_FIX")
+    m_eur  = _as_map("EUR_MXN")
+    m_jpy  = _as_map("JPY_MXN")
+    m_udis = _as_map("UDIS")
+    m_c28  = _as_map("CETES_28")
+    m_c91  = _as_map("CETES_91")
+    m_c182 = _as_map("CETES_182")
+    m_c364 = _as_map("CETES_364")
+    m_t28  = _as_map("TIIE_28")
+    m_t91  = _as_map("TIIE_91")
+    m_t182 = _as_map("TIIE_182")
+    m_tobj = _as_map("OBJETIVO")
 
     uma = _safe_get_uma()
-    uma_dict = {"diario": uma.get("diario"), "mensual": uma.get("mensual"), "anual": uma.get("anual")}
 
-    return {
-        "dates": days,
-        "fix": fix_vals,
-        "eur": eur_vals,
-        "jpy": jpy_vals,
-        "udis": udis_vals,
-        "c28": c28,
-        "c91": c91,
-        "c182": c182,
-        "c364": c364,
-        "t28": t28,
-        "t91": t91,
-        "t182": t182,
-        "tobj": tobj,
-        "uma": uma_dict,
-    }
+    def _two(m, scale=1.0, rnd=None):
+        v_prev   = _asof(m, d_prev)
+        v_latest = _asof(m, d_latest)
+        if v_prev   is not None:   v_prev   = (v_prev   / scale)
+        if v_latest is not None:   v_latest = (v_latest / scale)
+        if rnd is not None:
+            v_prev   = (round(v_prev, rnd)   if v_prev   is not None else None)
+            v_latest = (round(v_latest, rnd) if v_latest is not None else None)
+        return v_prev, v_latest
 
-# ==========================================================
-# Exportador (plantilla + opcionales)
-# ==========================================================
-def export_indicadores_template_bytes(add_fred=False, add_rss=False, add_graficos=False, add_raw=False):
-    days = last_5_business_days()  # [C..G]
-    S = _series_maps_for_template(days)
+    # Nota: TIIE/CETES dividimos entre 100 para formato porcentaje
+    fix_prev, fix_latest     = _two(m_fix)
+    eur_prev, eur_latest     = _two(m_eur)
+    jpy_prev, jpy_latest     = _two(m_jpy)
+    udis_prev, udis_latest   = _two(m_udis, rnd=4)
+    c28_prev, c28_latest     = _two(m_c28,  scale=100.0)
+    c91_prev, c91_latest     = _two(m_c91,  scale=100.0)
+    c182_prev, c182_latest   = _two(m_c182, scale=100.0)
+    c364_prev, c364_latest   = _two(m_c364, scale=100.0)
+    t28_prev, t28_latest     = _two(m_t28,  scale=100.0)
+    t91_prev, t91_latest     = _two(m_t91,  scale=100.0)
+    t182_prev, t182_latest   = _two(m_t182, scale=100.0)
+    tobj_prev, tobj_latest   = _two(m_tobj, scale=100.0)
 
+    # MONEX (si existe) con margen
     mv = _safe_rolling_movex(globals().get("movex_win"))
     try:
         mpct = float(globals().get("margen_pct", 0.20))
     except Exception:
         mpct = 0.20
-
-    payload = {
-        "DOLAR": {"5": {"F": (S["fix"][-2] if len(S["fix"]) >= 2 else None),
-                        "G": (S["fix"][-1] if S["fix"] else None)}},
-        "YEN":   {"10": {"F": (S["jpy"][-2] if len(S["jpy"]) >= 2 else None),
-                         "G": (S["jpy"][-1] if S["jpy"] else None)},
-                  "11": {"G": ((S["fix"][-1] / S["jpy"][-1]) if (S["fix"] and S["jpy"] and S["fix"][-1] and S["jpy"][-1]) else None)}},
-        "EURO":  {"14": {"F": (S["eur"][-2] if len(S["eur"]) >= 2 else None),
-                         "G": (S["eur"][-1] if S["eur"] else None)},
-                  "15": {"G": (round((S["eur"][-1] / S["fix"][-1]), 4) if (S["eur"] and S["fix"] and S["eur"][-1] and S["fix"][-1]) else None)}},
-        "UDIS":  {"18": {"F": (round(S["udis"][-2], 4) if len(S["udis"]) >= 2 and S["udis"][-2] is not None else None),
-                         "G": (round(S["udis"][-1], 4) if S["udis"] and S["udis"][-1] is not None else None)}},
-        "TIIE":  {"21": {"G": ((S["tobj"][-1] / 100.0) if (S["tobj"] and S["tobj"][-1] is not None) else None)},
-                  "22": {"G": ((S["t28"] [-1] / 100.0) if (S["t28"]  and S["t28"] [-1] is not None) else None)},
-                  "23": {"G": ((S["t91"] [-1] / 100.0) if (S["t91"]  and S["t91"] [-1] is not None) else None)},
-                  "24": {"G": ((S["t182"][-1] / 100.0) if (S["t182"] and S["t182"][-1] is not None) else None)}},
-        "CETES": {"27": {"G": ((S["c28"] [-1] / 100.0) if (S["c28"]  and S["c28"] [-1] is not None) else None)},
-                  "28": {"G": ((S["c91"] [-1] / 100.0) if (S["c91"]  and S["c91"] [-1] is not None) else None)},
-                  "29": {"G": ((S["c182"][-1] / 100.0) if (S["c182"] and S["c182"][-1] is not None) else None)},
-                  "30": {"G": ((S["c364"][-1] / 100.0) if (S["c364"] and S["c364"][-1] is not None) else None)}},
-        "UMA":   {"33": {"G": S["uma"].get("diario")},
-                  "34": {"G": S["uma"].get("mensual")},
-                  "35": {"G": S["uma"].get("anual")}},
-    }
-
+    compra_prev = compra_latest = venta_prev = venta_latest = None
     if mv and isinstance(mv, (list, tuple)):
         try:
             compra = [(x * (1 - mpct/100.0) if x is not None else None) for x in mv]
             venta  = [(x * (1 + mpct/100.0) if x is not None else None) for x in mv]
-            c_y = compra[-2] if len(compra) >= 2 else None
-            c_h = compra[-1] if len(compra) >= 1 else None
-            v_y = venta [-2] if len(venta ) >= 2 else None
-            v_h = venta [-1] if len(venta ) >= 1 else None
-            if c_y is not None: payload.setdefault("DOLAR", {}).setdefault("6", {})["F"] = c_y
-            if c_h is not None: payload.setdefault("DOLAR", {}).setdefault("6", {})["G"] = c_h
-            if v_y is not None: payload.setdefault("DOLAR", {}).setdefault("7", {})["F"] = v_y
-            if v_h is not None: payload.setdefault("DOLAR", {}).setdefault("7", {})["G"] = v_h
+            # Suponemos mv alineado por fecha; tomamos últimos 2
+            if len(compra) >= 2:
+                compra_prev, compra_latest = compra[-2], compra[-1]
+            if len(venta) >= 2:
+                venta_prev,  venta_latest  = venta[-2],  venta[-1]
         except Exception:
             pass
 
-    # Escribir archivo desde plantilla
+    return {
+        "fix": (fix_prev, fix_latest),
+        "eur": (eur_prev, eur_latest),
+        "jpy": (jpy_prev, jpy_latest),
+        "udis": (udis_prev, udis_latest),
+        "c28": (c28_prev, c28_latest),
+        "c91": (c91_prev, c91_latest),
+        "c182": (c182_prev, c182_latest),
+        "c364": (c364_prev, c364_latest),
+        "t28": (t28_prev, t28_latest),
+        "t91": (t91_prev, t91_latest),
+        "t182": (t182_prev, t182_latest),
+        "tobj": (tobj_prev, tobj_latest),
+        "uma": _safe_get_uma(),
+        "monex_compra": (compra_prev, compra_latest),
+        "monex_venta":  (venta_prev,  venta_latest),
+    }
+
+# ======================
+# Writer 2 columnas
+# ======================
+def write_two_col_template(template_path: str, out_path: str, d_prev: date, d_latest: date, values: dict):
+    """
+    Escribe en plantilla 2 columnas:
+      - C2 = d_prev (fecha anterior con valor)
+      - D2 = hoy (fecha generación)
+      - C/D de cada rubro en las filas estándar
+    """
+    from openpyxl import load_workbook
+    from openpyxl.utils import get_column_letter
+
+    wb = load_workbook(template_path)
+    ws = wb.active
+
+    # Encabezados de fechas
+    ws["C2"] = d_prev.strftime("%Y-%m-%d")
+    ws["D2"] = today_cdmx().strftime("%Y-%m-%d")
+
+    # Mapeo de filas (igual al layout previo)
+    rows = {
+        # Dólar: 5=FIX, 6=compra, 7=venta
+        "fix":   5,
+        "monex_compra": 6,
+        "monex_venta":  7,
+        # Yen
+        "jpy":   10,
+        # Euro: 14 = EUR/MXN, 15 = EURUSD (cruzado con FIX)
+        "eur":   14,
+        # UDIS
+        "udis":  18,
+        # TIIE
+        "tobj":  21,
+        "t28":   22,
+        "t91":   23,
+        "t182":  24,
+        # CETES
+        "c28":   27,
+        "c91":   28,
+        "c182":  29,
+        "c364":  30,
+        # UMA
+        "uma_diario": 33,
+        "uma_mensual":34,
+        "uma_anual":  35,
+    }
+
+    def write_pair(key, col_c="C", col_d="D", round_to=None, is_uma=False):
+        if is_uma:
+            prev_v = values["uma"].get("diario") if key=="uma_diario" else values["uma"].get("mensual") if key=="uma_mensual" else values["uma"].get("anual")
+            latest_v = prev_v  # UMA no cambia por fecha en este writer
+        else:
+            pair = values.get(key, (None, None))
+            prev_v, latest_v = pair[0], pair[1]
+        r = rows[key]
+        if round_to is not None:
+            prev_v   = (round(prev_v, round_to)   if prev_v   is not None else None)
+            latest_v = (round(latest_v, round_to) if latest_v is not None else None)
+        ws[f"{col_c}{r}"] = prev_v
+        ws[f"{col_d}{r}"] = latest_v
+
+    # Escribir pares
+    write_pair("fix")
+    write_pair("monex_compra")
+    write_pair("monex_venta")
+    write_pair("jpy")
+    write_pair("eur")
+    # EURUSD cruzado en 15: calculamos aquí
+    try:
+        eur_prev, eur_latest = values.get("eur", (None, None))
+        fix_prev, fix_latest = values.get("fix", (None, None))
+        v_prev   = (eur_prev  / fix_prev)  if (eur_prev  and fix_prev)  else None
+        v_latest = (eur_latest/ fix_latest)if (eur_latest and fix_latest) else None
+    except Exception:
+        v_prev = v_latest = None
+    ws["C15"] = (round(v_prev, 4) if v_prev is not None else None)
+    ws["D15"] = (round(v_latest, 4) if v_latest is not None else None)
+
+    write_pair("udis", round_to=4)
+    write_pair("tobj")
+    write_pair("t28")
+    write_pair("t91")
+    write_pair("t182")
+    write_pair("c28")
+    write_pair("c91")
+    write_pair("c182")
+    write_pair("c364")
+    # UMA
+    ws["C33"] = values["uma"].get("diario")
+    ws["D33"] = values["uma"].get("diario")
+    ws["C34"] = values["uma"].get("mensual")
+    ws["D34"] = values["uma"].get("mensual")
+    ws["C35"] = values["uma"].get("anual")
+    ws["D35"] = values["uma"].get("anual")
+
+    wb.save(out_path)
+
+# ======================
+# Exportador
+# ======================
+def export_indicadores_2col_bytes():
+    d_prev, d_latest = _latest_and_previous_value_dates()
+    vals = _series_values_for_dates(d_prev, d_latest)
     tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".xlsx"); tmp.close()
-    header_dates = last_5_business_days()
-    write_layout_v3(TEMPLATE_PATH, tmp.name, header_dates=header_dates, payload=payload)
-
-    # Agregar hojas opcionales (placeholder) si el usuario las marcó
-    if any([add_fred, add_rss, add_graficos, add_raw]):
-        try:
-            from openpyxl import load_workbook
-            wb = load_workbook(tmp.name)
-            def ensure_ws(name, note):
-                if name in wb.sheetnames:
-                    ws = wb[name]
-                else:
-                    ws = wb.create_sheet(title=name)
-                ws["A1"] = note
-                return ws
-            if add_fred:
-                ensure_ws("FRED", "Hoja FRED - pendiente poblar")
-            if add_rss:
-                ensure_ws("Noticias_RSS", "Hoja RSS - pendiente poblar")
-            if add_graficos:
-                ensure_ws("Gráficos", "Hoja Gráficos - pendiente poblar")
-            if add_raw:
-                ensure_ws("Datos crudos", "Hoja Datos crudos - pendiente poblar")
-            wb.save(tmp.name)
-        except Exception:
-            pass
-
+    write_two_col_template(TEMPLATE_PATH, tmp.name, d_prev, d_latest, vals)
     with open(tmp.name, "rb") as f:
         content = f.read()
     try:
         os.unlink(tmp.name)
     except Exception:
         pass
-    return content
+    return content, d_prev, d_latest
 
-# ==========================================================
-# UI (diseño original con opciones)
-# ==========================================================
-with st.expander("Selecciona las Hojas del Excel que contendrá tu archivo"):
-    st.caption("Activa/desactiva hojas opcionales del archivo Excel")
-    add_fred = st.checkbox("Agregar hoja FRED", value=False)
-    add_rss = st.checkbox("Agregar hoja Noticias_RSS", value=False)
-    add_graficos = st.checkbox("Agregar hoja 'Gráficos'", value=False)
-    add_raw = st.checkbox("Agregar hoja 'Datos crudos'", value=False)
+# ======================
+# UI
+# ======================
+with st.expander("Fechas elegidas", expanded=False):
+    d_prev, d_latest = _latest_and_previous_value_dates()
+    st.write({"dia_anterior": d_prev.strftime("%Y-%m-%d"), "dia_actual": today_cdmx().strftime("%Y-%m-%d"), "ultimo_con_valor": d_latest.strftime("%Y-%m-%d")})
 
 if "xlsx_bytes" not in st.session_state:
     st.session_state["xlsx_bytes"] = None
 
 col1, col2 = st.columns([1,1])
 with col1:
-    if st.button("Generar Excel", key="btn_generar"):
-        with st.spinner("Generando desde la PLANTILLA nueva..."):
-            st.session_state["xlsx_bytes"] = export_indicadores_template_bytes(
-                add_fred=add_fred, add_rss=add_rss, add_graficos=add_graficos, add_raw=add_raw
-            )
-        st.success("Listo. ¡Descarga abajo!")
+    if st.button("Generar Excel (2 columnas)"):
+        with st.spinner("Generando desde la plantilla 2 columnas..."):
+            bytes_, d_prev, d_latest = export_indicadores_2col_bytes()
+            st.session_state["xlsx_bytes"] = bytes_
+        st.success("Listo. Descarga abajo.")
 
 st.markdown("---")
 st.subheader("Descarga")
@@ -384,8 +441,4 @@ st.download_button(
     file_name="Indicadores " + today_cdmx().strftime("%Y-%m-%d %H%M%S") + ".xlsx",
     mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
     disabled=(st.session_state["xlsx_bytes"] is None),
-    key="btn_descargar",
 )
-
-st.caption("Plantilla: " + TEMPLATE_PATH)
-
