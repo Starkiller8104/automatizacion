@@ -63,7 +63,7 @@ if not st.session_state["auth_ok"]:
         if submit:
             if _password_ok(pwd):
                 st.session_state["auth_ok"] = True
-                st.experimental_rerun()
+                st.rerun()
             else:
                 st.error("Password incorrecto")
     st.stop()
