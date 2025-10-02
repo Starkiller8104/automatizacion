@@ -2098,25 +2098,12 @@ except NameError:
     pass
 except Exception:
     pass
-    st.download_button("Descargar Excel", data=export_indicadores_template_bytes(_TEMPLATE_PATH), file_name=f"Indicadores {today_cdmx().strftime('%Y-%m-%d %H%M%S')}.xlsx",
-        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        )
-    
-
-
-
-try:
-    xbytes = st.session_state.get('xlsx_bytes')
-    if xbytes:
-        st.download_button(
-            'Descargar Excel',
-            data=xbytes,
-            file_name=f"indicadores_{today_cdmx()}.xlsx",
-            mime='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-            use_container_width=True
-        )
-except Exception:
-    pass
+    st.download_button(
+    "Descargar Excel",
+    data=export_indicadores_template_bytes(),
+    file_name="Indicadores " + today_cdmx().strftime("%Y-%m-%d %H%M%S") + ".xlsx",
+    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+)
 
     
     try:
@@ -2205,11 +2192,23 @@ def _series_maps_for_template(days):
     t182,_ = _ffill_with_flags(m_t182, header_dates)
     tobj,_ = _ffill_with_flags(m_obj,   header_dates)
 
-    uma = get_uma()
+    uma = _safe_get_uma()
     uma_dict = {'diario': uma.get('diario'), 'mensual': uma.get('mensual'), 'anual': uma.get('anual')}
 
     return {'dates': days,'fix':fix_vals,'eur':eur_vals,'jpy':jpy_vals,'udis':udis_vals,
             'c28':c28,'c91':c91,'c182':c182,'c364':c364,'t28':t28,'t91':t91,'t182':t182,'tobj':tobj,'uma':uma_dict}
+
+
+def _safe_get_uma():
+    try:
+        return get_uma()
+    except Exception:
+        try:
+            # If decorated with st.cache_data, sometimes __wrapped__ bypasses cache layer
+            return getattr(get_uma, "__wrapped__", get_uma)()
+        except Exception:
+            return {"diario": None, "mensual": None, "anual": None}
+
 
 def export_indicadores_template_bytes(template_path: str):
     # Writer v3 que llena B..G (6 días) y MONEX compra/venta (F/G) según lógica de la app
@@ -2356,7 +2355,7 @@ def _series_maps_for_template(days):
     t182,_ = _ffill_with_flags(m_t182, header_dates)
     tobj,_ = _ffill_with_flags(m_obj,   header_dates)
 
-    uma = get_uma()
+    uma = _safe_get_uma()
     uma_dict = {'diario': uma.get('diario'), 'mensual': uma.get('mensual'), 'anual': uma.get('anual')}
 
     return {
@@ -2366,6 +2365,18 @@ def _series_maps_for_template(days):
         't28': t28, 't91': t91, 't182': t182, 'tobj': tobj,
         'uma': uma_dict
     }
+
+
+def _safe_get_uma():
+    try:
+        return get_uma()
+    except Exception:
+        try:
+            # If decorated with st.cache_data, sometimes __wrapped__ bypasses cache layer
+            return getattr(get_uma, "__wrapped__", get_uma)()
+        except Exception:
+            return {"diario": None, "mensual": None, "anual": None}
+
 
 def export_indicadores_template_bytes(template_path: str = _TEMPLATE_PATH):
     """
@@ -2445,26 +2456,33 @@ def export_indicadores_template_bytes(template_path: str = _TEMPLATE_PATH):
 
 
 
-# === Descarga SIEMPRE visible ===
-try:
-    _ = st.session_state
-except Exception:
-    pass
-
+# === Generación/Descarga controlada por estado ===
 if "xlsx_bytes" not in st.session_state:
     st.session_state["xlsx_bytes"] = None
 
+# Generar (si usas tu botón existente)
+if st.session_state.get("generate_now"):
+    with st.spinner("Generando archivo desde plantilla..."):
+        st.session_state["xlsx_bytes"] = export_indicadores_template_bytes()
+    st.session_state["generate_now"] = False
+
+# Botón de descarga siempre visible (usa bytes ya generados o genera on-demand)
+if st.session_state["xlsx_bytes"] is None:
+    try:
+        _bytes = export_indicadores_template_bytes()
+        st.session_state["xlsx_bytes"] = _bytes
+    except Exception:
+        _bytes = b""
+else:
+    _bytes = st.session_state["xlsx_bytes"]
+
 st.markdown("---")
 st.subheader("Descarga")
-
-# Generación directa desde la plantilla (no depende del botón Generar)
-_dl_bytes = export_indicadores_template_bytes()
 st.download_button(
     "Descargar Excel",
-    data=_dl_bytes,
+    data=_bytes,
     file_name="Indicadores " + today_cdmx().strftime("%Y-%m-%d %H%M%S") + ".xlsx",
     mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-    key="dl_indicadores_template_always",
+    key="dl_indicadores_template_final",
 )
-
 
