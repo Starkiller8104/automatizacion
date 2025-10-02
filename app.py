@@ -9,6 +9,7 @@ import requests
 import feedparser
 import xlsxwriter
 import streamlit as st
+ENABLE_LEGACY_EXPORT = False
 from datetime import datetime, timedelta, date
 from email.utils import parsedate_to_datetime
 from pathlib import Path
@@ -2105,11 +2106,12 @@ except Exception:
 
 
 
-try:
-    xbytes = st.session_state.get('xlsx_bytes')
+if ENABLE_LEGACY_EXPORT:
+    try:
+        xbytes = st.session_state.get('xlsx_bytes')
     if xbytes:
         st.download_button(
-            'Descargar Excel',
+            'Descargar Excel (legacy)',
             data=xbytes,
             file_name=f"indicadores_{today_cdmx()}.xlsx",
             mime='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
@@ -2442,4 +2444,5 @@ def export_indicadores_template_bytes(template_path: str = _TEMPLATE_PATH):
     except Exception:
         pass
     return content
+
 
