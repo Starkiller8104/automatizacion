@@ -2107,6 +2107,8 @@ except Exception:
 
 try:
     xbytes = st.session_state.get('xlsx_bytes')
+except Exception:
+    xbytes = None
     if xbytes:
         st.download_button(
             'Descargar Excel',
