@@ -2100,10 +2100,10 @@ except Exception:
     pass
     st.download_button(
     "Descargar Excel",
-        data=bio.getvalue(),
-        file_name=f"indicadores_{today_cdmx()}.xlsx",
-        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        )
+    data=export_indicadores_template_bytes("Indicadores_template.xlsx"),
+    file_name=f"Indicadores {today_cdmx().strftime('%Y-%m-%d %H%M%S')}.xlsx",
+    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    )
     
 
 
@@ -2144,3 +2144,187 @@ except Exception:
             wsh.write(i,0,k, fmt_bold); wsh.write(i,1,v, fmt_wrap)
     except Exception:
         pass
+
+
+# === Profe: Export to new template "Indicadores" (B..G fechas) sin cambiar la UI de Streamlit ===
+def _build_header_dates_6b():
+    """Devuelve 6 días hábiles (B..G), último es hoy."""
+    from datetime import timedelta
+    end = today_cdmx()
+    days = []
+    d = end
+    while len(days) < 6:
+        if d.weekday() < 5:
+            days.append(d)
+        d -= timedelta(days=1)
+    days = list(reversed(days))  # B..G
+    return days
+
+def _series_maps_for_template(days):
+    """Usa utilidades existentes para armar series alineadas a 'days' (como header_dates_date)."""
+    header_dates = [x.isoformat() for x in days]
+
+    def _as_map_from_range(series_key, start, end):
+        obs = sie_range(SIE_SERIES[series_key], start, end)
+        m = {}
+        for o in obs:
+            _f = parse_any_date(o.get('fecha'))
+            _v = try_float(o.get('dato'))
+            if _f and (_v is not None):
+                m[_f.date().isoformat()] = _v
+        return m
+
+    start = days[0].isoformat()
+    end   = days[-1].isoformat()
+
+    m_fix  = _as_map_from_range('USD_FIX', start, end)
+    m_eur  = _as_map_from_range('EUR_MXN', start, end)
+    m_jpy  = _as_map_from_range('JPY_MXN', start, end)
+    m_udis = _as_map_from_range('UDIS',    start, end)
+
+    fix_vals, _  = _ffill_with_flags(m_fix, header_dates)
+    eur_vals, _  = _ffill_with_flags(m_eur, header_dates)
+    jpy_vals, _  = _ffill_with_flags(m_jpy, header_dates)
+    udis_vals,_  = _ffill_with_flags(m_udis, header_dates)
+
+    # CETES (asof)
+    from datetime import timedelta as _td
+    cet_start = (days[0] - _td(days=450)).isoformat()
+    cet_end   = days[-1].isoformat()
+    m_c28  = _as_map_from_range('CETES_28',  cet_start, cet_end)
+    m_c91  = _as_map_from_range('CETES_91',  cet_start, cet_end)
+    m_c182 = _as_map_from_range('CETES_182', cet_start, cet_end)
+    m_c364 = _as_map_from_range('CETES_364', cet_start, cet_end)
+
+    c28,_  = _ffill_asof_with_flags_from_map(m_c28,  header_dates)
+    c91,_  = _ffill_asof_with_flags_from_map(m_c91,  header_dates)
+    c182,_ = _ffill_asof_with_flags_from_map(m_c182, header_dates)
+    c364,_ = _ffill_asof_with_flags_from_map(m_c364, header_dates)
+
+    # TIIE y objetivo
+    fx_start = (days[0]).isoformat()
+    fx_end   = (days[-1]).isoformat()
+    m_t28  = _as_map_from_range('TIIE_28',  fx_start, fx_end)
+    m_t91  = _as_map_from_range('TIIE_91',  fx_start, fx_end)
+    m_t182 = _as_map_from_range('TIIE_182', fx_start, fx_end)
+
+    _obs_obj = sie_range('SF61745', fx_start, fx_end)
+    m_obj = {}
+    for o in _obs_obj:
+        _f = parse_any_date(o.get('fecha'))
+        _v = try_float(o.get('dato'))
+        if _f and (_v is not None):
+            m_obj[_f.date().isoformat()] = _v
+
+    t28,_  = _ffill_with_flags(m_t28,  header_dates)
+    t91,_  = _ffill_with_flags(m_t91,  header_dates)
+    t182,_ = _ffill_with_flags(m_t182, header_dates)
+    tobj,_ = _ffill_with_flags(m_obj,   header_dates)
+
+    # UMA
+    uma = get_uma()
+    uma_dict = {'diario': uma.get('diario'), 'mensual': uma.get('mensual'), 'anual': uma.get('anual')}
+
+    return {
+        'dates': days,
+        'fix': fix_vals, 'eur': eur_vals, 'jpy': jpy_vals, 'udis': udis_vals,
+        'c28': c28, 'c91': c91, 'c182': c182, 'c364': c364,
+        't28': t28, 't91': t91, 't182': t182, 'tobj': tobj,
+        'uma': uma_dict
+    }
+
+def _payload_from_series_with_monex(series):
+    """Payload para writer v3 (B..G fechas) + MONEX compra/venta en F/G (ayer/hoy)."""
+    def last_two(arr):
+        v_y = None; v_h = None
+        try: v_y = arr[-2]
+        except Exception: pass
+        try: v_h = arr[-1]
+        except Exception: pass
+        return v_y, v_h
+
+    payload = {
+        "DOLAR": {"5": {"G": (series['fix'][-1] if series['fix'] and series['fix'][-1] is not None else None)}},
+        "YEN": {
+            "10": {"G": (series['jpy'][-1] if series['jpy'] and series['jpy'][-1] is not None else None)},
+            "11": {"G": ((series['fix'][-1]/series['jpy'][-1]) if (series['fix'] and series['jpy'] and series['fix'][-1] and series['jpy'][-1]) else None)},
+        },
+        "EURO": {
+            "14": {"G": (series['eur'][-1] if series['eur'] and series['eur'][-1] is not None else None)},
+            "15": {"G": ((series['eur'][-1]/series['fix'][-1]) if (series['eur'] and series['fix'] and series['eur'][-1] and series['fix'][-1]) else None)},
+        },
+        "UDIS": {"18": {"G": (series['udis'][-1] if series['udis'] else None)}},
+        "TIIE": {
+            "21": {"G": ((series['tobj'][-1]/100.0) if series['tobj'] and series['tobj'][-1] is not None else None)},
+            "22": {"G": ((series['t28'][-1] /100.0) if series['t28'] and series['t28'][-1] is not None else None)},
+            "23": {"G": ((series['t91'][-1] /100.0) if series['t91'] and series['t91'][-1] is not None else None)},
+            "24": {"G": ((series['t182'][-1]/100.0) if series['t182'] and series['t182'][-1] is not None else None)},
+        },
+        "CETES": {
+            "27": {"G": ((series['c28'][-1] /100.0) if series['c28'] and series['c28'][-1] is not None else None)},
+            "28": {"G": ((series['c91'][-1] /100.0) if series['c91'] and series['c91'][-1] is not None else None)},
+            "29": {"G": ((series['c182'][-1]/100.0) if series['c182'] and series['c182'][-1] is not None else None)},
+            "30": {"G": ((series['c364'][-1]/100.0) if series['c364'] and series['c364'][-1] is not None else None)},
+        },
+        "UMA": {
+            "33": {"G": series['uma'].get('diario')},
+            "34": {"G": series['uma'].get('mensual')},
+            "35": {"G": series['uma'].get('anual')},
+        }
+    }
+
+    # --- Ayer (F) para deltas G-F ---
+    vy, _ = last_two(series['fix'])
+    if vy is not None:
+        payload["DOLAR"].setdefault("5",{})["F"] = vy
+    vy, _ = last_two(series['jpy'])
+    if vy is not None:
+        payload["YEN"].setdefault("10",{})["F"] = vy
+    vy, _ = last_two(series['eur'])
+    if vy is not None:
+        payload["EURO"].setdefault("14",{})["F"] = vy
+    vy, _ = last_two(series['udis'])
+    if vy is not None:
+        payload["UDIS"].setdefault("18",{})["F"] = vy
+
+    # --- MONEX compra/venta (usa lógica existente: rolling_movex_for_last6 + margen_pct) ---
+    try:
+        mv = rolling_movex_for_last6(window=movex_win)  # usa funciones/vars de la app
+    except Exception:
+        mv = None
+    try:
+        mpct = float(margen_pct)
+    except Exception:
+        mpct = 0.20  # fallback a 0.20 si no está definido
+
+    if mv and isinstance(mv, (list, tuple)) and len(mv) >= 2:
+        compra = [(x*(1 - mpct/100) if x is not None else None) for x in mv]
+        venta  = [(x*(1 + mpct/100) if x is not None else None) for x in mv]
+        # ayer/hoy
+        c_y, c_h = (compra[-2], compra[-1]) if len(compra) >= 2 else (None, compra[-1] if compra else None)
+        v_y, v_h = (venta[-2],  venta[-1])  if len(venta)  >= 2 else (None, venta[-1]  if venta  else None)
+        if c_y is not None: payload["DOLAR"].setdefault("6",{})["F"] = c_y
+        if c_h is not None: payload["DOLAR"].setdefault("6",{})["G"] = c_h
+        if v_y is not None: payload["DOLAR"].setdefault("7",{})["F"] = v_y
+        if v_h is not None: payload["DOLAR"].setdefault("7",{})["G"] = v_h
+
+    return payload
+
+def export_indicadores_template_bytes(template_path: str):
+    """Construye bytes del archivo Indicadores desde la plantilla, con fechas B..G y MONEX."""
+    from app_writer_layout_v3 import write_layout_v3
+    import io, tempfile, os
+    days = _build_header_dates_6b()
+    series = _series_maps_for_template(days)
+    payload = _payload_from_series_with_monex(series)
+    tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".xlsx")
+    tmp.close()
+    header_dates = [d for d in days]
+    write_layout_v3(template_path, tmp.name, header_dates=header_dates, payload=payload)
+    with open(tmp.name, "rb") as f:
+        content = f.read()
+    try:
+        os.unlink(tmp.name)
+    except Exception:
+        pass
+    return content
