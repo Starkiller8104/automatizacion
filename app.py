@@ -2431,3 +2431,4 @@ def export_indicadores_template_bytes(template_path: str = _TEMPLATE_PATH):
     return content
 
 
+
