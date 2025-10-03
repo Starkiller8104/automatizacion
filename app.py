@@ -8,6 +8,7 @@ from pathlib import Path
 from xml.etree import ElementTree as ET
 
 import streamlit as st
+from ui_helpers import inject_base_css, header, section_card, metric_row
 
 # ---------- Fine-grained progress helper ----------
 class _Progress:
@@ -71,14 +72,16 @@ def _password_ok(p: str) -> bool:
 if "auth_ok" not in st.session_state:
     st.session_state["auth_ok"] = False
 
-cols = st.columns([1, 4])
-with cols[0]:
-    try:
-        st.image(LOGO_PATH, use_container_width=True)
-    except Exception:
-        pass
-with cols[1]:
-    st.markdown("# Indicadores de Tipo de Cambio")
+
+inject_base_css()
+updated_str = today_cdmx().strftime("%Y-%m-%d %H:%M (CDMX)")
+header(
+    logo_path=LOGO_PATH,
+    title="Indicadores de Tipo de Cambio",
+    subtitle="IMEMSA · Reporte ejecutivo",
+    updated=updated_str
+)
+
 
 st.markdown("---")
 
@@ -798,7 +801,7 @@ if "xlsx_bytes" not in st.session_state:
 # Contenedor para la barra de progreso (aparece debajo del botón)
 _progress_placeholder = st.empty()
 
-if st.button("Generar Excel"):
+if section_card('Generación de Excel', lambda: st.button("Generar Excel")):
     prog = _Progress(_progress_placeholder)
     prog.set(5, "Preparando fechas…")
     d_prev, d_latest = _latest_and_previous_value_dates()
