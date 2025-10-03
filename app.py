@@ -7,11 +7,16 @@ from pathlib import Path
 
 import streamlit as st
 
+# ======================
+# Config / Branding
+# ======================
 st.set_page_config(page_title="Indicadores IMEMSA", layout="wide")
 LOGO_PATH = str((Path(__file__).parent / "logo.png").resolve())
-TEMPLATE_PATH = str((Path(__file__).parent / "Indicadores_template_2col.xlsx").resolve())
+TEMPLATE_PATH = str((Path(__file__).parent / "Indicadores_template_2col.xlsx").resolve())  # coloca tu nueva plantilla con este nombre
 
-# ---------------- Password ----------------
+# ======================
+# Password (opcional)
+# ======================
 APP_PASSWORD = None
 try:
     APP_PASSWORD = st.secrets.get("app_password")
@@ -28,7 +33,7 @@ def _password_ok(p: str) -> bool:
 if "auth_ok" not in st.session_state:
     st.session_state["auth_ok"] = False
 
-cols = st.columns([1,4])
+cols = st.columns([1, 4])
 with cols[0]:
     try:
         st.image(LOGO_PATH, use_container_width=True)
@@ -36,6 +41,7 @@ with cols[0]:
         pass
 with cols[1]:
     st.markdown("# Indicadores (día actual y día anterior)")
+
 st.markdown("---")
 
 if not st.session_state["auth_ok"]:
@@ -51,7 +57,9 @@ if not st.session_state["auth_ok"]:
                 st.error("Password incorrecto")
     st.stop()
 
-# ---------------- Fechas ----------------
+# ======================
+# Utilidades de fecha
+# ======================
 def today_cdmx():
     try:
         import pytz
@@ -68,9 +76,11 @@ def business_days_back(n=10, end_date=None):
         if d.weekday() < 5:
             days.append(d)
         d -= timedelta(days=1)
-    return days
+    return days  # descendente
 
-# ---------------- Tokens/Secrets ----------------
+# ======================
+# Secrets / Tokens / Flags
+# ======================
 def _get_secret(name: str):
     v = None
     try:
@@ -85,7 +95,21 @@ BANXICO_TOKEN = globals().get("BANXICO_TOKEN") or _get_secret("banxico_token") o
 INEGI_TOKEN   = globals().get("INEGI_TOKEN")   or _get_secret("inegi_token")   or _get_secret("INEGI_TOKEN")
 FRED_API_KEY  = globals().get("FRED_API_KEY")  or _get_secret("fred_api_key")  or _get_secret("FRED_API_KEY")
 
-# ---------------- Series SIE ----------------
+# MONEX fallback: if MONEX_FALLBACK="fix", estimate compra/venta from FIX using margin pct
+MONEX_FALLBACK = (_get_secret("MONEX_FALLBACK") or "").strip().lower()  # "fix" to enable fallback
+def _get_margin_pct():
+    # default 0.20 (%). If you pass "0.3" => 0.3%; "1.5" => 1.5%
+    try:
+        v = _get_secret("MARGEN_PCT")
+        if v is None: 
+            return 0.20
+        return float(v)
+    except Exception:
+        return 0.20
+
+# ======================
+# Series SIE (basado en tu app anterior) + OBJETIVO
+# ======================
 SIE_SERIES = {
     "USD_FIX":   "SF43718",
     "EUR_MXN":   "SF46410",
@@ -103,7 +127,9 @@ SIE_SERIES = {
 def SIE(key: str) -> str:
     return SIE_SERIES[key]
 
-# ---------------- Helpers fetch ----------------
+# ======================
+# Fetchers robustos
+# ======================
 def _has(name: str) -> bool:
     return name in globals()
 
@@ -126,11 +152,13 @@ def _try_float(x):
         return None
 
 def _sie_range(series_id: str, start: str, end: str):
+    # Usa sie_range del repo si existe
     if _has("sie_range"):
         try:
             return sie_range(series_id, start, end)
         except Exception:
             pass
+    # Fallback a API SIE con token (Banxico)
     token = BANXICO_TOKEN
     if not token:
         return []
@@ -148,7 +176,7 @@ def _sie_range(series_id: str, start: str, end: str):
         return []
 
 def _safe_get_uma():
-    # try user's get_uma
+    # 1) try user's get_uma
     if _has("get_uma"):
         try:
             sig = inspect.signature(get_uma)
@@ -166,8 +194,8 @@ def _safe_get_uma():
                     return base()
             except Exception:
                 pass
-    # fallback: try INEGI indicator id from env if provided
-    UMA_INDICATOR_ID = os.environ.get("INEGI_UMA_ID", "")
+    # 2) try INEGI (needs INEGI_UMA_ID + INEGI_TOKEN)
+    UMA_INDICATOR_ID = os.environ.get("INEGI_UMA_ID", "") or _get_secret("INEGI_UMA_ID")
     if INEGI_TOKEN and UMA_INDICATOR_ID:
         import requests
         url = f"https://www.inegi.org.mx/app/api/indicadores/desarrolladores/jsonxml/INDICATOR/{UMA_INDICATOR_ID}/00000/es/{INEGI_TOKEN}?type=json"
@@ -175,19 +203,24 @@ def _safe_get_uma():
             r = requests.get(url, timeout=20); r.raise_for_status()
             j = r.json()
             series = j.get("Series", [])
-            if series:
+            if series and series[0].get("OBSERVATIONS"):
                 val = _try_float(series[0]["OBSERVATIONS"][-1]["OBS_VALUE"])
                 return {"diario": val, "mensual": val, "anual": val}
         except Exception:
             pass
-    # last fallback from secrets if provided
-    try:
-        diario = float(_get_secret("uma_diario") or "nan")
-        mensual = float(_get_secret("uma_mensual") or "nan")
-        anual = float(_get_secret("uma_anual") or "nan")
-        return {"diario": diario, "mensual": mensual, "anual": anual}
-    except Exception:
-        return {"diario": None, "mensual": None, "anual": None}
+    # 3) fallback: read from secrets
+    def _sf(name):
+        v = _get_secret(name)
+        if v is None or str(v).strip() == "":
+            return None
+        try:
+            return float(str(v).replace(",", ""))
+        except Exception:
+            return None
+    diario  = _sf("uma_diario")
+    mensual = _sf("uma_mensual")
+    anual   = _sf("uma_anual")
+    return {"diario": diario, "mensual": mensual, "anual": anual}
 
 def _safe_rolling_movex(window=None):
     if _has("rolling_movex_for_last6"):
@@ -202,13 +235,11 @@ def _fred_inflation_yoy_for(months):
     if not FRED_API_KEY:
         return {}
     import requests
-    # get monthly CPI values last 36 months
     url = f"https://api.stlouisfed.org/fred/series/observations?series_id=CPIAUCSL&api_key={FRED_API_KEY}&file_type=json&frequency=m&observation_start=2015-01-01"
     try:
         r = requests.get(url, timeout=20); r.raise_for_status()
         data = r.json()
         obs = data.get("observations", [])
-        # map date->value
         vals = {}
         for o in obs:
             try:
@@ -218,7 +249,6 @@ def _fred_inflation_yoy_for(months):
             vals[o["date"][:7]] = v
         yoy = {}
         for ym in months:
-            # year-month like '2025-09'
             y, m = ym.split("-")
             y_prev = f"{int(y)-1}-{m}"
             if ym in vals and y_prev in vals:
@@ -227,8 +257,12 @@ def _fred_inflation_yoy_for(months):
     except Exception:
         return {}
 
-# ---------------- Fechas clave por FIX ----------------
+# ======================
+# Cálculo de fechas (por FIX)
+# ======================
 def _latest_and_previous_value_dates():
+    """Regresa (prev, latest) donde latest = último día con valor <= hoy usando FIX,
+    y prev = día inmediatamente anterior con valor."""
     end = today_cdmx().date()
     lookback = business_days_back(25, end)
     start = lookback[-1].isoformat()
@@ -251,7 +285,9 @@ def _latest_and_previous_value_dates():
     prev = (prevs[-1] if prevs else next(d for d in business_days_back(10, latest) if d < latest))
     return (prev, latest)
 
-# ---------------- Series as-of ----------------
+# ======================
+# Lectura as-of para fechas prev/latest
+# ======================
 def _series_values_for_dates(d_prev: date, d_latest: date):
     start = (d_prev - timedelta(days=450)).isoformat()
     end = d_latest.isoformat()
@@ -307,19 +343,16 @@ def _series_values_for_dates(d_prev: date, d_latest: date):
     t182_prev, t182_latest   = _two(m_t182, scale=100.0)
     tobj_prev, tobj_latest   = _two(m_tobj, scale=100.0)
 
-    # Cross USD/JPY (JPY per USD) = FIX / (MXN per JPY)
-    usdjpy_prev   = (fix_prev / jpy_prev)   if (fix_prev and jpy_prev)   else None
-    usdjpy_latest = (fix_latest/ jpy_latest)if (fix_latest and jpy_latest) else None
+    # USD/JPY (JPY por USD) = FIX / (MXN por JPY). Usa as-of fallback.
+    usdjpy_prev   = (fix_prev / jpy_prev)    if (fix_prev is not None and jpy_prev is not None)     else None
+    usdjpy_latest = (fix_latest / jpy_latest)if (fix_latest is not None and jpy_latest is not None) else None
 
     # MONEX (si existe) con margen
     mv = _safe_rolling_movex(globals().get("movex_win"))
-    try:
-        mpct = float(globals().get("margen_pct", 0.20))
-    except Exception:
-        mpct = 0.20
     compra_prev = compra_latest = venta_prev = venta_latest = None
     if mv and isinstance(mv, (list, tuple)):
         try:
+            mpct = float(globals().get("margen_pct", _get_margin_pct()))
             compra = [(x * (1 - mpct/100.0) if x is not None else None) for x in mv]
             venta  = [(x * (1 + mpct/100.0) if x is not None else None) for x in mv]
             if len(compra) >= 2:
@@ -328,6 +361,17 @@ def _series_values_for_dates(d_prev: date, d_latest: date):
                 venta_prev,  venta_latest  = venta[-2],  venta[-1]
         except Exception:
             pass
+    # Fallback a partir de FIX si se activó MONEX_FALLBACK="fix"
+    if MONEX_FALLBACK == "fix" and (compra_prev is None or compra_latest is None or venta_prev is None or venta_latest is None):
+        mpct = _get_margin_pct()
+        if fix_prev is not None and compra_prev is None:
+            compra_prev = fix_prev * (1 - mpct/100.0)
+        if fix_latest is not None and compra_latest is None:
+            compra_latest = fix_latest * (1 - mpct/100.0)
+        if fix_prev is not None and venta_prev is None:
+            venta_prev = fix_prev * (1 + mpct/100.0)
+        if fix_latest is not None and venta_latest is None:
+            venta_latest = fix_latest * (1 + mpct/100.0)
 
     return {
         "fix": (fix_prev, fix_latest),
@@ -348,13 +392,15 @@ def _series_values_for_dates(d_prev: date, d_latest: date):
         "monex_venta":  (venta_prev,  venta_latest),
     }
 
-# ---------------- Writer ----------------
+# ======================
+# Writer 2 columnas: respeta plantilla + formatos
+# ======================
 def write_two_col_template(template_path: str, out_path: str, d_prev: date, d_latest: date, values: dict):
     from openpyxl import load_workbook
     wb = load_workbook(template_path)
     ws = wb.active
 
-    # Encabezados con formato dd/mm/aaaa
+    # Encabezados C2 (anterior) y D2 (hoy) con formato dd/mm/aaaa
     ws["C2"].value = d_prev
     ws["D2"].value = today_cdmx().date()
     ws["C2"].number_format = "dd/mm/yyyy"
@@ -427,21 +473,48 @@ def write_two_col_template(template_path: str, out_path: str, d_prev: date, d_la
     ws["B34"] = uma.get("mensual")
     ws["B35"] = uma.get("anual")
 
-    # Inflación EUA (B41=Octubre, B42=Septiembre) — % YoY si hay FRED_API_KEY
+    # Inflación EUA (B41=Octubre, B42=Septiembre) — % YoY
+    # Intento FRED; si no hay API, uso secrets us_inflation_oct/us_inflation_sep
+    def _as_pct_decimal(x):
+        if x is None:
+            return None
+        try:
+            x = float(x)
+            # Si nos pasan 3.4 como %, convierto a 0.034.
+            if abs(x) > 1:
+                x = x / 100.0
+            return x
+        except Exception:
+            return None
+
     try:
         y = today_cdmx().year
         ym_oct = f"{y}-10"
         ym_sep = f"{y}-09"
         fred = _fred_inflation_yoy_for([ym_oct, ym_sep])
-        # escribir como decimal (p.ej 0.034 = 3.4%); la plantilla puede tener formato %
-        ws["B41"] = fred.get(ym_oct)
-        ws["B42"] = fred.get(ym_sep)
+        val_oct = fred.get(ym_oct)
+        val_sep = fred.get(ym_sep)
+
+        # Fallback desde secrets si no hay FRED
+        if val_oct is None:
+            val_oct = _as_pct_decimal(_get_secret("us_inflation_oct"))
+        if val_sep is None:
+            val_sep = _as_pct_decimal(_get_secret("us_inflation_sep"))
+
+        ws["B41"] = val_oct
+        ws["B42"] = val_sep
+
+        # Forzar formato % si la plantilla no lo tiene
+        ws["B41"].number_format = "0.00%"
+        ws["B42"].number_format = "0.00%"
     except Exception:
         pass
 
     wb.save(out_path)
 
-# ---------------- Exportador / UI ----------------
+# ======================
+# Exportador
+# ======================
 def export_indicadores_2col_bytes():
     d_prev, d_latest = _latest_and_previous_value_dates()
     vals = _series_values_for_dates(d_prev, d_latest)
@@ -455,15 +528,20 @@ def export_indicadores_2col_bytes():
         pass
     return content, d_prev, d_latest
 
+# ======================
+# UI
+# ======================
 with st.expander("Diagnóstico / Fechas y tokens", expanded=False):
     d_prev, d_latest = _latest_and_previous_value_dates()
     st.write({
         "dia_anterior (C2)": d_prev.strftime("%d/%m/%Y"),
         "dia_actual (D2)": today_cdmx().strftime("%d/%m/%Y"),
         "ultimo_con_valor (por FIX)": d_latest.strftime("%d/%m/%Y"),
-        "banxico_token": bool(BANXICO_TOKEN),
-        "inegi_token": bool(INEGI_TOKEN),
-        "fred_api_key": bool(FRED_API_KEY),
+        "banxico_token_detectado": bool(BANXICO_TOKEN),
+        "inegi_token_detectado": bool(INEGI_TOKEN),
+        "fred_api_key_detectada": bool(FRED_API_KEY),
+        "monex_fallback": MONEX_FALLBACK,
+        "margen_pct": _get_margin_pct(),
     })
 
 if "xlsx_bytes" not in st.session_state:
