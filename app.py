@@ -8,11 +8,16 @@ from pathlib import Path
 
 import streamlit as st
 
+# ======================
+# Config / Branding
+# ======================
 st.set_page_config(page_title="Indicadores IMEMSA", layout="wide")
 LOGO_PATH = str((Path(__file__).parent / "logo.png").resolve())
 TEMPLATE_PATH = str((Path(__file__).parent / "Indicadores_template_2col.xlsx").resolve())
 
-# ---------------- Password ----------------
+# ======================
+# Password (opcional)
+# ======================
 APP_PASSWORD = None
 try:
     APP_PASSWORD = st.secrets.get("app_password")
@@ -29,7 +34,7 @@ def _password_ok(p: str) -> bool:
 if "auth_ok" not in st.session_state:
     st.session_state["auth_ok"] = False
 
-cols = st.columns([1,4])
+cols = st.columns([1, 4])
 with cols[0]:
     try:
         st.image(LOGO_PATH, use_container_width=True)
@@ -37,6 +42,7 @@ with cols[0]:
         pass
 with cols[1]:
     st.markdown("# Indicadores (día actual y día anterior)")
+
 st.markdown("---")
 
 if not st.session_state["auth_ok"]:
@@ -52,7 +58,9 @@ if not st.session_state["auth_ok"]:
                 st.error("Password incorrecto")
     st.stop()
 
-# ---------------- Fechas ----------------
+# ======================
+# Utilidades de fecha
+# ======================
 def today_cdmx():
     try:
         import pytz
@@ -69,9 +77,11 @@ def business_days_back(n=10, end_date=None):
         if d.weekday() < 5:
             days.append(d)
         d -= timedelta(days=1)
-    return days
+    return days  # descendente
 
-# ---------------- Tokens/Secrets with safe defaults from user ----------------
+# ======================
+# Secrets / Tokens / Flags
+# ======================
 def _get_secret(name: str, default=None):
     v = None
     try:
@@ -82,14 +92,15 @@ def _get_secret(name: str, default=None):
         v = os.environ.get(name) or os.environ.get(name.upper())
     return v if v is not None else default
 
-# Defaults provided by Ariel
+# Defaults provided by Ariel (puedes sobreescribir en secrets/env)
 BANXICO_TOKEN = _get_secret("banxico_token", "677aaedf11d11712aa2ccf73da4d77b6b785474eaeb2e092f6bad31b29de6609")
 INEGI_TOKEN   = _get_secret("inegi_token",   "0146a9ed-b70f-4ea2-8781-744b900c19d1")
 FRED_API_KEY  = _get_secret("fred_api_key",  "b4f11681f441da78103a3706d0dab1cf")
 
-# MONEX fallback: default to "fix" so cells never stay empty
+# MONEX fallback: por defecto activado para no dejar celdas vacías
 MONEX_FALLBACK = (_get_secret("MONEX_FALLBACK", "fix") or "fix").strip().lower()
 def _get_margin_pct():
+    # default 0.20 (%). If you pass "0.3" => 0.3%; "1.5" => 1.5%
     try:
         v = _get_secret("MARGEN_PCT")
         if v is None: 
@@ -98,25 +109,44 @@ def _get_margin_pct():
     except Exception:
         return 0.20
 
-# ---------------- Series SIE ----------------
+# ======================
+# Series SIE (base) + candidatos para TIIE 28/91/182
+# ======================
 SIE_SERIES = {
     "USD_FIX":   "SF43718",
     "EUR_MXN":   "SF46410",
     "JPY_MXN":   "SF46406",
     "UDIS":      "SP68257",
-    "TIIE_28":   "SF60648",
-    "TIIE_91":   "SF60649",
-    "TIIE_182":  "SF60650",
     "CETES_28":  "SF43936",
     "CETES_91":  "SF43939",
     "CETES_182": "SF43942",
     "CETES_364": "SF43945",
     "OBJETIVO":  "SF61745",
+    # TIIE defaults (clásicas)
+    "TIIE_28":   "SF60648",
+    "TIIE_91":   "SF60649",
+    "TIIE_182":  "SF60650",
 }
+
+def _parse_candidates_env(name: str, default_list):
+    raw = _get_secret(name)
+    if raw:
+        return [s.strip() for s in str(raw).split(",") if s.strip()]
+    return default_list
+
+# Candidatos configurables por secrets/env: SERIES_OVERRIDE__TIIE_28, SERIES_OVERRIDE__TIIE_91, SERIES_OVERRIDE__TIIE_182
+SIE_SERIES_CANDIDATES = {
+    "TIIE_28": _parse_candidates_env("SERIES_OVERRIDE__TIIE_28",  [SIE_SERIES["TIIE_28"]]),
+    "TIIE_91": _parse_candidates_env("SERIES_OVERRIDE__TIIE_91",  [SIE_SERIES["TIIE_91"]]),
+    "TIIE_182":_parse_candidates_env("SERIES_OVERRIDE__TIIE_182", [SIE_SERIES["TIIE_182"]]),
+}
+
 def SIE(key: str) -> str:
     return SIE_SERIES[key]
 
-# ---------------- Helpers fetch ----------------
+# ======================
+# Fetchers robustos
+# ======================
 def _has(name: str) -> bool:
     return name in globals()
 
@@ -160,6 +190,25 @@ def _sie_range(series_id: str, start: str, end: str):
     except Exception:
         return []
 
+def _sie_range_first_that_has_data(series_ids, start: str, end: str):
+    """Devuelve (series_id_usada, lista_de_datos) para la primera serie con datos en el rango; si ninguna trae, (None, [])."""
+    for sid in series_ids:
+        datos = _sie_range(sid, start, end)
+        if datos:
+            return sid, datos
+    return None, []
+
+def _to_map_from_obs(obs_list):
+    m = {}
+    for o in obs_list or []:
+        d = _parse_any_date(o.get("fecha")); v = _try_float(o.get("dato"))
+        if d and (v is not None):
+            m[d.date().isoformat()] = v
+    return m
+
+# ======================
+# UMA helpers
+# ======================
 def _safe_get_uma():
     # 1) try user's get_uma
     if _has("get_uma"):
@@ -179,13 +228,12 @@ def _safe_get_uma():
                     return base()
             except Exception:
                 pass
-    # 2) try INEGI page scrape (robust simple regex) as fallback
+    # 2) try INEGI page scrape (simple regex)
     try:
         import requests
         resp = requests.get("https://www.inegi.org.mx/temas/uma/", timeout=20)
         if resp.ok:
             txt = resp.text
-            # find current year line like: 2025, $ 113.14, $ 3,439.46, $ 41,273.52
             y = today_cdmx().year
             m = re.search(rf">{y}<.*?\\$\\s*([0-9]+\\.?[0-9]*)\\s*,\\s*\\$\\s*([0-9,\\.]+)\\s*,\\s*\\$\\s*([0-9,\\.]+)", txt, flags=re.S)
             if m:
@@ -218,17 +266,10 @@ def _safe_get_uma():
     anual   = _sf("uma_anual")
     return {"diario": diario, "mensual": mensual, "anual": anual}
 
-def _safe_rolling_movex(window=None):
-    if _has("rolling_movex_for_last6"):
-        try:
-            return rolling_movex_for_last6(window=window) if window else rolling_movex_for_last6()
-        except Exception:
-            return None
-    return None
-
+# ======================
+# FRED helpers (inflación EUA)
+# ======================
 def _fred_inflation_yoy_map():
-    """Return dict {YYYY-MM: yoy_decimal} using FRED CPIAUCSL monthly YoY.
-       Fills as many months as available. Requires FRED_API_KEY."""
     if not FRED_API_KEY:
         return {}
     import requests
@@ -255,24 +296,25 @@ def _fred_inflation_yoy_map():
         return {}
 
 def _fred_last_sept_oct_yoy():
-    """Return (sep_yoy, oct_yoy) for the latest available September and October <= today."""
     yoy = _fred_inflation_yoy_map()
     if not yoy:
         return (None, None)
-    # collect candidates by month number
-    avail = sorted(yoy.keys())  # YYYY-MM
-    sep_candidates = [k for k in avail if k.endswith("-09") and k <= today_cdmx().strftime("%Y-%m")]
-    oct_candidates = [k for k in avail if k.endswith("-10") and k <= today_cdmx().strftime("%Y-%m")]
+    avail = sorted(yoy.keys())
+    cutoff = today_cdmx().strftime("%Y-%m")
+    sep_candidates = [k for k in avail if k.endswith("-09") and k <= cutoff]
+    oct_candidates = [k for k in avail if k.endswith("-10") and k <= cutoff]
     sep = yoy.get(sep_candidates[-1]) if sep_candidates else None
     octo = yoy.get(oct_candidates[-1]) if oct_candidates else None
     return (sep, octo)
 
-# ---------------- Fechas clave por FIX ----------------
+# ======================
+# Fechas clave por FIX
+# ======================
 def _latest_and_previous_value_dates():
     end = today_cdmx().date()
     lookback = business_days_back(25, end)
     start = lookback[-1].isoformat()
-    obs = _sie_range(SIE("USD_FIX"), start, end.isoformat())
+    obs = _sie_range(SIE_SERIES["USD_FIX"], start, end.isoformat())
     have = []
     for o in obs:
         d = _parse_any_date(o.get("fecha"))
@@ -291,38 +333,52 @@ def _latest_and_previous_value_dates():
     prev = (prevs[-1] if prevs else next(d for d in business_days_back(10, latest) if d < latest))
     return (prev, latest)
 
-# ---------------- Series as-of ----------------
+# ======================
+# Series as-of (con selección automática de TIIE 28/91/182)
+# ======================
 def _series_values_for_dates(d_prev: date, d_latest: date):
+    # rango amplio para garantizar as-of
     start = (d_prev - timedelta(days=450)).isoformat()
     end = d_latest.isoformat()
 
-    def _as_map(series_key):
-        obs = _sie_range(SIE(series_key), start, end)
-        m = {}
-        for o in obs or []:
-            d = _parse_any_date(o.get("fecha")); v = _try_float(o.get("dato"))
-            if d and (v is not None):
-                m[d.date().isoformat()] = v
-        return m
+    used_series = {}  # para diagnóstico: qué ID se usó
+
+    # Series simples (sin candidatos)
+    def _as_map_fixed(series_id):
+        obs = _sie_range(series_id, start, end)
+        return _to_map_from_obs(obs)
+
+    m_fix  = _as_map_fixed(SIE_SERIES["USD_FIX"])
+    m_jpy  = _as_map_fixed(SIE_SERIES["JPY_MXN"])
+    m_eur  = _as_map_fixed(SIE_SERIES["EUR_MXN"])
+    m_udis = _as_map_fixed(SIE_SERIES["UDIS"])
+
+    m_c28  = _as_map_fixed(SIE_SERIES["CETES_28"])
+    m_c91  = _as_map_fixed(SIE_SERIES["CETES_91"])
+    m_c182 = _as_map_fixed(SIE_SERIES["CETES_182"])
+    m_c364 = _as_map_fixed(SIE_SERIES["CETES_364"])
+
+    m_tobj = _as_map_fixed(SIE_SERIES["OBJETIVO"])
+
+    # TIIE con candidatos (probar en orden hasta encontrar datos)
+    def _as_map_candidates(key_logic: str):
+        sids = SIE_SERIES_CANDIDATES[key_logic]
+        sid, obs = _sie_range_first_that_has_data(sids, start, end)
+        if sid:
+            used_series[key_logic] = sid
+        else:
+            used_series[key_logic] = None
+        return _to_map_from_obs(obs)
+
+    m_t28  = _as_map_candidates("TIIE_28")
+    m_t91  = _as_map_candidates("TIIE_91")
+    m_t182 = _as_map_candidates("TIIE_182")
+
+    uma = _safe_get_uma()
 
     def _asof(m, d):
         keys = sorted(k for k in m.keys() if k <= d.isoformat())
         return (m[keys[-1]] if keys else None)
-
-    m_fix  = _as_map("USD_FIX")
-    m_jpy  = _as_map("JPY_MXN")
-    m_eur  = _as_map("EUR_MXN")
-    m_udis = _as_map("UDIS")
-    m_c28  = _as_map("CETES_28")
-    m_c91  = _as_map("CETES_91")
-    m_c182 = _as_map("CETES_182")
-    m_c364 = _as_map("CETES_364")
-    m_t28  = _as_map("TIIE_28")
-    m_t91  = _as_map("TIIE_91")
-    m_t182 = _as_map("TIIE_182")
-    m_tobj = _as_map("OBJETIVO")
-
-    uma = _safe_get_uma()
 
     def _two(m, scale=1.0, rnd=None):
         v_prev   = _asof(m, d_prev)
@@ -347,12 +403,18 @@ def _series_values_for_dates(d_prev: date, d_latest: date):
     t182_prev, t182_latest   = _two(m_t182, scale=100.0)
     tobj_prev, tobj_latest   = _two(m_tobj, scale=100.0)
 
-    # USD/JPY (JPY por USD) = FIX / (MXN por JPY). Usa as-of fallback.
-    usdjpy_prev   = (fix_prev / jpy_prev)    if (fix_prev is not None and jpy_prev is not None)     else None
-    usdjpy_latest = (fix_latest / jpy_latest)if (fix_latest is not None and jpy_latest is not None) else None
+    # USD/JPY (JPY por USD) = FIX / (MXN por JPY).
+    usdjpy_prev   = (fix_prev / jpy_prev)     if (fix_prev is not None and jpy_prev is not None)      else None
+    usdjpy_latest = (fix_latest / jpy_latest) if (fix_latest is not None and jpy_latest is not None)  else None
 
-    # MONEX (si existe) con margen
-    mv = _safe_rolling_movex(globals().get("movex_win"))
+    # MONEX (si existe) con margen o fallback por FIX
+    mv = None
+    if "rolling_movex_for_last6" in globals():
+        try:
+            mv = rolling_movex_for_last6(window=globals().get("movex_win"))
+        except Exception:
+            mv = None
+
     compra_prev = compra_latest = venta_prev = venta_latest = None
     if mv and isinstance(mv, (list, tuple)):
         try:
@@ -365,7 +427,6 @@ def _series_values_for_dates(d_prev: date, d_latest: date):
                 venta_prev,  venta_latest  = venta[-2],  venta[-1]
         except Exception:
             pass
-    # Fallback a partir de FIX si se activó o por defecto
     if MONEX_FALLBACK == "fix":
         mpct = _get_margin_pct()
         if fix_prev is not None and compra_prev is None:
@@ -376,6 +437,9 @@ def _series_values_for_dates(d_prev: date, d_latest: date):
             venta_prev = fix_prev * (1 + mpct/100.0)
         if fix_latest is not None and venta_latest is None:
             venta_latest = fix_latest * (1 + mpct/100.0)
+
+    # Guardar IDs usados para diagnóstico
+    st.session_state["used_series_ids"] = used_series
 
     return {
         "fix": (fix_prev, fix_latest),
@@ -396,13 +460,15 @@ def _series_values_for_dates(d_prev: date, d_latest: date):
         "monex_venta":  (venta_prev,  venta_latest),
     }
 
-# ---------------- Writer ----------------
+# ======================
+# Writer 2 columnas: respeta plantilla + formatos
+# ======================
 def write_two_col_template(template_path: str, out_path: str, d_prev: date, d_latest: date, values: dict):
     from openpyxl import load_workbook
     wb = load_workbook(template_path)
     ws = wb.active
 
-    # Encabezados con formato dd/mm/aaaa
+    # Encabezados C2 (anterior) y D2 (hoy) con formato dd/mm/aaaa
     ws["C2"].value = d_prev
     ws["D2"].value = today_cdmx().date()
     ws["C2"].number_format = "dd/mm/yyyy"
@@ -488,14 +554,11 @@ def write_two_col_template(template_path: str, out_path: str, d_prev: date, d_la
             return None
 
     try:
-        # Try FRED for latest available Sep/Oct up to today
         sep_yoy, oct_yoy = _fred_last_sept_oct_yoy()
-        if sep_yoy is None or oct_yoy is None:
-            # fallback from secrets
-            if sep_yoy is None:
-                sep_yoy = _as_pct_decimal(_get_secret("us_inflation_sep"))
-            if oct_yoy is None:
-                oct_yoy = _as_pct_decimal(_get_secret("us_inflation_oct"))
+        if sep_yoy is None:
+            sep_yoy = _as_pct_decimal(_get_secret("us_inflation_sep"))
+        if oct_yoy is None:
+            oct_yoy = _as_pct_decimal(_get_secret("us_inflation_oct"))
         ws["B42"] = sep_yoy
         ws["B41"] = oct_yoy
         ws["B41"].number_format = "0.00%"
@@ -505,7 +568,9 @@ def write_two_col_template(template_path: str, out_path: str, d_prev: date, d_la
 
     wb.save(out_path)
 
-# ---------------- Exportador / UI ----------------
+# ======================
+# Exportador
+# ======================
 def export_indicadores_2col_bytes():
     d_prev, d_latest = _latest_and_previous_value_dates()
     vals = _series_values_for_dates(d_prev, d_latest)
@@ -519,17 +584,24 @@ def export_indicadores_2col_bytes():
         pass
     return content, d_prev, d_latest
 
+# ======================
+# UI
+# ======================
 with st.expander("Diagnóstico / Fechas y tokens", expanded=False):
     d_prev, d_latest = _latest_and_previous_value_dates()
+    used = st.session_state.get("used_series_ids", {})
     st.write({
         "dia_anterior (C2)": d_prev.strftime("%d/%m/%Y"),
         "dia_actual (D2)": today_cdmx().strftime("%d/%m/%Y"),
-        "ultimo_con_valor (por FIX)": d_latest.strftime("%d/%m/%Y"),
-        "banxico_token": bool(BANXICO_TOKEN),
-        "inegi_token": bool(INEGI_TOKEN),
-        "fred_api_key": bool(FRED_API_KEY),
+        "banxico_token_detectado": bool(BANXICO_TOKEN),
+        "inegi_token_detectado": bool(INEGI_TOKEN),
+        "fred_api_key_detectada": bool(FRED_API_KEY),
         "monex_fallback": MONEX_FALLBACK,
         "margen_pct": _get_margin_pct(),
+        "TIIE_28_series_usada": used.get("TIIE_28"),
+        "TIIE_91_series_usada": used.get("TIIE_91"),
+        "TIIE_182_series_usada": used.get("TIIE_182"),
+        "caveat": "Si alguno es None, agrega SERIES_OVERRIDE__TIIE_xx con los IDs correctos (coma-separados).",
     })
 
 if "xlsx_bytes" not in st.session_state:
