@@ -1,25 +1,16 @@
 
 import os
-import io
-import json
-import math
-import time
 import tempfile
 from datetime import datetime, timedelta, date
 from pathlib import Path
-
 import streamlit as st
 
-# ======================
-# Config / Branding
-# ======================
 st.set_page_config(page_title="Indicadores IMEMSA", layout="wide")
-LOGO_PATH = str((Path(__file__).parent / "logo.png").resolve())
-TEMPLATE_PATH = str((Path(__file__).parent / "Indicadores_template_2col.xlsx").resolve())  # Usa el nuevo archivo (renómbralo así)
 
-# ======================
-# Password (opcional)
-# ======================
+LOGO_PATH = str((Path(__file__).parent / "logo.png").resolve())
+TEMPLATE_PATH = str((Path(__file__).parent / "Indicadores_template_2col.xlsx").resolve())
+
+# Password
 APP_PASSWORD = None
 try:
     APP_PASSWORD = st.secrets.get("app_password")
@@ -44,7 +35,6 @@ with cols[0]:
         pass
 with cols[1]:
     st.markdown("# Indicadores (día actual y día anterior)")
-
 st.markdown("---")
 
 if not st.session_state["auth_ok"]:
@@ -60,9 +50,6 @@ if not st.session_state["auth_ok"]:
                 st.error("Password incorrecto")
     st.stop()
 
-# ======================
-# Utilidades fecha
-# ======================
 def today_cdmx():
     try:
         import pytz
@@ -79,11 +66,21 @@ def business_days_back(n=10, end_date=None):
         if d.weekday() < 5:
             days.append(d)
         d -= timedelta(days=1)
-    return days  # en orden descendente
+    return days
 
-# ======================
-# Helpers robustos
-# ======================
+def _get_secret(name: str):
+    v = None
+    try:
+        v = st.secrets.get(name)
+    except Exception:
+        v = None
+    if not v:
+        v = os.environ.get(name.upper())
+    return v
+
+BANXICO_TOKEN = _get_secret("banxico_token") or _get_secret("BANXICO_TOKEN")
+INEGI_TOKEN   = _get_secret("inegi_token")   or _get_secret("INEGI_TOKEN")
+
 def _has(name: str) -> bool:
     return name in globals()
 
@@ -111,13 +108,7 @@ def _sie_range(series_id: str, start: str, end: str):
             return sie_range(series_id, start, end)
         except Exception:
             pass
-    token = None
-    try:
-        token = st.secrets.get("banxico_token")
-    except Exception:
-        token = None
-    if not token:
-        token = os.environ.get("BANXICO_TOKEN")
+    token = BANXICO_TOKEN
     if not token:
         return []
     import requests
@@ -147,6 +138,7 @@ DEFAULT_SIE_SERIES = {
     "TIIE_182":  "SF60640",
     "OBJETIVO": "SF61745",
 }
+
 def SIE(id_key: str) -> str:
     if _has("SIE_SERIES"):
         try:
@@ -164,6 +156,7 @@ def _safe_get_uma():
                 return getattr(get_uma, "__wrapped__", get_uma)()
             except Exception:
                 pass
+    # Fallback vacío si no hay token/función (ajustar si pasas indicador INEGI)
     return {"diario": None, "mensual": None, "anual": None}
 
 def _safe_rolling_movex(window=None):
@@ -174,14 +167,9 @@ def _safe_rolling_movex(window=None):
             return None
     return None
 
-# ======================
-# Lógica 2 columnas
-# ======================
 def _latest_and_previous_value_dates():
-    """Regresa (prev_date, latest_date) basadas en FIX (<= hoy)."""
     end = today_cdmx().date()
-    # mirar 20 días hábiles hacia atrás
-    lookback = business_days_back(20, end)
+    lookback = business_days_back(25, end)
     start = lookback[-1].isoformat()
     obs = _sie_range(SIE("USD_FIX"), start, end.isoformat())
     have = []
@@ -194,7 +182,6 @@ def _latest_and_previous_value_dates():
                 have.append(dd)
     have = sorted(set(have))
     if not have:
-        # fallback: hoy y hoy-1 hábil
         latest = end
         prev = next(d for d in business_days_back(10, end) if d < end)
         return (prev, latest)
@@ -207,7 +194,6 @@ def _latest_and_previous_value_dates():
     return (prev, latest)
 
 def _series_values_for_dates(d_prev: date, d_latest: date):
-    """Devuelve los valores as-of para ambas fechas (prev y latest)."""
     start = (d_prev - timedelta(days=450)).isoformat()
     end = d_latest.isoformat()
 
@@ -221,7 +207,6 @@ def _series_values_for_dates(d_prev: date, d_latest: date):
         return m
 
     def _asof(m, d):
-        # último <= d
         keys = sorted(k for k in m.keys() if k <= d.isoformat())
         return (m[keys[-1]] if keys else None)
 
@@ -250,7 +235,6 @@ def _series_values_for_dates(d_prev: date, d_latest: date):
             v_latest = (round(v_latest, rnd) if v_latest is not None else None)
         return v_prev, v_latest
 
-    # Nota: TIIE/CETES dividimos entre 100 para formato porcentaje
     fix_prev, fix_latest     = _two(m_fix)
     eur_prev, eur_latest     = _two(m_eur)
     jpy_prev, jpy_latest     = _two(m_jpy)
@@ -264,7 +248,6 @@ def _series_values_for_dates(d_prev: date, d_latest: date):
     t182_prev, t182_latest   = _two(m_t182, scale=100.0)
     tobj_prev, tobj_latest   = _two(m_tobj, scale=100.0)
 
-    # MONEX (si existe) con margen
     mv = _safe_rolling_movex(globals().get("movex_win"))
     try:
         mpct = float(globals().get("margen_pct", 0.20))
@@ -275,7 +258,6 @@ def _series_values_for_dates(d_prev: date, d_latest: date):
         try:
             compra = [(x * (1 - mpct/100.0) if x is not None else None) for x in mv]
             venta  = [(x * (1 + mpct/100.0) if x is not None else None) for x in mv]
-            # Suponemos mv alineado por fecha; tomamos últimos 2
             if len(compra) >= 2:
                 compra_prev, compra_latest = compra[-2], compra[-1]
             if len(venta) >= 2:
@@ -296,80 +278,51 @@ def _series_values_for_dates(d_prev: date, d_latest: date):
         "t91": (t91_prev, t91_latest),
         "t182": (t182_prev, t182_latest),
         "tobj": (tobj_prev, tobj_latest),
-        "uma": _safe_get_uma(),
+        "uma": uma,
         "monex_compra": (compra_prev, compra_latest),
         "monex_venta":  (venta_prev,  venta_latest),
     }
 
-# ======================
-# Writer 2 columnas
-# ======================
 def write_two_col_template(template_path: str, out_path: str, d_prev: date, d_latest: date, values: dict):
-    """
-    Escribe en plantilla 2 columnas:
-      - C2 = d_prev (fecha anterior con valor)
-      - D2 = hoy (fecha generación)
-      - C/D de cada rubro en las filas estándar
-    """
     from openpyxl import load_workbook
-    from openpyxl.utils import get_column_letter
-
     wb = load_workbook(template_path)
     ws = wb.active
 
-    # Encabezados de fechas
     ws["C2"] = d_prev.strftime("%Y-%m-%d")
     ws["D2"] = today_cdmx().strftime("%Y-%m-%d")
 
-    # Mapeo de filas (igual al layout previo)
     rows = {
-        # Dólar: 5=FIX, 6=compra, 7=venta
         "fix":   5,
         "monex_compra": 6,
         "monex_venta":  7,
-        # Yen
         "jpy":   10,
-        # Euro: 14 = EUR/MXN, 15 = EURUSD (cruzado con FIX)
         "eur":   14,
-        # UDIS
         "udis":  18,
-        # TIIE
         "tobj":  21,
         "t28":   22,
         "t91":   23,
         "t182":  24,
-        # CETES
         "c28":   27,
         "c91":   28,
         "c182":  29,
         "c364":  30,
-        # UMA
-        "uma_diario": 33,
-        "uma_mensual":34,
-        "uma_anual":  35,
     }
 
-    def write_pair(key, col_c="C", col_d="D", round_to=None, is_uma=False):
-        if is_uma:
-            prev_v = values["uma"].get("diario") if key=="uma_diario" else values["uma"].get("mensual") if key=="uma_mensual" else values["uma"].get("anual")
-            latest_v = prev_v  # UMA no cambia por fecha en este writer
-        else:
-            pair = values.get(key, (None, None))
-            prev_v, latest_v = pair[0], pair[1]
+    def write_pair(key, round_to=None):
         r = rows[key]
+        v_prev, v_latest = values.get(key, (None, None))
         if round_to is not None:
-            prev_v   = (round(prev_v, round_to)   if prev_v   is not None else None)
-            latest_v = (round(latest_v, round_to) if latest_v is not None else None)
-        ws[f"{col_c}{r}"] = prev_v
-        ws[f"{col_d}{r}"] = latest_v
+            v_prev   = (round(v_prev, round_to)   if v_prev   is not None else None)
+            v_latest = (round(v_latest, round_to) if v_latest is not None else None)
+        ws[f"C{r}"] = v_prev
+        ws[f"D{r}"] = v_latest
 
-    # Escribir pares
     write_pair("fix")
     write_pair("monex_compra")
     write_pair("monex_venta")
     write_pair("jpy")
     write_pair("eur")
-    # EURUSD cruzado en 15: calculamos aquí
+
     try:
         eur_prev, eur_latest = values.get("eur", (None, None))
         fix_prev, fix_latest = values.get("fix", (None, None))
@@ -389,19 +342,17 @@ def write_two_col_template(template_path: str, out_path: str, d_prev: date, d_la
     write_pair("c91")
     write_pair("c182")
     write_pair("c364")
-    # UMA
-    ws["C33"] = values["uma"].get("diario")
-    ws["D33"] = values["uma"].get("diario")
-    ws["C34"] = values["uma"].get("mensual")
-    ws["D34"] = values["uma"].get("mensual")
-    ws["C35"] = values["uma"].get("anual")
-    ws["D35"] = values["uma"].get("anual")
+
+    uma = values.get("uma", {})
+    ws["C33"] = uma.get("diario")
+    ws["D33"] = uma.get("diario")
+    ws["C34"] = uma.get("mensual")
+    ws["D34"] = uma.get("mensual")
+    ws["C35"] = uma.get("anual")
+    ws["D35"] = uma.get("anual")
 
     wb.save(out_path)
 
-# ======================
-# Exportador
-# ======================
 def export_indicadores_2col_bytes():
     d_prev, d_latest = _latest_and_previous_value_dates()
     vals = _series_values_for_dates(d_prev, d_latest)
@@ -415,12 +366,14 @@ def export_indicadores_2col_bytes():
         pass
     return content, d_prev, d_latest
 
-# ======================
-# UI
-# ======================
-with st.expander("Fechas elegidas", expanded=False):
+with st.expander("Diagnóstico / Fechas elegidas", expanded=False):
     d_prev, d_latest = _latest_and_previous_value_dates()
-    st.write({"dia_anterior": d_prev.strftime("%Y-%m-%d"), "dia_actual": today_cdmx().strftime("%Y-%m-%d"), "ultimo_con_valor": d_latest.strftime("%Y-%m-%d")})
+    st.write({
+        "dia_anterior (C2)": d_prev.strftime("%Y-%m-%d"),
+        "dia_actual (D2)": today_cdmx().strftime("%Y-%m-%d"),
+        "ultimo_con_valor": d_latest.strftime("%Y-%m-%d"),
+        "banxico_token": bool(BANXICO_TOKEN),
+    })
 
 if "xlsx_bytes" not in st.session_state:
     st.session_state["xlsx_bytes"] = None
