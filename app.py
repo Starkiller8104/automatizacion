@@ -97,6 +97,33 @@ if not st.session_state["auth_ok"]:
 
 # ======================
 # Utilidades de fecha
+# --- Encabezados efectivos (respeta corte 12:00 CDMX) ---
+def _prev_business_day(base: date) -> date:
+    d = base - timedelta(days=1)
+    while d.weekday() >= 5:  # 5=Sat,6=Sun
+        d -= timedelta(days=1)
+    return d
+
+def header_dates_effective():
+    """
+    Devuelve (d_prev, d_latest) usando corte de las 12:00 en CDMX.
+    - d_latest: hoy si hora>=12:00; de lo contrario el día hábil previo
+    - d_prev:   el día hábil inmediatamente anterior a d_latest
+    """
+    now = today_cdmx()
+    # Definir d_latest con corte de mediodía:
+    if now.hour >= 12:
+        d_latest = now.date()
+        # Si hoy es fin de semana, retrocede al hábil previo
+        while d_latest.weekday() >= 5:
+            d_latest -= timedelta(days=1)
+    else:
+        # Antes de mediodía -> usar día hábil anterior
+        d_latest = _prev_business_day(now.date())
+    # d_prev = hábil anterior a d_latest
+    d_prev = _prev_business_day(d_latest)
+    return d_prev, d_latest
+
 # ======================
 def today_cdmx():
     try:
@@ -322,23 +349,9 @@ def _fred_last_sept_oct_yoy():
 # Fechas clave por FIX
 # ======================
 def _latest_and_previous_value_dates():
-    end = today_cdmx().date()
-    lookback = business_days_back(25, end)
-    start = lookback[-1].isoformat()
-    obs = _sie_range(SIE_SERIES["USD_FIX"], start, end.isoformat())
-    have = []
-    for o in obs:
-        d = _parse_any_date(o.get("fecha"))
-        v = _try_float(o.get("dato"))
-        if d and (v is not None):
-            dd = d.date()
-            if dd <= end:
-                have.append(dd)
-    have = sorted(set(have))
-    if not have:
-        latest = end
-        prev = next(d for d in business_days_back(10, end) if d < end)
-        return (prev, latest)
+    # Fechas de encabezado efectivas (independientes de disponibilidad de FIX)
+    return header_dates_effective()
+
     latest = have[-1]
     prevs = [d for d in have if d < latest]
     prev = (prevs[-1] if prevs else next(d for d in business_days_back(10, latest) if d < latest))
@@ -550,7 +563,7 @@ def write_two_col_template(template_path: str, out_path: str, d_prev: date, d_la
 
     # Fechas
     ws["C2"].value = d_prev
-    ws["D2"].value = today_cdmx().date()
+    ws["D2"].value = d_latest
     ws["C2"].number_format = "dd/mm/yyyy"
     ws["D2"].number_format = "dd/mm/yyyy"
 
