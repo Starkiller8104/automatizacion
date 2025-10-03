@@ -32,13 +32,11 @@ class _Progress:
     def inc(self, delta, text=None):
         self.set(self.value + delta, text=text)
 
-
 # ======================
 # Config / Branding
 # ======================
 st.set_page_config(page_title="Indicadores IMEMSA", layout="wide")
 
-# Optional clean UI (toggle with HIDE_DEFAULT_UI; default=on)
 def _get_secret_env(key, default=None):
     try:
         v = st.secrets.get(key)
@@ -48,6 +46,7 @@ def _get_secret_env(key, default=None):
         v = os.environ.get(key) or os.environ.get(key.upper())
     return v if v is not None else default
 
+# Optional clean UI (toggle with HIDE_DEFAULT_UI; default=on)
 if str((_get_secret_env("HIDE_DEFAULT_UI", "1"))).strip().lower() in ("1","true","yes","on"):
     st.markdown(
         "<style>#MainMenu{visibility:hidden;} footer{visibility:hidden;} header{visibility:hidden;}</style>",
@@ -354,13 +353,13 @@ def _series_values_for_dates(d_prev: date, d_latest: date, prog: _Progress | Non
 
     used_series = {}
 
-# progress planning: fetch series ~60% of total (we'll allocate here); if provided, we distribute across 10 ops
-if prog:
-    base_fetch = 5  # we assume outer already set ~5% after dates
-    fetch_span = 60
-    ops_total = 10  # FIX, JPY, EUR, UDIS, CETES(4), OBJETIVO
-    step = fetch_span / ops_total
-
+    # Progreso: distribuir ~60% en fetchs
+    if prog is not None:
+        fetch_span = 60.0
+        ops_total = 10.0  # FIX, JPY, EUR, UDIS, CETES*4, OBJETIVO
+        step = fetch_span / ops_total
+    else:
+        step = 0.0
 
     def _as_map_fixed(series_id):
         obs = _sie_range(series_id, start, end)
@@ -401,6 +400,7 @@ if prog:
     m_t28  = _as_map_candidates("TIIE_28")
     if prog: prog.inc(step, "Banxico SIE: TIIE 91")
     m_t91  = _as_map_candidates("TIIE_91")
+
     # TIIE 182 fija (%)
     def _get_fixed_tiie182():
         default_pct = "7.9871"
@@ -414,6 +414,7 @@ if prog:
     t182_prev = fixed_dec
     t182_latest = fixed_dec
     used_series["TIIE_182"] = f"fixed:{fixed_pct}%"
+
     uma = _safe_get_uma()
 
     def _asof(m, d):
@@ -494,7 +495,7 @@ if prog:
         "t91": (t91_prev, t91_latest),
         "t182": (t182_prev, t182_latest),
         "tobj": (tobj_prev, tobj_latest),
-        "uma": _safe_get_uma(),
+        "uma": uma,
         "usdjpy": (usdjpy_prev, usdjpy_latest),
         "monex_compra": (compra_prev, compra_latest),
         "monex_venta":  (venta_prev,  venta_latest),
@@ -543,8 +544,8 @@ def write_two_col_template(template_path: str, out_path: str, d_prev: date, d_la
     from openpyxl import load_workbook
     from openpyxl.styles import Font, Alignment, PatternFill
     wb = load_workbook(template_path)
-if prog: prog.set(65, "Escribiendo hoja principal…")
-
+    if prog:
+        prog.set(65, "Escribiendo hoja principal…")
     ws = wb.active
 
     # Fechas
@@ -639,13 +640,15 @@ if prog: prog.set(65, "Escribiendo hoja principal…")
     except Exception:
         pass
 
-    if prog: prog.set(82, "Aplicando limpieza/formatos…")
+    if prog:
+        prog.set(82, "Aplicando limpieza/formatos…")
     # Eliminar hojas no deseadas si existen
     for sheet_name in ["Lógica de datos", "Metadatos"]:
         if sheet_name in wb.sheetnames:
             del wb[sheet_name]
 
-    if prog: prog.set(86, "Generando hoja RSS…")
+    if prog:
+        prog.set(86, "Generando hoja RSS…")
     # Hoja RSS con estilo Arial 12 y sin grid
     news_ws = wb.create_sheet("Noticias Financieras RSS")
     header = ["Fuente", "Título", "Fecha (CDMX)", "Link"]
@@ -674,7 +677,8 @@ if prog: prog.set(65, "Escribiendo hoja principal…")
             return None
 
     for idx_feed, (fuente, url) in enumerate(RSS_FEEDS, start=1):
-        if prog: prog.inc( (12/ max(1,len(RSS_FEEDS))), f"RSS: {fuente}")
+        if prog:
+            prog.inc(12.0 / max(1, len(RSS_FEEDS)), f"RSS: {fuente}")
         items = fetch_rss_items(url, max_items=12)
         for it in items:
             title = it.get("title") or ""
@@ -698,6 +702,7 @@ if prog: prog.set(65, "Escribiendo hoja principal…")
             cell = news_ws.cell(row=r, column=c)
             if r == 1:
                 cell.font = Font(name="Arial", size=12, bold=True, color="FFFFFF")
+                cell.alignment = Alignment(vertical="center")
             else:
                 if cell.hyperlink:
                     cell.font = Font(name="Arial", size=12, color="0563C1")
@@ -716,7 +721,6 @@ if prog: prog.set(65, "Escribiendo hoja principal…")
     # Fechas con formato
     for r in range(2, max_r+1):
         c3 = news_ws.cell(row=r, column=3)
-        from openpyxl.styles import Alignment
         if isinstance(c3.value, datetime):
             c3.number_format = "dd/mm/yyyy HH:MM"
             c3.alignment = Alignment(vertical="top")
@@ -730,16 +734,18 @@ if prog: prog.set(65, "Escribiendo hoja principal…")
     news_ws.freeze_panes = "A2"
 
     wb.save(out_path)
-    if prog: prog.set(100, "Archivo listo.")
+    if prog:
+        prog.set(100, "Archivo listo.")
 
 # ======================
-# Exportador
+# Exportador (no usado por el botón, lo dejo por compatibilidad)
 # ======================
 def export_indicadores_2col_bytes():
     d_prev, d_latest = _latest_and_previous_value_dates()
-    vals = _series_values_for_dates(d_prev, d_latest, prog)
-    tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".xlsx"); tmp.close()
-    write_two_col_template(TEMPLATE_PATH, tmp.name, d_prev, d_latest, vals, prog)
+    vals = _series_values_for_dates(d_prev, d_latest)
+    tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".xlsx")
+    tmp.close()
+    write_two_col_template(TEMPLATE_PATH, tmp.name, d_prev, d_latest, vals)
     with open(tmp.name, "rb") as f:
         content = f.read()
     try:
@@ -780,26 +786,14 @@ if "xlsx_bytes" not in st.session_state:
 _progress_placeholder = st.empty()
 
 if st.button("Generar Excel"):
-    try:
-        prog = _Progress(_progress_placeholder)
+    prog = _Progress(_progress_placeholder)
     prog.set(5, "Preparando fechas…")
-    except TypeError:
-        # Compatibilidad con versiones antiguas de Streamlit sin argumento 'text'
-        progress = _progress_placeholder.progress(0)
-    # Paso 1: Fechas
     d_prev, d_latest = _latest_and_previous_value_dates()
-    try:
-        prog.set(10, "Preparando consultas…")
-    except TypeError:
-        progress.progress(25)
-    # Paso 2: Series
+    prog.set(10, "Preparando consultas…")
     vals = _series_values_for_dates(d_prev, d_latest, prog)
-    try:
-        prog.set(64, "Construyendo archivo…")
-    except TypeError:
-        progress.progress(70)
-    # Paso 3: Escribir Excel
-    tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".xlsx"); tmp.close()
+    prog.set(64, "Construyendo archivo…")
+    tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".xlsx")
+    tmp.close()
     write_two_col_template(TEMPLATE_PATH, tmp.name, d_prev, d_latest, vals, prog)
     with open(tmp.name, "rb") as f:
         st.session_state["xlsx_bytes"] = f.read()
@@ -807,10 +801,7 @@ if st.button("Generar Excel"):
         os.unlink(tmp.name)
     except Exception:
         pass
-    try:
-        prog.set(100, "Listo. Descarga abajo.")
-    except TypeError:
-        progress.progress(100)
+    prog.set(100, "Listo. Descarga abajo.")
     st.success("Listo. Descarga abajo.")
 
 st.download_button(
