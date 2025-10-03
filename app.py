@@ -1,16 +1,21 @@
 
 import os
+import inspect
 import tempfile
 from datetime import datetime, timedelta, date
 from pathlib import Path
 import streamlit as st
 
+# ======================
+# Config / Branding
+# ======================
 st.set_page_config(page_title="Indicadores IMEMSA", layout="wide")
-
 LOGO_PATH = str((Path(__file__).parent / "logo.png").resolve())
-TEMPLATE_PATH = str((Path(__file__).parent / "Indicadores_template_2col.xlsx").resolve())
+TEMPLATE_PATH = str((Path(__file__).parent / "Indicadores_template_2col.xlsx").resolve())  # usa tu nuevo archivo
 
-# Password
+# ======================
+# Password (opcional)
+# ======================
 APP_PASSWORD = None
 try:
     APP_PASSWORD = st.secrets.get("app_password")
@@ -35,6 +40,7 @@ with cols[0]:
         pass
 with cols[1]:
     st.markdown("# Indicadores (día actual y día anterior)")
+
 st.markdown("---")
 
 if not st.session_state["auth_ok"]:
@@ -50,6 +56,9 @@ if not st.session_state["auth_ok"]:
                 st.error("Password incorrecto")
     st.stop()
 
+# ======================
+# Utilidades fecha
+# ======================
 def today_cdmx():
     try:
         import pytz
@@ -66,8 +75,11 @@ def business_days_back(n=10, end_date=None):
         if d.weekday() < 5:
             days.append(d)
         d -= timedelta(days=1)
-    return days
+    return days  # descendente
 
+# ======================
+# Tokens (compatibles con app anterior)
+# ======================
 def _get_secret(name: str):
     v = None
     try:
@@ -75,12 +87,37 @@ def _get_secret(name: str):
     except Exception:
         v = None
     if not v:
-        v = os.environ.get(name.upper())
+        v = os.environ.get(name) or os.environ.get(name.upper())
     return v
 
-BANXICO_TOKEN = _get_secret("banxico_token") or _get_secret("BANXICO_TOKEN")
-INEGI_TOKEN   = _get_secret("inegi_token")   or _get_secret("INEGI_TOKEN")
+# Si el repo define variables BANXICO_TOKEN / INEGI_TOKEN en algún módulo importado, usará esas también
+BANXICO_TOKEN = globals().get("BANXICO_TOKEN") or _get_secret("banxico_token") or _get_secret("BANXICO_TOKEN")
+INEGI_TOKEN   = globals().get("INEGI_TOKEN")   or _get_secret("inegi_token")   or _get_secret("INEGI_TOKEN")
 
+# ======================
+# Series SIE (tomamos las del repo anterior y añadimos OBJETIVO por si faltó)
+# ======================
+SIE_SERIES = {
+    "USD_FIX":   "SF43718",
+    "EUR_MXN":   "SF46410",
+    "JPY_MXN":   "SF46406",
+    "UDIS":      "SP68257",
+    "TIIE_28":   "SF60648",
+    "TIIE_91":   "SF60649",
+    "TIIE_182":  "SF60650",
+    "CETES_28":  "SF43936",
+    "CETES_91":  "SF43939",
+    "CETES_182": "SF43942",
+    "CETES_364": "SF43945",
+}
+SIE_SERIES.setdefault("OBJETIVO", "SF61745")
+
+def SIE(key: str) -> str:
+    return SIE_SERIES[key]
+
+# ======================
+# Fetchers (compatibles con app anterior)
+# ======================
 def _has(name: str) -> bool:
     return name in globals()
 
@@ -103,11 +140,13 @@ def _try_float(x):
         return None
 
 def _sie_range(series_id: str, start: str, end: str):
+    # Usa sie_range del repo si existe
     if _has("sie_range"):
         try:
             return sie_range(series_id, start, end)
         except Exception:
             pass
+    # Fallback a API SIE con token (Banxico)
     token = BANXICO_TOKEN
     if not token:
         return []
@@ -124,39 +163,26 @@ def _sie_range(series_id: str, start: str, end: str):
     except Exception:
         return []
 
-DEFAULT_SIE_SERIES = {
-    "USD_FIX": "SF43718",
-    "EUR_MXN": "SE17927",
-    "JPY_MXN": "SE163190",
-    "UDIS":    "SP68257",
-    "CETES_28":  "SF60653",
-    "CETES_91":  "SF60654",
-    "CETES_182": "SF60655",
-    "CETES_364": "SF60656",
-    "TIIE_28":   "SF60634",
-    "TIIE_91":   "SF60639",
-    "TIIE_182":  "SF60640",
-    "OBJETIVO": "SF61745",
-}
-
-def SIE(id_key: str) -> str:
-    if _has("SIE_SERIES"):
-        try:
-            return SIE_SERIES[id_key]
-        except Exception:
-            pass
-    return DEFAULT_SIE_SERIES[id_key]
-
 def _safe_get_uma():
+    # Si tu repo define get_uma(inegi_token, ...)
     if _has("get_uma"):
         try:
-            return get_uma()
+            sig = inspect.signature(get_uma)
+            if len(sig.parameters) >= 1:
+                return get_uma(INEGI_TOKEN)
+            else:
+                return get_uma()
         except Exception:
             try:
-                return getattr(get_uma, "__wrapped__", get_uma)()
+                base = getattr(get_uma, "__wrapped__", get_uma)
+                sig = inspect.signature(base)
+                if len(sig.parameters) >= 1:
+                    return base(INEGI_TOKEN)
+                else:
+                    return base()
             except Exception:
                 pass
-    # Fallback vacío si no hay token/función (ajustar si pasas indicador INEGI)
+    # Fallback sin romper formato
     return {"diario": None, "mensual": None, "anual": None}
 
 def _safe_rolling_movex(window=None):
@@ -167,6 +193,9 @@ def _safe_rolling_movex(window=None):
             return None
     return None
 
+# ======================
+# Cálculo de fechas prev/latest (por FIX)
+# ======================
 def _latest_and_previous_value_dates():
     end = today_cdmx().date()
     lookback = business_days_back(25, end)
@@ -187,12 +216,12 @@ def _latest_and_previous_value_dates():
         return (prev, latest)
     latest = have[-1]
     prevs = [d for d in have if d < latest]
-    if prevs:
-        prev = prevs[-1]
-    else:
-        prev = next(d for d in business_days_back(10, latest) if d < latest)
+    prev = (prevs[-1] if prevs else next(d for d in business_days_back(10, latest) if d < latest))
     return (prev, latest)
 
+# ======================
+# Lectura as-of para ambas fechas
+# ======================
 def _series_values_for_dates(d_prev: date, d_latest: date):
     start = (d_prev - timedelta(days=450)).isoformat()
     end = d_latest.isoformat()
@@ -248,6 +277,7 @@ def _series_values_for_dates(d_prev: date, d_latest: date):
     t182_prev, t182_latest   = _two(m_t182, scale=100.0)
     tobj_prev, tobj_latest   = _two(m_tobj, scale=100.0)
 
+    # MONEX (si existe) con margen
     mv = _safe_rolling_movex(globals().get("movex_win"))
     try:
         mpct = float(globals().get("margen_pct", 0.20))
@@ -283,13 +313,21 @@ def _series_values_for_dates(d_prev: date, d_latest: date):
         "monex_venta":  (venta_prev,  venta_latest),
     }
 
+# ======================
+# Writer 2 columnas (respeta plantilla + formatos)
+# ======================
 def write_two_col_template(template_path: str, out_path: str, d_prev: date, d_latest: date, values: dict):
     from openpyxl import load_workbook
+    from openpyxl.styles import numbers
+
     wb = load_workbook(template_path)
     ws = wb.active
 
-    ws["C2"] = d_prev.strftime("%Y-%m-%d")
-    ws["D2"] = today_cdmx().strftime("%Y-%m-%d")
+    # Encabezados C2 (anterior) y D2 (hoy) en formato dd/mm/aaaa
+    ws["C2"].value = d_prev
+    ws["D2"].value = today_cdmx().date()
+    ws["C2"].number_format = "dd/mm/yyyy"
+    ws["D2"].number_format = "dd/mm/yyyy"
 
     rows = {
         "fix":   5,
@@ -297,6 +335,7 @@ def write_two_col_template(template_path: str, out_path: str, d_prev: date, d_la
         "monex_venta":  7,
         "jpy":   10,
         "eur":   14,
+        # fila 15 = EURUSD (se calcula abajo con 4 dec)
         "udis":  18,
         "tobj":  21,
         "t28":   22,
@@ -323,11 +362,12 @@ def write_two_col_template(template_path: str, out_path: str, d_prev: date, d_la
     write_pair("jpy")
     write_pair("eur")
 
+    # EURUSD en fila 15, con 4 decimales
     try:
         eur_prev, eur_latest = values.get("eur", (None, None))
         fix_prev, fix_latest = values.get("fix", (None, None))
-        v_prev   = (eur_prev  / fix_prev)  if (eur_prev  and fix_prev)  else None
-        v_latest = (eur_latest/ fix_latest)if (eur_latest and fix_latest) else None
+        v_prev   = (eur_prev  / fix_prev)   if (eur_prev  and fix_prev)  else None
+        v_latest = (eur_latest/ fix_latest) if (eur_latest and fix_latest) else None
     except Exception:
         v_prev = v_latest = None
     ws["C15"] = (round(v_prev, 4) if v_prev is not None else None)
@@ -343,16 +383,17 @@ def write_two_col_template(template_path: str, out_path: str, d_prev: date, d_la
     write_pair("c182")
     write_pair("c364")
 
+    # UMA: SOLO columna B (B33/B34/B35)
     uma = values.get("uma", {})
-    ws["C33"] = uma.get("diario")
-    ws["D33"] = uma.get("diario")
-    ws["C34"] = uma.get("mensual")
-    ws["D34"] = uma.get("mensual")
-    ws["C35"] = uma.get("anual")
-    ws["D35"] = uma.get("anual")
+    ws["B33"] = uma.get("diario")
+    ws["B34"] = uma.get("mensual")
+    ws["B35"] = uma.get("anual")
 
     wb.save(out_path)
 
+# ======================
+# Exportador
+# ======================
 def export_indicadores_2col_bytes():
     d_prev, d_latest = _latest_and_previous_value_dates()
     vals = _series_values_for_dates(d_prev, d_latest)
@@ -366,13 +407,17 @@ def export_indicadores_2col_bytes():
         pass
     return content, d_prev, d_latest
 
-with st.expander("Diagnóstico / Fechas elegidas", expanded=False):
+# ======================
+# UI
+# ======================
+with st.expander("Diagnóstico / Fechas y tokens", expanded=False):
     d_prev, d_latest = _latest_and_previous_value_dates()
     st.write({
-        "dia_anterior (C2)": d_prev.strftime("%Y-%m-%d"),
-        "dia_actual (D2)": today_cdmx().strftime("%Y-%m-%d"),
-        "ultimo_con_valor": d_latest.strftime("%Y-%m-%d"),
+        "dia_anterior (C2)": d_prev.strftime("%d/%m/%Y"),
+        "dia_actual (D2)": today_cdmx().strftime("%d/%m/%Y"),
+        "ultimo_con_valor (por FIX)": d_latest.strftime("%d/%m/%Y"),
         "banxico_token": bool(BANXICO_TOKEN),
+        "inegi_token": bool(INEGI_TOKEN),
     })
 
 if "xlsx_bytes" not in st.session_state:
@@ -381,7 +426,7 @@ if "xlsx_bytes" not in st.session_state:
 col1, col2 = st.columns([1,1])
 with col1:
     if st.button("Generar Excel (2 columnas)"):
-        with st.spinner("Generando desde la plantilla 2 columnas..."):
+        with st.spinner("Generando desde plantilla 2 columnas..."):
             bytes_, d_prev, d_latest = export_indicadores_2col_bytes()
             st.session_state["xlsx_bytes"] = bytes_
         st.success("Listo. Descarga abajo.")
