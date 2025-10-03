@@ -4,6 +4,7 @@ import inspect
 import tempfile
 from datetime import datetime, timedelta, date
 from pathlib import Path
+
 import streamlit as st
 
 # ======================
@@ -11,7 +12,7 @@ import streamlit as st
 # ======================
 st.set_page_config(page_title="Indicadores IMEMSA", layout="wide")
 LOGO_PATH = str((Path(__file__).parent / "logo.png").resolve())
-TEMPLATE_PATH = str((Path(__file__).parent / "Indicadores_template_2col.xlsx").resolve())  # usa tu nuevo archivo
+TEMPLATE_PATH = str((Path(__file__).parent / "Indicadores_template_2col.xlsx").resolve())  # coloca tu nueva plantilla con este nombre
 
 # ======================
 # Password (opcional)
@@ -57,7 +58,7 @@ if not st.session_state["auth_ok"]:
     st.stop()
 
 # ======================
-# Utilidades fecha
+# Utilidades de fecha
 # ======================
 def today_cdmx():
     try:
@@ -78,7 +79,7 @@ def business_days_back(n=10, end_date=None):
     return days  # descendente
 
 # ======================
-# Tokens (compatibles con app anterior)
+# Secrets / Tokens (Banxico e INEGI)
 # ======================
 def _get_secret(name: str):
     v = None
@@ -90,12 +91,11 @@ def _get_secret(name: str):
         v = os.environ.get(name) or os.environ.get(name.upper())
     return v
 
-# Si el repo define variables BANXICO_TOKEN / INEGI_TOKEN en algún módulo importado, usará esas también
 BANXICO_TOKEN = globals().get("BANXICO_TOKEN") or _get_secret("banxico_token") or _get_secret("BANXICO_TOKEN")
 INEGI_TOKEN   = globals().get("INEGI_TOKEN")   or _get_secret("inegi_token")   or _get_secret("INEGI_TOKEN")
 
 # ======================
-# Series SIE (tomamos las del repo anterior y añadimos OBJETIVO por si faltó)
+# Series SIE (basado en tu app anterior) + OBJETIVO
 # ======================
 SIE_SERIES = {
     "USD_FIX":   "SF43718",
@@ -116,7 +116,7 @@ def SIE(key: str) -> str:
     return SIE_SERIES[key]
 
 # ======================
-# Fetchers (compatibles con app anterior)
+# Fetchers robustos
 # ======================
 def _has(name: str) -> bool:
     return name in globals()
@@ -164,7 +164,7 @@ def _sie_range(series_id: str, start: str, end: str):
         return []
 
 def _safe_get_uma():
-    # Si tu repo define get_uma(inegi_token, ...)
+    # Si tu repo define get_uma(inegi_token, ...), lo usamos
     if _has("get_uma"):
         try:
             sig = inspect.signature(get_uma)
@@ -194,9 +194,11 @@ def _safe_rolling_movex(window=None):
     return None
 
 # ======================
-# Cálculo de fechas prev/latest (por FIX)
+# Cálculo de fechas (por FIX)
 # ======================
 def _latest_and_previous_value_dates():
+    """Regresa (prev, latest) donde latest = último día con valor <= hoy usando FIX,
+    y prev = día inmediatamente anterior con valor."""
     end = today_cdmx().date()
     lookback = business_days_back(25, end)
     start = lookback[-1].isoformat()
@@ -220,7 +222,7 @@ def _latest_and_previous_value_dates():
     return (prev, latest)
 
 # ======================
-# Lectura as-of para ambas fechas
+# Lectura as-of para fechas prev/latest
 # ======================
 def _series_values_for_dates(d_prev: date, d_latest: date):
     start = (d_prev - timedelta(days=450)).isoformat()
@@ -314,16 +316,14 @@ def _series_values_for_dates(d_prev: date, d_latest: date):
     }
 
 # ======================
-# Writer 2 columnas (respeta plantilla + formatos)
+# Writer 2 columnas: respeta plantilla, formatos y reglas UMA
 # ======================
 def write_two_col_template(template_path: str, out_path: str, d_prev: date, d_latest: date, values: dict):
     from openpyxl import load_workbook
-    from openpyxl.styles import numbers
-
     wb = load_workbook(template_path)
     ws = wb.active
 
-    # Encabezados C2 (anterior) y D2 (hoy) en formato dd/mm/aaaa
+    # Encabezados C2 (anterior) y D2 (hoy) con formato dd/mm/aaaa
     ws["C2"].value = d_prev
     ws["D2"].value = today_cdmx().date()
     ws["C2"].number_format = "dd/mm/yyyy"
@@ -416,8 +416,8 @@ with st.expander("Diagnóstico / Fechas y tokens", expanded=False):
         "dia_anterior (C2)": d_prev.strftime("%d/%m/%Y"),
         "dia_actual (D2)": today_cdmx().strftime("%d/%m/%Y"),
         "ultimo_con_valor (por FIX)": d_latest.strftime("%d/%m/%Y"),
-        "banxico_token": bool(BANXICO_TOKEN),
-        "inegi_token": bool(INEGI_TOKEN),
+        "banxico_token_detectado": bool(BANXICO_TOKEN),
+        "inegi_token_detectado": bool(INEGI_TOKEN),
     })
 
 if "xlsx_bytes" not in st.session_state:
