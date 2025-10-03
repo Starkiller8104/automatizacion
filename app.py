@@ -5,19 +5,14 @@ import inspect
 import tempfile
 from datetime import datetime, timedelta, date
 from pathlib import Path
+from xml.etree import ElementTree as ET
 
 import streamlit as st
 
-# ======================
-# Config / Branding
-# ======================
 st.set_page_config(page_title="Indicadores IMEMSA", layout="wide")
 LOGO_PATH = str((Path(__file__).parent / "logo.png").resolve())
 TEMPLATE_PATH = str((Path(__file__).parent / "Indicadores_template_2col.xlsx").resolve())
 
-# ======================
-# Password (opcional)
-# ======================
 APP_PASSWORD = None
 try:
     APP_PASSWORD = st.secrets.get("app_password")
@@ -58,9 +53,6 @@ if not st.session_state["auth_ok"]:
                 st.error("Password incorrecto")
     st.stop()
 
-# ======================
-# Utilidades de fecha
-# ======================
 def today_cdmx():
     try:
         import pytz
@@ -77,11 +69,8 @@ def business_days_back(n=10, end_date=None):
         if d.weekday() < 5:
             days.append(d)
         d -= timedelta(days=1)
-    return days  # descendente
+    return days
 
-# ======================
-# Secrets / Tokens / Flags
-# ======================
 def _get_secret(name: str, default=None):
     v = None
     try:
@@ -92,15 +81,12 @@ def _get_secret(name: str, default=None):
         v = os.environ.get(name) or os.environ.get(name.upper())
     return v if v is not None else default
 
-# Defaults provided by Ariel (puedes sobreescribir en secrets/env)
 BANXICO_TOKEN = _get_secret("banxico_token", "677aaedf11d11712aa2ccf73da4d77b6b785474eaeb2e092f6bad31b29de6609")
 INEGI_TOKEN   = _get_secret("inegi_token",   "0146a9ed-b70f-4ea2-8781-744b900c19d1")
 FRED_API_KEY  = _get_secret("fred_api_key",  "b4f11681f441da78103a3706d0dab1cf")
 
-# MONEX fallback: por defecto activado para no dejar celdas vacías
 MONEX_FALLBACK = (_get_secret("MONEX_FALLBACK", "fix") or "fix").strip().lower()
 def _get_margin_pct():
-    # default 0.20 (%). If you pass "0.3" => 0.3%; "1.5" => 1.5%
     try:
         v = _get_secret("MARGEN_PCT")
         if v is None: 
@@ -109,9 +95,6 @@ def _get_margin_pct():
     except Exception:
         return 0.20
 
-# ======================
-# Series SIE (base) + candidatos para TIIE 28/91/182
-# ======================
 SIE_SERIES = {
     "USD_FIX":   "SF43718",
     "EUR_MXN":   "SF46410",
@@ -122,7 +105,6 @@ SIE_SERIES = {
     "CETES_182": "SF43942",
     "CETES_364": "SF43945",
     "OBJETIVO":  "SF61745",
-    # TIIE defaults (clásicas)
     "TIIE_28":   "SF60648",
     "TIIE_91":   "SF60649",
     "TIIE_182":  "SF60650",
@@ -134,19 +116,12 @@ def _parse_candidates_env(name: str, default_list):
         return [s.strip() for s in str(raw).split(",") if s.strip()]
     return default_list
 
-# Candidatos configurables por secrets/env: SERIES_OVERRIDE__TIIE_28, SERIES_OVERRIDE__TIIE_91, SERIES_OVERRIDE__TIIE_182
 SIE_SERIES_CANDIDATES = {
-    "TIIE_28": _parse_candidates_env("SERIES_OVERRIDE__TIIE_28",  [SIE_SERIES["TIIE_28"]]),
-    "TIIE_91": _parse_candidates_env("SERIES_OVERRIDE__TIIE_91",  [SIE_SERIES["TIIE_91"]]),
-    "TIIE_182":_parse_candidates_env("SERIES_OVERRIDE__TIIE_182", [SIE_SERIES["TIIE_182"]]),
+    "TIIE_28":  _parse_candidates_env("SERIES_OVERRIDE__TIIE_28",  [SIE_SERIES["TIIE_28"]]),
+    "TIIE_91":  _parse_candidates_env("SERIES_OVERRIDE__TIIE_91",  [SIE_SERIES["TIIE_91"]]),
+    "TIIE_182": _parse_candidates_env("SERIES_OVERRIDE__TIIE_182", [SIE_SERIES["TIIE_182"]]),
 }
 
-def SIE(key: str) -> str:
-    return SIE_SERIES[key]
-
-# ======================
-# Fetchers robustos
-# ======================
 def _has(name: str) -> bool:
     return name in globals()
 
@@ -191,7 +166,6 @@ def _sie_range(series_id: str, start: str, end: str):
         return []
 
 def _sie_range_first_that_has_data(series_ids, start: str, end: str):
-    """Devuelve (series_id_usada, lista_de_datos) para la primera serie con datos en el rango; si ninguna trae, (None, [])."""
     for sid in series_ids:
         datos = _sie_range(sid, start, end)
         if datos:
@@ -206,11 +180,27 @@ def _to_map_from_obs(obs_list):
             m[d.date().isoformat()] = v
     return m
 
-# ======================
-# UMA helpers
-# ======================
+def _tiie182_map_from_banxico_html():
+    try:
+        import requests
+        url = "https://www.banxico.org.mx/mercados/tiie-26-semanas-valores-banco.html"
+        r = requests.get(url, timeout=20)
+        if not r.ok:
+            return {}
+        html = r.text
+        rows = re.findall(r"(\\d{2}/\\d{2}/\\d{4}).{0,120}?(\\d{1,2}\\.\\d{2,4})", html, flags=re.S)
+        m = {}
+        for (ddmmyyyy, rate) in rows:
+            try:
+                d = datetime.strptime(ddmmyyyy, "%d/%m/%Y").date().isoformat()
+                m[d] = float(rate)
+            except Exception:
+                continue
+        return m
+    except Exception:
+        return {}
+
 def _safe_get_uma():
-    # 1) try user's get_uma
     if _has("get_uma"):
         try:
             sig = inspect.signature(get_uma)
@@ -228,7 +218,6 @@ def _safe_get_uma():
                     return base()
             except Exception:
                 pass
-    # 2) try INEGI page scrape (simple regex)
     try:
         import requests
         resp = requests.get("https://www.inegi.org.mx/temas/uma/", timeout=20)
@@ -243,7 +232,6 @@ def _safe_get_uma():
                 return {"diario": diario, "mensual": mensual, "anual": anual}
     except Exception:
         pass
-    # 3) fixed map for recent years
     UMA_MAP = {
         2025: {"diario": 113.14, "mensual": 3439.46, "anual": 41273.52},
         2024: {"diario": 108.57, "mensual": 3300.53, "anual": 39606.36},
@@ -252,7 +240,6 @@ def _safe_get_uma():
     y = today_cdmx().year
     if y in UMA_MAP:
         return UMA_MAP[y]
-    # 4) secrets manual
     def _sf(name):
         v = _get_secret(name)
         if v is None or str(v).strip() == "":
@@ -266,9 +253,6 @@ def _safe_get_uma():
     anual   = _sf("uma_anual")
     return {"diario": diario, "mensual": mensual, "anual": anual}
 
-# ======================
-# FRED helpers (inflación EUA)
-# ======================
 def _fred_inflation_yoy_map():
     if not FRED_API_KEY:
         return {}
@@ -284,7 +268,7 @@ def _fred_inflation_yoy_map():
                 v = float(o["value"])
             except Exception:
                 continue
-            vals[o["date"][:7]] = v  # YYYY-MM
+            vals[o["date"][:7]] = v
         yoy = {}
         for k, v in vals.items():
             y, m = k.split("-")
@@ -307,9 +291,6 @@ def _fred_last_sept_oct_yoy():
     octo = yoy.get(oct_candidates[-1]) if oct_candidates else None
     return (sep, octo)
 
-# ======================
-# Fechas clave por FIX
-# ======================
 def _latest_and_previous_value_dates():
     end = today_cdmx().date()
     lookback = business_days_back(25, end)
@@ -333,17 +314,12 @@ def _latest_and_previous_value_dates():
     prev = (prevs[-1] if prevs else next(d for d in business_days_back(10, latest) if d < latest))
     return (prev, latest)
 
-# ======================
-# Series as-of (con selección automática de TIIE 28/91/182)
-# ======================
 def _series_values_for_dates(d_prev: date, d_latest: date):
-    # rango amplio para garantizar as-of
     start = (d_prev - timedelta(days=450)).isoformat()
     end = d_latest.isoformat()
 
-    used_series = {}  # para diagnóstico: qué ID se usó
+    used_series = {}
 
-    # Series simples (sin candidatos)
     def _as_map_fixed(series_id):
         obs = _sie_range(series_id, start, end)
         return _to_map_from_obs(obs)
@@ -360,7 +336,6 @@ def _series_values_for_dates(d_prev: date, d_latest: date):
 
     m_tobj = _as_map_fixed(SIE_SERIES["OBJETIVO"])
 
-    # TIIE con candidatos (probar en orden hasta encontrar datos)
     def _as_map_candidates(key_logic: str):
         sids = SIE_SERIES_CANDIDATES[key_logic]
         sid, obs = _sie_range_first_that_has_data(sids, start, end)
@@ -373,6 +348,12 @@ def _series_values_for_dates(d_prev: date, d_latest: date):
     m_t28  = _as_map_candidates("TIIE_28")
     m_t91  = _as_map_candidates("TIIE_91")
     m_t182 = _as_map_candidates("TIIE_182")
+
+    if not m_t182:
+        html_map = _tiie182_map_from_banxico_html()
+        if html_map:
+            used_series["TIIE_182"] = "banxico_html_fallback"
+            m_t182 = html_map
 
     uma = _safe_get_uma()
 
@@ -403,11 +384,9 @@ def _series_values_for_dates(d_prev: date, d_latest: date):
     t182_prev, t182_latest   = _two(m_t182, scale=100.0)
     tobj_prev, tobj_latest   = _two(m_tobj, scale=100.0)
 
-    # USD/JPY (JPY por USD) = FIX / (MXN por JPY).
     usdjpy_prev   = (fix_prev / jpy_prev)     if (fix_prev is not None and jpy_prev is not None)      else None
     usdjpy_latest = (fix_latest / jpy_latest) if (fix_latest is not None and jpy_latest is not None)  else None
 
-    # MONEX (si existe) con margen o fallback por FIX
     mv = None
     if "rolling_movex_for_last6" in globals():
         try:
@@ -438,7 +417,6 @@ def _series_values_for_dates(d_prev: date, d_latest: date):
         if fix_latest is not None and venta_latest is None:
             venta_latest = fix_latest * (1 + mpct/100.0)
 
-    # Guardar IDs usados para diagnóstico
     st.session_state["used_series_ids"] = used_series
 
     return {
@@ -454,21 +432,50 @@ def _series_values_for_dates(d_prev: date, d_latest: date):
         "t91": (t91_prev, t91_latest),
         "t182": (t182_prev, t182_latest),
         "tobj": (tobj_prev, tobj_latest),
-        "uma": uma,
+        "uma": _safe_get_uma(),
         "usdjpy": (usdjpy_prev, usdjpy_latest),
         "monex_compra": (compra_prev, compra_latest),
         "monex_venta":  (venta_prev,  venta_latest),
     }
 
-# ======================
-# Writer 2 columnas: respeta plantilla + formatos
-# ======================
+RSS_FEEDS = [
+    ("Google News MX – Economía",
+     "https://news.google.com/rss/headlines/section/topic/BUSINESS?hl=es-419&gl=MX&ceid=MX:es-419"),
+    ("Google News MX – BMV",
+     "https://news.google.com/rss/search?q=Bolsa%20Mexicana%20de%20Valores&hl=es-419&gl=MX&ceid=MX:es-419"),
+    ("Google News MX – Banxico",
+     "https://news.google.com/rss/search?q=Banxico&hl=es-419&gl=MX&ceid=MX:es-419"),
+    ("Google News MX – Inflación INEGI",
+     "https://news.google.com/rss/search?q=inflaci%C3%B3n%20M%C3%A9xico%20INEGI&hl=es-419&gl=MX&ceid=MX:es-419"),
+]
+
+def fetch_rss_items(url: str, max_items: int = 12):
+    import requests
+    try:
+        r = requests.get(url, timeout=20)
+        r.raise_for_status()
+        root = ET.fromstring(r.content)
+        items = []
+        for item in root.findall(".//item"):
+            title = (item.findtext("title") or "").strip()
+            link = (item.findtext("link") or "").strip()
+            pubDate = (item.findtext("pubDate") or "").strip()
+            source = ""
+            s = item.find("source")
+            if s is not None and (s.text or "").strip():
+                source = s.text.strip()
+            items.append({"title": title, "link": link, "pubDate": pubDate, "source": source})
+            if len(items) >= max_items:
+                break
+        return items
+    except Exception:
+        return []
+
 def write_two_col_template(template_path: str, out_path: str, d_prev: date, d_latest: date, values: dict):
     from openpyxl import load_workbook
     wb = load_workbook(template_path)
     ws = wb.active
 
-    # Encabezados C2 (anterior) y D2 (hoy) con formato dd/mm/aaaa
     ws["C2"].value = d_prev
     ws["D2"].value = today_cdmx().date()
     ws["C2"].number_format = "dd/mm/yyyy"
@@ -479,9 +486,7 @@ def write_two_col_template(template_path: str, out_path: str, d_prev: date, d_la
         "monex_compra": 6,
         "monex_venta":  7,
         "jpy":   10,
-        # fila 11: USD/JPY (JPY por USD)
         "eur":   14,
-        # fila 15: EURUSD = EUR/FIX (4 dec)
         "udis":  18,
         "tobj":  21,
         "t28":   22,
@@ -507,14 +512,12 @@ def write_two_col_template(template_path: str, out_path: str, d_prev: date, d_la
     write_pair("monex_venta")
     write_pair("jpy")
 
-    # USD/JPY en fila 11
     v_prev, v_latest = values.get("usdjpy", (None, None))
     ws["C11"] = v_prev
     ws["D11"] = v_latest
 
     write_pair("eur")
 
-    # EURUSD (fila 15) 4 dec
     try:
         eur_prev, eur_latest = values.get("eur", (None, None))
         fix_prev, fix_latest = values.get("fix", (None, None))
@@ -535,13 +538,11 @@ def write_two_col_template(template_path: str, out_path: str, d_prev: date, d_la
     write_pair("c182")
     write_pair("c364")
 
-    # UMA SOLO EN B33-B35
     uma = values.get("uma", {})
     ws["B33"] = uma.get("diario")
     ws["B34"] = uma.get("mensual")
     ws["B35"] = uma.get("anual")
 
-    # Inflación EUA (B41=Octubre, B42=Septiembre) — % YoY
     def _as_pct_decimal(x):
         if x is None:
             return None
@@ -566,11 +567,29 @@ def write_two_col_template(template_path: str, out_path: str, d_prev: date, d_la
     except Exception:
         pass
 
+    for sheet_name in ["Lógica de datos", "Metadatos"]:
+        if sheet_name in wb.sheetnames:
+            del wb[sheet_name]
+
+    news_ws = wb.create_sheet("Noticias Financieras RSS")
+    news_ws["A1"] = "Fuente"
+    news_ws["B1"] = "Título"
+    news_ws["C1"] = "Fecha"
+    news_ws["D1"] = "Link"
+
+    row = 2
+    for fuente, url in RSS_FEEDS:
+        items = fetch_rss_items(url, max_items=12)
+        for it in items:
+            news_ws.cell(row=row, column=1, value=fuente if not it.get("source") else f"{fuente} · {it['source']}")
+            news_ws.cell(row=row, column=2, value=it.get("title"))
+            news_ws.cell(row=row, column=3, value=it.get("pubDate"))
+            news_ws.cell(row=row, column=4, value=it.get("link"))
+            row += 1
+        row += 1
+
     wb.save(out_path)
 
-# ======================
-# Exportador
-# ======================
 def export_indicadores_2col_bytes():
     d_prev, d_latest = _latest_and_previous_value_dates()
     vals = _series_values_for_dates(d_prev, d_latest)
@@ -584,9 +603,6 @@ def export_indicadores_2col_bytes():
         pass
     return content, d_prev, d_latest
 
-# ======================
-# UI
-# ======================
 with st.expander("Diagnóstico / Fechas y tokens", expanded=False):
     d_prev, d_latest = _latest_and_previous_value_dates()
     used = st.session_state.get("used_series_ids", {})
@@ -601,7 +617,7 @@ with st.expander("Diagnóstico / Fechas y tokens", expanded=False):
         "TIIE_28_series_usada": used.get("TIIE_28"),
         "TIIE_91_series_usada": used.get("TIIE_91"),
         "TIIE_182_series_usada": used.get("TIIE_182"),
-        "caveat": "Si alguno es None, agrega SERIES_OVERRIDE__TIIE_xx con los IDs correctos (coma-separados).",
+        "nota_TIIE182": "Si sigue en None, se usó 'banxico_html_fallback' o agrega SERIES_OVERRIDE__TIIE_182 con IDs 'nuevos'.",
     })
 
 if "xlsx_bytes" not in st.session_state:
