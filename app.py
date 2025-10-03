@@ -801,8 +801,8 @@ if st.button("Generar Excel"):
         os.unlink(tmp.name)
     except Exception:
         pass
-    prog.set(100, "Listo. Descarga abajo.")
-    st.success("Listo. Descarga abajo.")
+    prog.set(100, "Listo!!!")
+    st.success("Listo!!!")
 
 st.download_button(
     "Descargar Excel",
