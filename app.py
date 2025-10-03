@@ -13,6 +13,14 @@ import streamlit as st
 # Config / Branding
 # ======================
 st.set_page_config(page_title="Indicadores IMEMSA", layout="wide")
+
+# === Optional clean UI (can be toggled with HIDE_DEFAULT_UI; default=on) ===
+if str((_get_secret("HIDE_DEFAULT_UI", "1"))).strip().lower() in ("1","true","yes","on"):
+    st.markdown(
+        "<style>#MainMenu{visibility:hidden;} footer{visibility:hidden;} header{visibility:hidden;}</style>",
+        unsafe_allow_html=True
+    )
+
 LOGO_PATH = str((Path(__file__).parent / "logo.png").resolve())
 TEMPLATE_PATH = str((Path(__file__).parent / "Indicadores_template_2col.xlsx").resolve())
 
@@ -751,7 +759,9 @@ def export_indicadores_2col_bytes():
 # ======================
 # UI
 # ======================
-with st.expander("Diagnóstico / Fechas y tokens", expanded=False):
+SHOW_DIAGNOSTICS = str((_get_secret("SHOW_DIAGNOSTICS", "0"))).strip().lower() in ("1","true","yes","on")
+if SHOW_DIAGNOSTICS:
+    with st.expander("Diagnóstico / Fechas y tokens", expanded=False):
     d_prev, d_latest = _latest_and_previous_value_dates()
     used = st.session_state.get("used_series_ids", {})
     st.write({
