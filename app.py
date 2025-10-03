@@ -12,11 +12,9 @@ import streamlit as st
 try:
     from ui_helpers import inject_base_css, header, section_card, metric_row
 except ModuleNotFoundError:
-    # Fallback inline defs (in case ui_helpers.py was not deployed)
     def inject_base_css():
         st.markdown(
-            """
-            <style>
+            """<style>
             .im-card{padding:1rem 1.25rem;border-radius:.9rem;background:rgba(255,255,255,.03);
                      border:1px solid rgba(255,255,255,.08);box-shadow:0 2px 8px rgba(0,0,0,.15);
                      margin-bottom:.75rem}
@@ -26,8 +24,7 @@ except ModuleNotFoundError:
             div[data-testid="metric-container"]{padding:.6rem .8rem;border-radius:.75rem;
                 background:rgba(255,255,255,.03);border:1px solid rgba(255,255,255,.08)}
             div[data-testid="stMetricDelta"] svg{display:none}
-            </style>
-            """, unsafe_allow_html=True
+            </style>""", unsafe_allow_html=True
         )
     def header(logo_path:str, title:str, subtitle:str="", updated:str|None=None):
         cols = st.columns([1,5,3])
@@ -119,13 +116,12 @@ if "auth_ok" not in st.session_state:
 
 
 inject_base_css()
-# Compute updated string without relying on today_cdmx (may not be defined yet)
+from datetime import datetime
 try:
     import pytz
     updated_str = datetime.now(pytz.timezone("America/Mexico_City")).strftime("%Y-%m-%d %H:%M (CDMX)")
 except Exception:
-    from datetime import datetime
-    updated_str = datetime.now().strftime("%Y-%m-%d %H:%M")")
+    updated_str = datetime.now().strftime("%Y-%m-%d %H:%M")
 header(
     logo_path=LOGO_PATH,
     title="Indicadores de Tipo de Cambio",
