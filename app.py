@@ -122,7 +122,7 @@ inject_base_css()
 # Compute updated string without relying on today_cdmx (may not be defined yet)
 try:
     import pytz
-    updated_str = __import__("datetime").datetime.now(pytz.timezone("America/Mexico_City")).strftime("%Y-%m-%d %H:%M (CDMX)")
+    updated_str = datetime.now(pytz.timezone("America/Mexico_City")).strftime("%Y-%m-%d %H:%M (CDMX)")
 except Exception:
     from datetime import datetime
     updated_str = datetime.now().strftime("%Y-%m-%d %H:%M")")
