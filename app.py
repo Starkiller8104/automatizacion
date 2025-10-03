@@ -43,10 +43,8 @@ except ModuleNotFoundError:
                 )
     def section_card(title:str, body_builder):
         st.markdown(f"<div class='im-card'><div class='im-title'>{title}</div>", unsafe_allow_html=True)
-        try:
-            return body_builder()
-        finally:
-            st.markdown("</div>", unsafe_allow_html=True)
+        body_builder()
+        st.markdown("</div>", unsafe_allow_html=True)
     def metric_row(items):
         cols = st.columns(len(items))
         for i,(label,value,delta) in enumerate(items):
@@ -116,17 +114,35 @@ def _password_ok(p: str) -> bool:
 if "auth_ok" not in st.session_state:
     st.session_state["auth_ok"] = False
 
+
+inject_base_css()
+from datetime import datetime
+try:
+    import pytz
+    updated_str = datetime.now(pytz.timezone("America/Mexico_City")).strftime("%Y-%m-%d %H:%M (CDMX)")
+except Exception:
+    updated_str = datetime.now().strftime("%Y-%m-%d %H:%M")
+header(
+    logo_path=LOGO_PATH,
+    title="Indicadores de Tipo de Cambio",
+    subtitle="IMEMSA · Reporte ejecutivo",
+    updated=updated_str
+)
+
+
+st.markdown("---")
+
 if not st.session_state["auth_ok"]:
-    with st.form("login_form", clear_on_submit=False):
+    with st.form("login_form"):
         st.subheader("Acceso")
         pwd = st.text_input("Password", type="password")
         submit = st.form_submit_button("Entrar")
-    if submit:
-        if _password_ok(pwd):
-            st.session_state["auth_ok"] = True
-            st.rerun()
-        else:
-            st.error("Password incorrecto")
+        if submit:
+            if _password_ok(pwd):
+                st.session_state["auth_ok"] = True
+                st.rerun()
+            else:
+                st.error("Password incorrecto")
     st.stop()
 
 # ======================
@@ -832,8 +848,7 @@ if "xlsx_bytes" not in st.session_state:
 # Contenedor para la barra de progreso (aparece debajo del botón)
 _progress_placeholder = st.empty()
 
-clicked = section_card('Generación de Excel', lambda: st.button("Generar Excel", type="primary"))
-if clicked:
+if section_card('Generación de Excel', lambda: st.button("Generar Excel")):
     prog = _Progress(_progress_placeholder)
     prog.set(5, "Preparando fechas…")
     d_prev, d_latest = _latest_and_previous_value_dates()
