@@ -9,6 +9,30 @@ from xml.etree import ElementTree as ET
 
 import streamlit as st
 
+# ---------- Fine-grained progress helper ----------
+class _Progress:
+    def __init__(self, placeholder):
+        self.placeholder = placeholder
+        self.value = 0
+        try:
+            self._bar = placeholder.progress(0, text="")
+            self._has_text = True
+        except TypeError:
+            self._bar = placeholder.progress(0)
+            self._has_text = False
+
+    def set(self, v, text=None):
+        v = max(0, min(100, int(v)))
+        self.value = v
+        if self._has_text and text is not None:
+            self._bar.progress(v, text=text)
+        else:
+            self._bar.progress(v)
+
+    def inc(self, delta, text=None):
+        self.set(self.value + delta, text=text)
+
+
 # ======================
 # Config / Branding
 # ======================
@@ -324,26 +348,43 @@ def _latest_and_previous_value_dates():
 # ======================
 # Series as-of (TIIE 182 fija)
 # ======================
-def _series_values_for_dates(d_prev: date, d_latest: date):
+def _series_values_for_dates(d_prev: date, d_latest: date, prog: _Progress | None = None):
     start = (d_prev - timedelta(days=450)).isoformat()
     end = d_latest.isoformat()
 
     used_series = {}
 
+# progress planning: fetch series ~60% of total (we'll allocate here); if provided, we distribute across 10 ops
+if prog:
+    base_fetch = 5  # we assume outer already set ~5% after dates
+    fetch_span = 60
+    ops_total = 10  # FIX, JPY, EUR, UDIS, CETES(4), OBJETIVO
+    step = fetch_span / ops_total
+
+
     def _as_map_fixed(series_id):
         obs = _sie_range(series_id, start, end)
         return _to_map_from_obs(obs)
 
+    if prog: prog.inc(step, "Banxico SIE: USD FIX")
     m_fix  = _as_map_fixed(SIE_SERIES["USD_FIX"])
+    if prog: prog.inc(step, "Banxico SIE: JPY/MXN")
     m_jpy  = _as_map_fixed(SIE_SERIES["JPY_MXN"])
+    if prog: prog.inc(step, "Banxico SIE: EUR/MXN")
     m_eur  = _as_map_fixed(SIE_SERIES["EUR_MXN"])
+    if prog: prog.inc(step, "Banxico SIE: UDIS")
     m_udis = _as_map_fixed(SIE_SERIES["UDIS"])
 
+    if prog: prog.inc(step, "Banxico SIE: CETES 28")
     m_c28  = _as_map_fixed(SIE_SERIES["CETES_28"])
+    if prog: prog.inc(step, "Banxico SIE: CETES 91")
     m_c91  = _as_map_fixed(SIE_SERIES["CETES_91"])
+    if prog: prog.inc(step, "Banxico SIE: CETES 182")
     m_c182 = _as_map_fixed(SIE_SERIES["CETES_182"])
+    if prog: prog.inc(step, "Banxico SIE: CETES 364")
     m_c364 = _as_map_fixed(SIE_SERIES["CETES_364"])
 
+    if prog: prog.inc(step, "Banxico SIE: Objetivo")
     m_tobj = _as_map_fixed(SIE_SERIES["OBJETIVO"])
 
     # TIIE 28/91 por SIE; 182 fija
@@ -356,7 +397,9 @@ def _series_values_for_dates(d_prev: date, d_latest: date):
             used_series[key_logic] = None
         return _to_map_from_obs(obs)
 
+    if prog: prog.inc(step, "Banxico SIE: TIIE 28")
     m_t28  = _as_map_candidates("TIIE_28")
+    if prog: prog.inc(step, "Banxico SIE: TIIE 91")
     m_t91  = _as_map_candidates("TIIE_91")
     # TIIE 182 fija (%)
     def _get_fixed_tiie182():
@@ -496,10 +539,12 @@ def fetch_rss_items(url: str, max_items: int = 12):
 # ======================
 # Writer 2 columnas + hoja RSS con estilo Arial 12 y sin grid
 # ======================
-def write_two_col_template(template_path: str, out_path: str, d_prev: date, d_latest: date, values: dict):
+def write_two_col_template(template_path: str, out_path: str, d_prev: date, d_latest: date, values: dict, prog: _Progress | None = None):
     from openpyxl import load_workbook
     from openpyxl.styles import Font, Alignment, PatternFill
     wb = load_workbook(template_path)
+if prog: prog.set(65, "Escribiendo hoja principal…")
+
     ws = wb.active
 
     # Fechas
@@ -594,11 +639,13 @@ def write_two_col_template(template_path: str, out_path: str, d_prev: date, d_la
     except Exception:
         pass
 
+    if prog: prog.set(82, "Aplicando limpieza/formatos…")
     # Eliminar hojas no deseadas si existen
     for sheet_name in ["Lógica de datos", "Metadatos"]:
         if sheet_name in wb.sheetnames:
             del wb[sheet_name]
 
+    if prog: prog.set(86, "Generando hoja RSS…")
     # Hoja RSS con estilo Arial 12 y sin grid
     news_ws = wb.create_sheet("Noticias Financieras RSS")
     header = ["Fuente", "Título", "Fecha (CDMX)", "Link"]
@@ -626,7 +673,8 @@ def write_two_col_template(template_path: str, out_path: str, d_prev: date, d_la
         except Exception:
             return None
 
-    for fuente, url in RSS_FEEDS:
+    for idx_feed, (fuente, url) in enumerate(RSS_FEEDS, start=1):
+        if prog: prog.inc( (12/ max(1,len(RSS_FEEDS))), f"RSS: {fuente}")
         items = fetch_rss_items(url, max_items=12)
         for it in items:
             title = it.get("title") or ""
@@ -682,15 +730,16 @@ def write_two_col_template(template_path: str, out_path: str, d_prev: date, d_la
     news_ws.freeze_panes = "A2"
 
     wb.save(out_path)
+    if prog: prog.set(100, "Archivo listo.")
 
 # ======================
 # Exportador
 # ======================
 def export_indicadores_2col_bytes():
     d_prev, d_latest = _latest_and_previous_value_dates()
-    vals = _series_values_for_dates(d_prev, d_latest)
+    vals = _series_values_for_dates(d_prev, d_latest, prog)
     tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".xlsx"); tmp.close()
-    write_two_col_template(TEMPLATE_PATH, tmp.name, d_prev, d_latest, vals)
+    write_two_col_template(TEMPLATE_PATH, tmp.name, d_prev, d_latest, vals, prog)
     with open(tmp.name, "rb") as f:
         content = f.read()
     try:
@@ -727,10 +776,41 @@ if SHOW_DIAGNOSTICS:
 if "xlsx_bytes" not in st.session_state:
     st.session_state["xlsx_bytes"] = None
 
-if st.button("Generar Excel (2 columnas)"):
-    with st.spinner("Generando desde plantilla 2 columnas..."):
-        bytes_, d_prev, d_latest = export_indicadores_2col_bytes()
-        st.session_state["xlsx_bytes"] = bytes_
+# Contenedor para la barra de progreso (aparece debajo del botón)
+_progress_placeholder = st.empty()
+
+if st.button("Generar Excel"):
+    try:
+        prog = _Progress(_progress_placeholder)
+    prog.set(5, "Preparando fechas…")
+    except TypeError:
+        # Compatibilidad con versiones antiguas de Streamlit sin argumento 'text'
+        progress = _progress_placeholder.progress(0)
+    # Paso 1: Fechas
+    d_prev, d_latest = _latest_and_previous_value_dates()
+    try:
+        prog.set(10, "Preparando consultas…")
+    except TypeError:
+        progress.progress(25)
+    # Paso 2: Series
+    vals = _series_values_for_dates(d_prev, d_latest, prog)
+    try:
+        prog.set(64, "Construyendo archivo…")
+    except TypeError:
+        progress.progress(70)
+    # Paso 3: Escribir Excel
+    tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".xlsx"); tmp.close()
+    write_two_col_template(TEMPLATE_PATH, tmp.name, d_prev, d_latest, vals, prog)
+    with open(tmp.name, "rb") as f:
+        st.session_state["xlsx_bytes"] = f.read()
+    try:
+        os.unlink(tmp.name)
+    except Exception:
+        pass
+    try:
+        prog.set(100, "Listo. Descarga abajo.")
+    except TypeError:
+        progress.progress(100)
     st.success("Listo. Descarga abajo.")
 
 st.download_button(
