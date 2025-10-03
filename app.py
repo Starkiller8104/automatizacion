@@ -8,7 +8,52 @@ from pathlib import Path
 from xml.etree import ElementTree as ET
 
 import streamlit as st
-from ui_helpers import inject_base_css, header, section_card, metric_row
+# --- UI helpers import with fallback ---
+try:
+    from ui_helpers import inject_base_css, header, section_card, metric_row
+except ModuleNotFoundError:
+    # Fallback inline defs (in case ui_helpers.py was not deployed)
+    def inject_base_css():
+        st.markdown(
+            """
+            <style>
+            .im-card{padding:1rem 1.25rem;border-radius:.9rem;background:rgba(255,255,255,.03);
+                     border:1px solid rgba(255,255,255,.08);box-shadow:0 2px 8px rgba(0,0,0,.15);
+                     margin-bottom:.75rem}
+            .im-title{font-weight:700;font-size:1.1rem;margin-bottom:.25rem}
+            .im-subtle{opacity:.8;font-size:.9rem}
+            .stButton > button{border-radius:.75rem;padding:.6rem 1rem;font-weight:600}
+            div[data-testid="metric-container"]{padding:.6rem .8rem;border-radius:.75rem;
+                background:rgba(255,255,255,.03);border:1px solid rgba(255,255,255,.08)}
+            div[data-testid="stMetricDelta"] svg{display:none}
+            </style>
+            """, unsafe_allow_html=True
+        )
+    def header(logo_path:str, title:str, subtitle:str="", updated:str|None=None):
+        cols = st.columns([1,5,3])
+        with cols[0]:
+            try: st.image(logo_path, use_container_width=True)
+            except Exception: st.write("")
+        with cols[1]:
+            st.markdown(f"### {title}")
+            if subtitle: st.markdown(f"<span class='im-subtle'>{subtitle}</span>", unsafe_allow_html=True)
+        with cols[2]:
+            if updated:
+                st.markdown(
+                    f"<div class='im-card'><div class='im-title'>Estado</div>"
+                    f"<div class='im-subtle'>Actualizado: {updated}</div></div>",
+                    unsafe_allow_html=True
+                )
+    def section_card(title:str, body_builder):
+        st.markdown(f"<div class='im-card'><div class='im-title'>{title}</div>", unsafe_allow_html=True)
+        body_builder()
+        st.markdown("</div>", unsafe_allow_html=True)
+    def metric_row(items):
+        cols = st.columns(len(items))
+        for i,(label,value,delta) in enumerate(items):
+            with cols[i]:
+                st.metric(label, value, delta if delta else None)
+
 
 # ---------- Fine-grained progress helper ----------
 class _Progress:
@@ -74,7 +119,13 @@ if "auth_ok" not in st.session_state:
 
 
 inject_base_css()
-updated_str = today_cdmx().strftime("%Y-%m-%d %H:%M (CDMX)")
+# Compute updated string without relying on today_cdmx (may not be defined yet)
+try:
+    import pytz
+    updated_str = __import__("datetime").datetime.now(pytz.timezone("America/Mexico_City")).strftime("%Y-%m-%d %H:%M (CDMX)")
+except Exception:
+    from datetime import datetime
+    updated_str = datetime.now().strftime("%Y-%m-%d %H:%M")")
 header(
     logo_path=LOGO_PATH,
     title="Indicadores de Tipo de Cambio",
