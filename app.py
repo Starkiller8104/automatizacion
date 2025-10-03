@@ -1,5 +1,6 @@
 
 import os
+import re
 import inspect
 import tempfile
 from datetime import datetime, timedelta, date
@@ -7,16 +8,11 @@ from pathlib import Path
 
 import streamlit as st
 
-# ======================
-# Config / Branding
-# ======================
 st.set_page_config(page_title="Indicadores IMEMSA", layout="wide")
 LOGO_PATH = str((Path(__file__).parent / "logo.png").resolve())
-TEMPLATE_PATH = str((Path(__file__).parent / "Indicadores_template_2col.xlsx").resolve())  # coloca tu nueva plantilla con este nombre
+TEMPLATE_PATH = str((Path(__file__).parent / "Indicadores_template_2col.xlsx").resolve())
 
-# ======================
-# Password (opcional)
-# ======================
+# ---------------- Password ----------------
 APP_PASSWORD = None
 try:
     APP_PASSWORD = st.secrets.get("app_password")
@@ -33,7 +29,7 @@ def _password_ok(p: str) -> bool:
 if "auth_ok" not in st.session_state:
     st.session_state["auth_ok"] = False
 
-cols = st.columns([1, 4])
+cols = st.columns([1,4])
 with cols[0]:
     try:
         st.image(LOGO_PATH, use_container_width=True)
@@ -41,7 +37,6 @@ with cols[0]:
         pass
 with cols[1]:
     st.markdown("# Indicadores (día actual y día anterior)")
-
 st.markdown("---")
 
 if not st.session_state["auth_ok"]:
@@ -57,9 +52,7 @@ if not st.session_state["auth_ok"]:
                 st.error("Password incorrecto")
     st.stop()
 
-# ======================
-# Utilidades de fecha
-# ======================
+# ---------------- Fechas ----------------
 def today_cdmx():
     try:
         import pytz
@@ -76,12 +69,10 @@ def business_days_back(n=10, end_date=None):
         if d.weekday() < 5:
             days.append(d)
         d -= timedelta(days=1)
-    return days  # descendente
+    return days
 
-# ======================
-# Secrets / Tokens / Flags
-# ======================
-def _get_secret(name: str):
+# ---------------- Tokens/Secrets with safe defaults from user ----------------
+def _get_secret(name: str, default=None):
     v = None
     try:
         v = st.secrets.get(name)
@@ -89,16 +80,16 @@ def _get_secret(name: str):
         v = None
     if not v:
         v = os.environ.get(name) or os.environ.get(name.upper())
-    return v
+    return v if v is not None else default
 
-BANXICO_TOKEN = globals().get("BANXICO_TOKEN") or _get_secret("banxico_token") or _get_secret("BANXICO_TOKEN")
-INEGI_TOKEN   = globals().get("INEGI_TOKEN")   or _get_secret("inegi_token")   or _get_secret("INEGI_TOKEN")
-FRED_API_KEY  = globals().get("FRED_API_KEY")  or _get_secret("fred_api_key")  or _get_secret("FRED_API_KEY")
+# Defaults provided by Ariel
+BANXICO_TOKEN = _get_secret("banxico_token", "677aaedf11d11712aa2ccf73da4d77b6b785474eaeb2e092f6bad31b29de6609")
+INEGI_TOKEN   = _get_secret("inegi_token",   "0146a9ed-b70f-4ea2-8781-744b900c19d1")
+FRED_API_KEY  = _get_secret("fred_api_key",  "b4f11681f441da78103a3706d0dab1cf")
 
-# MONEX fallback: if MONEX_FALLBACK="fix", estimate compra/venta from FIX using margin pct
-MONEX_FALLBACK = (_get_secret("MONEX_FALLBACK") or "").strip().lower()  # "fix" to enable fallback
+# MONEX fallback: default to "fix" so cells never stay empty
+MONEX_FALLBACK = (_get_secret("MONEX_FALLBACK", "fix") or "fix").strip().lower()
 def _get_margin_pct():
-    # default 0.20 (%). If you pass "0.3" => 0.3%; "1.5" => 1.5%
     try:
         v = _get_secret("MARGEN_PCT")
         if v is None: 
@@ -107,9 +98,7 @@ def _get_margin_pct():
     except Exception:
         return 0.20
 
-# ======================
-# Series SIE (basado en tu app anterior) + OBJETIVO
-# ======================
+# ---------------- Series SIE ----------------
 SIE_SERIES = {
     "USD_FIX":   "SF43718",
     "EUR_MXN":   "SF46410",
@@ -127,9 +116,7 @@ SIE_SERIES = {
 def SIE(key: str) -> str:
     return SIE_SERIES[key]
 
-# ======================
-# Fetchers robustos
-# ======================
+# ---------------- Helpers fetch ----------------
 def _has(name: str) -> bool:
     return name in globals()
 
@@ -145,20 +132,18 @@ def _parse_any_date(s):
 
 def _try_float(x):
     try:
-        if x is None or (isinstance(x, str) and x.strip() == ""):
+        if x is None or (isinstance(x, str) and str(x).strip() == ""):
             return None
         return float(str(x).replace(",", ""))
     except Exception:
         return None
 
 def _sie_range(series_id: str, start: str, end: str):
-    # Usa sie_range del repo si existe
     if _has("sie_range"):
         try:
             return sie_range(series_id, start, end)
         except Exception:
             pass
-    # Fallback a API SIE con token (Banxico)
     token = BANXICO_TOKEN
     if not token:
         return []
@@ -194,21 +179,32 @@ def _safe_get_uma():
                     return base()
             except Exception:
                 pass
-    # 2) try INEGI (needs INEGI_UMA_ID + INEGI_TOKEN)
-    UMA_INDICATOR_ID = os.environ.get("INEGI_UMA_ID", "") or _get_secret("INEGI_UMA_ID")
-    if INEGI_TOKEN and UMA_INDICATOR_ID:
+    # 2) try INEGI page scrape (robust simple regex) as fallback
+    try:
         import requests
-        url = f"https://www.inegi.org.mx/app/api/indicadores/desarrolladores/jsonxml/INDICATOR/{UMA_INDICATOR_ID}/00000/es/{INEGI_TOKEN}?type=json"
-        try:
-            r = requests.get(url, timeout=20); r.raise_for_status()
-            j = r.json()
-            series = j.get("Series", [])
-            if series and series[0].get("OBSERVATIONS"):
-                val = _try_float(series[0]["OBSERVATIONS"][-1]["OBS_VALUE"])
-                return {"diario": val, "mensual": val, "anual": val}
-        except Exception:
-            pass
-    # 3) fallback: read from secrets
+        resp = requests.get("https://www.inegi.org.mx/temas/uma/", timeout=20)
+        if resp.ok:
+            txt = resp.text
+            # find current year line like: 2025, $ 113.14, $ 3,439.46, $ 41,273.52
+            y = today_cdmx().year
+            m = re.search(rf">{y}<.*?\\$\\s*([0-9]+\\.?[0-9]*)\\s*,\\s*\\$\\s*([0-9,\\.]+)\\s*,\\s*\\$\\s*([0-9,\\.]+)", txt, flags=re.S)
+            if m:
+                diario  = _try_float(m.group(1))
+                mensual = _try_float(m.group(2))
+                anual   = _try_float(m.group(3))
+                return {"diario": diario, "mensual": mensual, "anual": anual}
+    except Exception:
+        pass
+    # 3) fixed map for recent years
+    UMA_MAP = {
+        2025: {"diario": 113.14, "mensual": 3439.46, "anual": 41273.52},
+        2024: {"diario": 108.57, "mensual": 3300.53, "anual": 39606.36},
+        2023: {"diario": 103.74, "mensual": 3153.70, "anual": 37844.40},
+    }
+    y = today_cdmx().year
+    if y in UMA_MAP:
+        return UMA_MAP[y]
+    # 4) secrets manual
     def _sf(name):
         v = _get_secret(name)
         if v is None or str(v).strip() == "":
@@ -230,12 +226,13 @@ def _safe_rolling_movex(window=None):
             return None
     return None
 
-def _fred_inflation_yoy_for(months):
-    """Return dict {YYYY-MM: yoy_decimal} using FRED CPIAUCSL (YoY). Requires FRED_API_KEY."""
+def _fred_inflation_yoy_map():
+    """Return dict {YYYY-MM: yoy_decimal} using FRED CPIAUCSL monthly YoY.
+       Fills as many months as available. Requires FRED_API_KEY."""
     if not FRED_API_KEY:
         return {}
     import requests
-    url = f"https://api.stlouisfed.org/fred/series/observations?series_id=CPIAUCSL&api_key={FRED_API_KEY}&file_type=json&frequency=m&observation_start=2015-01-01"
+    url = f"https://api.stlouisfed.org/fred/series/observations?series_id=CPIAUCSL&api_key={FRED_API_KEY}&file_type=json&frequency=m&observation_start=2010-01-01"
     try:
         r = requests.get(url, timeout=20); r.raise_for_status()
         data = r.json()
@@ -246,23 +243,32 @@ def _fred_inflation_yoy_for(months):
                 v = float(o["value"])
             except Exception:
                 continue
-            vals[o["date"][:7]] = v
+            vals[o["date"][:7]] = v  # YYYY-MM
         yoy = {}
-        for ym in months:
-            y, m = ym.split("-")
-            y_prev = f"{int(y)-1}-{m}"
-            if ym in vals and y_prev in vals:
-                yoy[ym] = (vals[ym] / vals[y_prev]) - 1.0
+        for k, v in vals.items():
+            y, m = k.split("-")
+            prev = f"{int(y)-1}-{m}"
+            if prev in vals:
+                yoy[k] = (v / vals[prev]) - 1.0
         return yoy
     except Exception:
         return {}
 
-# ======================
-# Cálculo de fechas (por FIX)
-# ======================
+def _fred_last_sept_oct_yoy():
+    """Return (sep_yoy, oct_yoy) for the latest available September and October <= today."""
+    yoy = _fred_inflation_yoy_map()
+    if not yoy:
+        return (None, None)
+    # collect candidates by month number
+    avail = sorted(yoy.keys())  # YYYY-MM
+    sep_candidates = [k for k in avail if k.endswith("-09") and k <= today_cdmx().strftime("%Y-%m")]
+    oct_candidates = [k for k in avail if k.endswith("-10") and k <= today_cdmx().strftime("%Y-%m")]
+    sep = yoy.get(sep_candidates[-1]) if sep_candidates else None
+    octo = yoy.get(oct_candidates[-1]) if oct_candidates else None
+    return (sep, octo)
+
+# ---------------- Fechas clave por FIX ----------------
 def _latest_and_previous_value_dates():
-    """Regresa (prev, latest) donde latest = último día con valor <= hoy usando FIX,
-    y prev = día inmediatamente anterior con valor."""
     end = today_cdmx().date()
     lookback = business_days_back(25, end)
     start = lookback[-1].isoformat()
@@ -285,9 +291,7 @@ def _latest_and_previous_value_dates():
     prev = (prevs[-1] if prevs else next(d for d in business_days_back(10, latest) if d < latest))
     return (prev, latest)
 
-# ======================
-# Lectura as-of para fechas prev/latest
-# ======================
+# ---------------- Series as-of ----------------
 def _series_values_for_dates(d_prev: date, d_latest: date):
     start = (d_prev - timedelta(days=450)).isoformat()
     end = d_latest.isoformat()
@@ -361,8 +365,8 @@ def _series_values_for_dates(d_prev: date, d_latest: date):
                 venta_prev,  venta_latest  = venta[-2],  venta[-1]
         except Exception:
             pass
-    # Fallback a partir de FIX si se activó MONEX_FALLBACK="fix"
-    if MONEX_FALLBACK == "fix" and (compra_prev is None or compra_latest is None or venta_prev is None or venta_latest is None):
+    # Fallback a partir de FIX si se activó o por defecto
+    if MONEX_FALLBACK == "fix":
         mpct = _get_margin_pct()
         if fix_prev is not None and compra_prev is None:
             compra_prev = fix_prev * (1 - mpct/100.0)
@@ -392,15 +396,13 @@ def _series_values_for_dates(d_prev: date, d_latest: date):
         "monex_venta":  (venta_prev,  venta_latest),
     }
 
-# ======================
-# Writer 2 columnas: respeta plantilla + formatos
-# ======================
+# ---------------- Writer ----------------
 def write_two_col_template(template_path: str, out_path: str, d_prev: date, d_latest: date, values: dict):
     from openpyxl import load_workbook
     wb = load_workbook(template_path)
     ws = wb.active
 
-    # Encabezados C2 (anterior) y D2 (hoy) con formato dd/mm/aaaa
+    # Encabezados con formato dd/mm/aaaa
     ws["C2"].value = d_prev
     ws["D2"].value = today_cdmx().date()
     ws["C2"].number_format = "dd/mm/yyyy"
@@ -474,13 +476,11 @@ def write_two_col_template(template_path: str, out_path: str, d_prev: date, d_la
     ws["B35"] = uma.get("anual")
 
     # Inflación EUA (B41=Octubre, B42=Septiembre) — % YoY
-    # Intento FRED; si no hay API, uso secrets us_inflation_oct/us_inflation_sep
     def _as_pct_decimal(x):
         if x is None:
             return None
         try:
             x = float(x)
-            # Si nos pasan 3.4 como %, convierto a 0.034.
             if abs(x) > 1:
                 x = x / 100.0
             return x
@@ -488,23 +488,16 @@ def write_two_col_template(template_path: str, out_path: str, d_prev: date, d_la
             return None
 
     try:
-        y = today_cdmx().year
-        ym_oct = f"{y}-10"
-        ym_sep = f"{y}-09"
-        fred = _fred_inflation_yoy_for([ym_oct, ym_sep])
-        val_oct = fred.get(ym_oct)
-        val_sep = fred.get(ym_sep)
-
-        # Fallback desde secrets si no hay FRED
-        if val_oct is None:
-            val_oct = _as_pct_decimal(_get_secret("us_inflation_oct"))
-        if val_sep is None:
-            val_sep = _as_pct_decimal(_get_secret("us_inflation_sep"))
-
-        ws["B41"] = val_oct
-        ws["B42"] = val_sep
-
-        # Forzar formato % si la plantilla no lo tiene
+        # Try FRED for latest available Sep/Oct up to today
+        sep_yoy, oct_yoy = _fred_last_sept_oct_yoy()
+        if sep_yoy is None or oct_yoy is None:
+            # fallback from secrets
+            if sep_yoy is None:
+                sep_yoy = _as_pct_decimal(_get_secret("us_inflation_sep"))
+            if oct_yoy is None:
+                oct_yoy = _as_pct_decimal(_get_secret("us_inflation_oct"))
+        ws["B42"] = sep_yoy
+        ws["B41"] = oct_yoy
         ws["B41"].number_format = "0.00%"
         ws["B42"].number_format = "0.00%"
     except Exception:
@@ -512,9 +505,7 @@ def write_two_col_template(template_path: str, out_path: str, d_prev: date, d_la
 
     wb.save(out_path)
 
-# ======================
-# Exportador
-# ======================
+# ---------------- Exportador / UI ----------------
 def export_indicadores_2col_bytes():
     d_prev, d_latest = _latest_and_previous_value_dates()
     vals = _series_values_for_dates(d_prev, d_latest)
@@ -528,18 +519,15 @@ def export_indicadores_2col_bytes():
         pass
     return content, d_prev, d_latest
 
-# ======================
-# UI
-# ======================
 with st.expander("Diagnóstico / Fechas y tokens", expanded=False):
     d_prev, d_latest = _latest_and_previous_value_dates()
     st.write({
         "dia_anterior (C2)": d_prev.strftime("%d/%m/%Y"),
         "dia_actual (D2)": today_cdmx().strftime("%d/%m/%Y"),
         "ultimo_con_valor (por FIX)": d_latest.strftime("%d/%m/%Y"),
-        "banxico_token_detectado": bool(BANXICO_TOKEN),
-        "inegi_token_detectado": bool(INEGI_TOKEN),
-        "fred_api_key_detectada": bool(FRED_API_KEY),
+        "banxico_token": bool(BANXICO_TOKEN),
+        "inegi_token": bool(INEGI_TOKEN),
+        "fred_api_key": bool(FRED_API_KEY),
         "monex_fallback": MONEX_FALLBACK,
         "margen_pct": _get_margin_pct(),
     })
