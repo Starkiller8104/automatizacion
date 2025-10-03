@@ -78,7 +78,7 @@ with cols[0]:
     except Exception:
         pass
 with cols[1]:
-    st.markdown("# Indicadores (día actual y día anterior)")
+    st.markdown("# Indicadores de Tipo de Cambio")
 
 st.markdown("---")
 
