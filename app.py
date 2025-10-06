@@ -416,6 +416,28 @@ def _series_values_for_dates(d_prev: date, d_latest: date, prog: _Progress | Non
 
     used_series = {}
 
+    # === Helpers para FX (fecha exacta con fallback asof) ===
+    def _get_exact(m, d):
+        return (m.get(d.isoformat()) if isinstance(m, dict) else None)
+
+    def _asof_local(m, d):
+        try:
+            keys = sorted(k for k in m.keys() if k <= d.isoformat())
+            return (m[keys[-1]] if keys else None)
+        except Exception:
+            return None
+
+    def _get_exact_or_asof(m, d):
+        v = _get_exact(m, d)
+        return v if (v is not None) else _asof_local(m, d)
+
+    def _fx_sane(x):
+        try:
+            return (x is not None) and (15.0 <= float(x) <= 20.0)
+        except Exception:
+            return False
+
+
     # === Helpers para FX (exact date, sin márgenes) ===
     def _get_exact(m, d):
         return (m.get(d.isoformat()) if isinstance(m, dict) else None)
@@ -504,15 +526,15 @@ def _series_values_for_dates(d_prev: date, d_latest: date, prog: _Progress | Non
             v_latest = (round(v_latest, rnd) if v_latest is not None else None)
         return v_prev, v_latest
 
-    fix_prev   = _get_exact(m_fix, d_prev)
-    fix_latest = _get_exact(m_fix, d_latest)
-    # sanity: si se sale de rango para FIX, lo anulamos (evita 20.x cuando FIX=18.x)
+        fix_prev   = _get_exact_or_asof(m_fix, d_prev)
+    fix_latest = _get_exact_or_asof(m_fix, d_latest)
+    # sanity: evita valores fuera de rango (p. ej. 20.x) 
     if not _fx_sane(fix_latest): fix_latest = None
     if (fix_prev is not None) and not _fx_sane(fix_prev): fix_prev = None
-    jpy_prev   = _get_exact(m_jpy, d_prev)
-    jpy_latest = _get_exact(m_jpy, d_latest)
-    eur_prev   = _get_exact(m_eur, d_prev)
-    eur_latest = _get_exact(m_eur, d_latest)
+        jpy_prev   = _get_exact_or_asof(m_jpy, d_prev)
+    jpy_latest = _get_exact_or_asof(m_jpy, d_latest)
+        eur_prev   = _get_exact_or_asof(m_eur, d_prev)
+    eur_latest = _get_exact_or_asof(m_eur, d_latest)
     udis_prev, udis_latest   = _two(m_udis, rnd=4)
     c28_prev, c28_latest     = _two(m_c28,  scale=100.0)
     c91_prev, c91_latest     = _two(m_c91,  scale=100.0)
