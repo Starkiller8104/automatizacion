@@ -504,14 +504,14 @@ def _series_values_for_dates(d_prev: date, d_latest: date, prog: _Progress | Non
             v_latest = (round(v_latest, rnd) if v_latest is not None else None)
         return v_prev, v_latest
 
-        fix_prev   = _get_exact(m_fix, d_prev)
+    fix_prev   = _get_exact(m_fix, d_prev)
     fix_latest = _get_exact(m_fix, d_latest)
     # sanity: si se sale de rango para FIX, lo anulamos (evita 20.x cuando FIX=18.x)
     if not _fx_sane(fix_latest): fix_latest = None
     if (fix_prev is not None) and not _fx_sane(fix_prev): fix_prev = None
-        jpy_prev   = _get_exact(m_jpy, d_prev)
+    jpy_prev   = _get_exact(m_jpy, d_prev)
     jpy_latest = _get_exact(m_jpy, d_latest)
-        eur_prev   = _get_exact(m_eur, d_prev)
+    eur_prev   = _get_exact(m_eur, d_prev)
     eur_latest = _get_exact(m_eur, d_latest)
     udis_prev, udis_latest   = _two(m_udis, rnd=4)
     c28_prev, c28_latest     = _two(m_c28,  scale=100.0)
