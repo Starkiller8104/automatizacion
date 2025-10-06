@@ -434,6 +434,12 @@ def _series_values_for_dates(d_prev: date, d_latest: date, prog: _Progress | Non
     m_jpy  = _as_map_fixed(SIE_SERIES["JPY_MXN"])
     if prog: prog.inc(step, "Banxico SIE: EUR/MXN")
     m_eur  = _as_map_fixed(SIE_SERIES["EUR_MXN"])
+
+    # Enforce oficiales Banxico para FX
+    used_series["USD_FIX"] = SIE_SERIES["USD_FIX"]
+    used_series["EUR_MXN"] = SIE_SERIES["EUR_MXN"]
+    used_series["JPY_MXN"] = SIE_SERIES["JPY_MXN"]
+
     if prog: prog.inc(step, "Banxico SIE: UDIS")
     m_udis = _as_map_fixed(SIE_SERIES["UDIS"])
 
@@ -643,12 +649,12 @@ def write_two_col_template(template_path: str, out_path: str, d_prev: date, d_la
         ws[f"C{r}"] = v_prev
         ws[f"D{r}"] = v_latest
 
-    write_pair("fix")
+    write_pair("fix")  # USD FIX Banxico (oficial)
     write_pair("monex_compra")
     write_pair("monex_venta")
-    write_pair("jpy")
+    write_pair("jpy")  # JPY/MXN Banxico (oficial)
     ws["C11"], ws["D11"] = values.get("usdjpy", (None, None))
-    write_pair("eur")
+    write_pair("eur")  # EUR/MXN Banxico (oficial)
     # EURUSD 4 dec
     try:
         eur_prev, eur_latest = values.get("eur", (None, None))
