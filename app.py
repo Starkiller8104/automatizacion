@@ -601,12 +601,12 @@ def _series_values_for_dates(d_prev: date, d_latest: date, prog: _Progress | Non
         if compra_latest is None: compra_latest = usd.get("compra")
         if venta_prev is None:   venta_prev = usd.get("venta")
         if venta_latest is None: venta_latest = usd.get("venta")
-st.session_state["used_series_ids"] = {
+    st.session_state["used_series_ids"] = {
         "TIIE_28":  st.session_state.get("used_series_ids", {}).get("TIIE_28"),
         "TIIE_91":  st.session_state.get("used_series_ids", {}).get("TIIE_91"),
         "TIIE_182": used_series.get("TIIE_182"),
     }
-
+    
     return {
         "fix": (fix_prev, fix_latest),
         "jpy": (jpy_prev, jpy_latest),
