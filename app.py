@@ -5,6 +5,17 @@ def _fetch_fix_direct(date_obj):
     Requiere BANXICO_TOKEN en variables de entorno.
     """
     import os, requests
+
+# --- UMA shim (added by patch): never raises NameError if not provided elsewhere
+def _uma_values():
+    try:
+        import streamlit as st
+        v = st.session_state.get("uma_values")
+        if isinstance(v, dict):
+            return v
+    except Exception:
+        pass
+    return {"diaria": None, "mensual": None, "anual": None}
     sid = "SF43718"
     token = os.environ.get("BANXICO_TOKEN") or os.environ.get("BANXICO_API_TOKEN")
     if not token:
@@ -655,7 +666,7 @@ def _series_values_for_dates(d_prev: date, d_latest: date, prog: _Progress | Non
         "t28": (t28_prev, t28_latest),
         "t91": (t91_prev, t91_latest),
         "tobj": (tobj_prev, tobj_latest),
-        "uma": _uma_values(),
+        "uma": (_uma_values() if "st" in globals() or "streamlit" in sys.modules else {"diaria": None, "mensual": None, "anual": None}),
         "usdjpy": (usdjpy_prev, usdjpy_latest),
         "monex_compra": (compra_prev, compra_latest),
         "monex_venta":  (venta_prev,  venta_latest),
