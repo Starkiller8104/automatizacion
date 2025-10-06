@@ -412,6 +412,13 @@ def _sie_range(series_id: str, start: str, end: str):
     except Exception:
         return []
 
+
+# --- Compatibility shim (old function name used by rolling_movex_for_last6) ---
+def sie_range(series_id: str, start: str, end: str):
+    """Backwards-compatible wrapper -> _sie_range"""
+    return _sie_range(series_id, start, end)
+
+
 def _sie_range_first_that_has_data(series_ids, start: str, end: str):
     for sid in series_ids:
         datos = _sie_range(sid, start, end)
