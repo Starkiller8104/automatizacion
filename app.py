@@ -229,8 +229,8 @@ FRED_API_KEY  = _get_secret_env("fred_api_key",  "b4f11681f441da78103a3706d0dab1
 MONEX_FALLBACK = (_get_secret_env("MONEX_FALLBACK", "scrape") or "scrape").strip().lower()
 def _fetch_monex_scrape():
     """
-    Scrapea https://www.monex.com.mx/ para obtener compra/venta informativos.
-    Devuelve dict como {'usd': {'compra':float,'venta':float}, 'eur': {...}}.
+    Intenta extraer compra/venta USD y EUR desde https://www.monex.com.mx/.
+    Devuelve {'usd': {'compra': float, 'venta': float}, 'eur': {...}} o None.
     """
     try:
         import re, requests
@@ -241,19 +241,37 @@ def _fetch_monex_scrape():
         resp = requests.get("https://www.monex.com.mx/", headers={"User-Agent":"Mozilla/5.0"}, timeout=15)
         resp.raise_for_status()
         html = resp.text
+        # Obtener texto
         if BeautifulSoup:
             soup = BeautifulSoup(html, "html.parser")
             txt = soup.get_text(" ", strip=True)
         else:
             txt = re.sub(r"<[^>]+>", " ", html)
-        out = {}
-        for cur in ["USD","EUR"]:
-            m = re.search(rf"{cur}\s*([0-9]+(?:\.[0-9]+)?)\s*/\s*([0-9]+(?:\.[0-9]+)?)", txt)
-            if m:
-                out[cur.lower()] = {"compra": float(m.group(1)), "venta": float(m.group(2))}
+            txt = re.sub(r"\s+", " ", txt)
+        def parse_many(txt):
+            out = {}
+            pats = [
+                r"(USD)\s*([0-9]+(?:[\.,][0-9]+)?)\s*/\s*([0-9]+(?:[\.,][0-9]+)?)",
+                r"(EUR)\s*([0-9]+(?:[\.,][0-9]+)?)\s*/\s*([0-9]+(?:[\.,][0-9]+)?)",
+                r"(USD|D[oó]lar)[^0-9]{0,40}Compra[^0-9]{0,12}([0-9]+(?:[\.,][0-9]+)?)\D+Venta[^0-9]{0,12}([0-9]+(?:[\.,][0-9]+)?)",
+                r"(EUR|Euro)[^0-9]{0,40}Compra[^0-9]{0,12}([0-9]+(?:[\.,][0-9]+)?)\D+Venta[^0-9]{0,12}([0-9]+(?:[\.,][0-9]+)?)",
+            ]
+            for pat in pats:
+                for m in re.finditer(pat, txt, flags=re.I):
+                    cur = m.group(1).upper()
+                    c = float(m.group(2).replace(",", "."))
+                    v = float(m.group(3).replace(",", "."))
+                    if "USD" in cur:
+                        out["usd"] = {"compra": c, "venta": v}
+                    elif "EUR" in cur:
+                        out["eur"] = {"compra": c, "venta": v}
+            return out
+        out = parse_many(txt)
         return out or None
     except Exception:
         return None
+
+
 def _get_margin_pct():
     try:
         v = _get_secret_env("MARGEN_PCT")
@@ -266,6 +284,62 @@ def _get_margin_pct():
 # ======================
 # Series SIE (base) + candidatos para TIIE 28/91/182
 # ======================
+
+# === Old stable helpers (restored) ===
+
+def parse_any_date(s: str):
+    """Devuelve datetime naive (sin tz)."""
+    if not s:
+        return None
+    for fmt in ("%Y-%m-%d", "%d/%m/%Y"):
+        try:
+            return datetime.strptime(str(s), fmt)
+        except:
+            pass
+    return None
+
+def try_float(x):
+    try:
+        return float(str(x).replace(",", "").strip())
+    except:
+        return None
+
+def rolling_movex_for_last6(window:int=20):
+    end = today_cdmx()
+    start = end - timedelta(days=2*365)
+    obs = sie_range(SIE_SERIES["USD_FIX"], start.isoformat(), end.isoformat())
+    vals = []
+    for o in obs:
+        f = o.get("fecha"); v = try_float(o.get("dato"))
+        if f and (v is not None):
+            vals.append((f, v))
+    if not vals:
+        return []
+    vals.sort(key=lambda x: parse_any_date(x[0]) or datetime.utcnow())
+    series = [v for _, v in vals]
+    out = []
+    for i in range(len(series)):
+        sub = series[max(0, i-window+1): i+1]
+        out.append(sum(sub)/len(sub) if sub else None)
+    return out
+
+SIE_SERIES = {
+    "USD_FIX":   "SF43718",
+    "EUR_MXN":   "SF46410",
+    "JPY_MXN":   "SF46406",
+    "UDIS":      "SP68257",
+    "TIIE_28": "SF60648",
+    "TIIE_91": "SF60649",
+    "TIIE_182": "SF60650",
+
+    "CETES_28":  "SF43936",
+    "CETES_91":  "SF43939",
+    "CETES_182": "SF43942",
+    "CETES_364": "SF43945",
+}
+
+@st.cache_data(ttl=60*60)
+
 SIE_SERIES = {
     "USD_FIX":   "SF43718",
     "EUR_MXN":   "SF46410",
@@ -582,26 +656,40 @@ def _series_values_for_dates(d_prev: date, d_latest: date, prog: _Progress | Non
                 venta_prev,  venta_latest  = venta[-2],  venta[-1]
         except Exception:
             pass
-    if MONEX_FALLBACK == "fix":
-        mpct = _get_margin_pct()
-        if fix_prev is not None and compra_prev is None:
-            compra_prev = fix_prev * (1 - mpct/100.0)
-        if fix_latest is not None and compra_latest is None:
-            compra_latest = fix_latest * (1 - mpct/100.0)
-        if fix_prev is not None and venta_prev is None:
-            venta_prev = fix_prev * (1 + mpct/100.0)
-        if fix_latest is not None and venta_latest is None:
-            venta_latest = fix_latest * (1 + mpct/100.0)
-
     
-    elif MONEX_FALLBACK == "scrape":
-        monex = _fetch_monex_scrape() or {}
-        usd = monex.get("usd") or {}
-        if compra_prev is None:  compra_prev = usd.get("compra")
-        if compra_latest is None: compra_latest = usd.get("compra")
-        if venta_prev is None:   venta_prev = usd.get("venta")
-        if venta_latest is None: venta_latest = usd.get("venta")
-    st.session_state["used_series_ids"] = {
+mode = (_get_secret_env("MONEX_MODE", "old") or "old").strip().lower()
+if mode == "old":
+    # usa el promedio móvil del FIX (ventana=movex_win) y aplica margen
+    mv = rolling_movex_for_last6(window=globals().get("movex_win", 20))
+    compra_prev = compra_latest = venta_prev = venta_latest = None
+    if mv and isinstance(mv, (list, tuple)):
+        try:
+            mpct = float(globals().get("margen_pct", _get_margin_pct()))
+            compra = [(x * (1 - mpct/100.0) if x is not None else None) for x in mv]
+            venta  = [(x * (1 + mpct/100.0) if x is not None else None) for x in mv]
+            if len(compra) >= 2:
+                compra_prev, compra_latest = compra[-2], compra[-1]
+            if len(venta) >= 2:
+                venta_prev,  venta_latest  = venta[-2],  venta[-1]
+        except Exception:
+            pass
+elif mode == "scrape":
+    monex = _fetch_monex_scrape() or {}
+    usd = monex.get("usd") or {}
+    compra_prev   = usd.get("compra"); compra_latest = usd.get("compra")
+    venta_prev    = usd.get("venta");  venta_latest  = usd.get("venta")
+# Fallback final a FIX ± margen si faltó algo
+mpct = _get_margin_pct()
+if fix_prev is not None and (compra_prev is None):
+    compra_prev = fix_prev * (1 - mpct/100.0)
+if fix_latest is not None and (compra_latest is None):
+    compra_latest = fix_latest * (1 - mpct/100.0)
+if fix_prev is not None and (venta_prev is None):
+    venta_prev = fix_prev * (1 + mpct/100.0)
+if fix_latest is not None and (venta_latest is None):
+    venta_latest = fix_latest * (1 + mpct/100.0)
+
+st.session_state["used_series_ids"] = {
         "TIIE_28":  st.session_state.get("used_series_ids", {}).get("TIIE_28"),
         "TIIE_91":  st.session_state.get("used_series_ids", {}).get("TIIE_91"),
         "TIIE_182": used_series.get("TIIE_182"),
