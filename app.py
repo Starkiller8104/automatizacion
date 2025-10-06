@@ -226,7 +226,34 @@ BANXICO_TOKEN = _get_secret_env("banxico_token", "677aaedf11d11712aa2ccf73da4d77
 INEGI_TOKEN   = _get_secret_env("inegi_token",   "0146a9ed-b70f-4ea2-8781-744b900c19d1")
 FRED_API_KEY  = _get_secret_env("fred_api_key",  "b4f11681f441da78103a3706d0dab1cf")
 
-MONEX_FALLBACK = (_get_secret_env("MONEX_FALLBACK", "fix") or "fix").strip().lower()
+MONEX_FALLBACK = (_get_secret_env("MONEX_FALLBACK", "scrape") or "scrape").strip().lower()
+def _fetch_monex_scrape():
+    """
+    Scrapea https://www.monex.com.mx/ para obtener compra/venta informativos.
+    Devuelve dict como {'usd': {'compra':float,'venta':float}, 'eur': {...}}.
+    """
+    try:
+        import re, requests
+        try:
+            from bs4 import BeautifulSoup
+        except Exception:
+            BeautifulSoup = None
+        resp = requests.get("https://www.monex.com.mx/", headers={"User-Agent":"Mozilla/5.0"}, timeout=15)
+        resp.raise_for_status()
+        html = resp.text
+        if BeautifulSoup:
+            soup = BeautifulSoup(html, "html.parser")
+            txt = soup.get_text(" ", strip=True)
+        else:
+            txt = re.sub(r"<[^>]+>", " ", html)
+        out = {}
+        for cur in ["USD","EUR"]:
+            m = re.search(rf"{cur}\s*([0-9]+(?:\.[0-9]+)?)\s*/\s*([0-9]+(?:\.[0-9]+)?)", txt)
+            if m:
+                out[cur.lower()] = {"compra": float(m.group(1)), "venta": float(m.group(2))}
+        return out or None
+    except Exception:
+        return None
 def _get_margin_pct():
     try:
         v = _get_secret_env("MARGEN_PCT")
@@ -300,9 +327,9 @@ def _sie_range(series_id: str, start: str, end: str):
     if not token:
         return []
     import requests
-    url = f"https://www.banxico.org.mx/SieAPIRest/service/v1/series/{series_id}/datos/{start}/{end}?token={token}"
+    url = f"https://www.banxico.org.mx/SieAPIRest/service/v1/series/{series_id}/datos/{start}/{end}"
     try:
-        r = requests.get(url, timeout=20, headers={"User-Agent": "Mozilla/5.0"})
+        r = requests.get(url, timeout=20, headers={"User-Agent": "Mozilla/5.0", "Bmx-Token": token})
         r.raise_for_status()
         data = r.json()
         series = data.get("bmx", {}).get("series", [])
@@ -566,7 +593,15 @@ def _series_values_for_dates(d_prev: date, d_latest: date, prog: _Progress | Non
         if fix_latest is not None and venta_latest is None:
             venta_latest = fix_latest * (1 + mpct/100.0)
 
-    st.session_state["used_series_ids"] = {
+    
+    elif MONEX_FALLBACK == "scrape":
+        monex = _fetch_monex_scrape() or {}
+        usd = monex.get("usd") or {}
+        if compra_prev is None:  compra_prev = usd.get("compra")
+        if compra_latest is None: compra_latest = usd.get("compra")
+        if venta_prev is None:   venta_prev = usd.get("venta")
+        if venta_latest is None: venta_latest = usd.get("venta")
+st.session_state["used_series_ids"] = {
         "TIIE_28":  st.session_state.get("used_series_ids", {}).get("TIIE_28"),
         "TIIE_91":  st.session_state.get("used_series_ids", {}).get("TIIE_91"),
         "TIIE_182": used_series.get("TIIE_182"),
