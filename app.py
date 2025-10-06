@@ -601,8 +601,9 @@ def _series_values_for_dates(d_prev: date, d_latest: date, prog: _Progress | Non
     c91_prev, c91_latest     = _two(m_c91,  scale=100.0)
     c182_prev, c182_latest   = _two(m_c182, scale=100.0)
     c364_prev, c364_latest   = _two(m_c364, scale=100.0)
-    t28_prev, t28_latest     = _two(m_tobj, scale=100.0) if m_tobj else (None, None)
-    t91_prev, t91_latest     = (None, None)  # si no se usa en Excel actual
+    tobj_prev, tobj_latest = _two(m_tobj, scale=100.0) if m_tobj else (None, None)
+    t28_prev, t28_latest = (None, None)
+    t91_prev, t91_latest = (None, None)  # si no se usa en Excel actual
 
     # USD/JPY cruz
     usdjpy_prev   = (fix_prev / jpy_prev)     if (fix_prev is not None and jpy_prev is not None)      else None
