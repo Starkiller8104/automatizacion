@@ -971,3 +971,18 @@ st.download_button(
     mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
     disabled=(st.session_state["xlsx_bytes"] is None),
 )
+
+# --- Safe SIE range (always available) ---
+def _safe_sie_range(series_id: str, start: str, end: str):
+    import requests
+    import os
+    token = os.environ.get("BANXICO_TOKEN","")
+    url = f"https://www.banxico.org.mx/SieAPIRest/service/v1/series/{series_id}/datos/{start}/{end}"
+    headers = {"User-Agent":"Mozilla/5.0"}
+    if token:
+        headers["Bmx-Token"] = token
+    r = requests.get(url, headers=headers, timeout=30)
+    r.raise_for_status()
+    data = r.json()
+    series = data.get("bmx",{}).get("series",[])
+    return series[0].get("datos",[]) if series else []
