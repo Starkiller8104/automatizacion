@@ -427,13 +427,36 @@ def _series_values_for_dates(d_prev: date, d_latest: date, prog: _Progress | Non
         except Exception:
             return None
 
+    
+    # === Fallback robusto: buscar hasta N días hábiles hacia atrás ===
+    def _bizday_back(d):
+        x = d - timedelta(days=1)
+        while x.weekday() >= 5:
+            x -= timedelta(days=1)
+        return x
+
+    def _nearest_prev_available(m, d, max_steps=5):
+        # Busca fecha exacta primero; si no, recorre hábiles hacia atrás hasta encontrar
+        dd = d
+        for _ in range(max_steps+1):
+            v = _get_exact(m, dd)
+            if v is not None:
+                return v
+            dd = _bizday_back(dd)
+        # como último recurso usa as-of
+        try:
+            keys = sorted(k for k in m.keys() if k <= d.isoformat())
+            return (m[keys[-1]] if keys else None)
+        except Exception:
+            return None
+
     def _get_exact_or_asof(m, d):
         v = _get_exact(m, d)
         return v if (v is not None) else _asof_local(m, d)
 
     def _fx_sane(x):
         try:
-            return (x is not None) and (15.0 <= float(x) <= 20.0)
+            return (x is not None) and (14.0 <= float(x) <= 25.0)
         except Exception:
             return False
 
@@ -444,7 +467,7 @@ def _series_values_for_dates(d_prev: date, d_latest: date, prog: _Progress | Non
 
     def _fx_sane(x):
         # Rango razonable para 2024-2026 MXN/USD; ajusta si quieres más amplio
-        return (x is not None) and (15.0 <= float(x) <= 20.0)
+        return (x is not None) and (14.0 <= float(x) <= 25.0)
 
 
 
@@ -526,15 +549,15 @@ def _series_values_for_dates(d_prev: date, d_latest: date, prog: _Progress | Non
             v_latest = (round(v_latest, rnd) if v_latest is not None else None)
         return v_prev, v_latest
 
-    fix_prev   = _get_exact_or_asof(m_fix, d_prev)
-    fix_latest = _get_exact_or_asof(m_fix, d_latest)
-    # sanity: evita valores fuera de rango (p. ej. 20.x) 
+        fix_prev   = _nearest_prev_available(m_fix, d_prev)
+    fix_latest = _nearest_prev_available(m_fix, d_latest)
+    # sanity: evita valores fuera de rango extremos; ampliamos un poco el rango para no vaciar valores válidos
     if not _fx_sane(fix_latest): fix_latest = None
     if (fix_prev is not None) and not _fx_sane(fix_prev): fix_prev = None
-    jpy_prev   = _get_exact_or_asof(m_jpy, d_prev)
-    jpy_latest = _get_exact_or_asof(m_jpy, d_latest)
-    eur_prev   = _get_exact_or_asof(m_eur, d_prev)
-    eur_latest = _get_exact_or_asof(m_eur, d_latest)
+        jpy_prev   = _nearest_prev_available(m_jpy, d_prev)
+    jpy_latest = _nearest_prev_available(m_jpy, d_latest)
+        eur_prev   = _nearest_prev_available(m_eur, d_prev)
+    eur_latest = _nearest_prev_available(m_eur, d_latest)
     udis_prev, udis_latest   = _two(m_udis, rnd=4)
     c28_prev, c28_latest     = _two(m_c28,  scale=100.0)
     c91_prev, c91_latest     = _two(m_c91,  scale=100.0)
