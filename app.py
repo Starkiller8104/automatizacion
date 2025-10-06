@@ -416,6 +416,16 @@ def _series_values_for_dates(d_prev: date, d_latest: date, prog: _Progress | Non
 
     used_series = {}
 
+    # === Helpers para FX (exact date, sin márgenes) ===
+    def _get_exact(m, d):
+        return (m.get(d.isoformat()) if isinstance(m, dict) else None)
+
+    def _fx_sane(x):
+        # Rango razonable para 2024-2026 MXN/USD; ajusta si quieres más amplio
+        return (x is not None) and (15.0 <= float(x) <= 20.0)
+
+
+
     # Progreso: distribuir ~60% en fetchs
     if prog is not None:
         fetch_span = 60.0
@@ -434,12 +444,6 @@ def _series_values_for_dates(d_prev: date, d_latest: date, prog: _Progress | Non
     m_jpy  = _as_map_fixed(SIE_SERIES["JPY_MXN"])
     if prog: prog.inc(step, "Banxico SIE: EUR/MXN")
     m_eur  = _as_map_fixed(SIE_SERIES["EUR_MXN"])
-
-    # Enforce oficiales Banxico para FX
-    used_series["USD_FIX"] = SIE_SERIES["USD_FIX"]
-    used_series["EUR_MXN"] = SIE_SERIES["EUR_MXN"]
-    used_series["JPY_MXN"] = SIE_SERIES["JPY_MXN"]
-
     if prog: prog.inc(step, "Banxico SIE: UDIS")
     m_udis = _as_map_fixed(SIE_SERIES["UDIS"])
 
@@ -500,9 +504,15 @@ def _series_values_for_dates(d_prev: date, d_latest: date, prog: _Progress | Non
             v_latest = (round(v_latest, rnd) if v_latest is not None else None)
         return v_prev, v_latest
 
-    fix_prev, fix_latest     = _two(m_fix)
-    jpy_prev, jpy_latest     = _two(m_jpy)
-    eur_prev, eur_latest     = _two(m_eur)
+        fix_prev   = _get_exact(m_fix, d_prev)
+    fix_latest = _get_exact(m_fix, d_latest)
+    # sanity: si se sale de rango para FIX, lo anulamos (evita 20.x cuando FIX=18.x)
+    if not _fx_sane(fix_latest): fix_latest = None
+    if (fix_prev is not None) and not _fx_sane(fix_prev): fix_prev = None
+        jpy_prev   = _get_exact(m_jpy, d_prev)
+    jpy_latest = _get_exact(m_jpy, d_latest)
+        eur_prev   = _get_exact(m_eur, d_prev)
+    eur_latest = _get_exact(m_eur, d_latest)
     udis_prev, udis_latest   = _two(m_udis, rnd=4)
     c28_prev, c28_latest     = _two(m_c28,  scale=100.0)
     c91_prev, c91_latest     = _two(m_c91,  scale=100.0)
@@ -649,12 +659,12 @@ def write_two_col_template(template_path: str, out_path: str, d_prev: date, d_la
         ws[f"C{r}"] = v_prev
         ws[f"D{r}"] = v_latest
 
-    write_pair("fix")  # USD FIX Banxico (oficial)
+    write_pair("fix")  # USD FIX Banxico (SIE SF43718, exact-date)
     write_pair("monex_compra")
     write_pair("monex_venta")
-    write_pair("jpy")  # JPY/MXN Banxico (oficial)
+    write_pair("jpy")  # JPY/MXN Banxico (SIE SF46406, exact-date)
     ws["C11"], ws["D11"] = values.get("usdjpy", (None, None))
-    write_pair("eur")  # EUR/MXN Banxico (oficial)
+    write_pair("eur")  # EUR/MXN Banxico (SIE SF46410, exact-date)
     # EURUSD 4 dec
     try:
         eur_prev, eur_latest = values.get("eur", (None, None))
