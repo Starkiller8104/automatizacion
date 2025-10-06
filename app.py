@@ -621,8 +621,8 @@ def _series_values_for_dates(d_prev: date, d_latest: date, prog: _Progress | Non
         "tobj": (tobj_prev, tobj_latest),
         "uma": uma,
         "usdjpy": (usdjpy_prev, usdjpy_latest),
-        "monex_compra": (compra_prev, compra_latest),
-        "monex_venta":  (venta_prev,  venta_latest),
+        "monex_compra": (None, None),
+        "monex_venta":  (None, None),
     }
 # ======================
 # RSS helpers
@@ -704,8 +704,8 @@ def write_two_col_template(template_path: str, out_path: str, d_prev: date, d_la
         ws[f"D{r}"] = v_latest
 
     write_pair("fix")  # USD FIX Banxico (SIE SF43718, exact-date)
-    write_pair("monex_compra")
-    write_pair("monex_venta")
+    # write_pair("monex_compra")  # desactivado: no oficial
+    # write_pair("monex_venta")   # desactivado: no oficial
     write_pair("jpy")  # JPY/MXN Banxico (SIE SF46406, exact-date)
     ws["C11"], ws["D11"] = values.get("usdjpy", (None, None))
     write_pair("eur")  # EUR/MXN Banxico (SIE SF46410, exact-date)
