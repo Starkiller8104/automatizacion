@@ -1,4 +1,30 @@
 
+def _fetch_fix_direct(date_obj):
+    """
+    Obtiene el FIX (SF43718) exactamente para `date_obj` directo de Banxico SIE.
+    Requiere BANXICO_TOKEN en variables de entorno.
+    """
+    import os, requests
+    sid = "SF43718"
+    token = os.environ.get("BANXICO_TOKEN") or os.environ.get("BANXICO_API_TOKEN")
+    if not token:
+        return None
+    d = date_obj.strftime("%Y-%m-%d")
+    url = f"https://www.banxico.org.mx/SieAPIRest/service/v1/series/{sid}/datos/{d}/{d}"
+    headers = {"Bmx-Token": token}
+    try:
+        resp = requests.get(url, headers=headers, timeout=15)
+        j = resp.json()
+        obs = j["bmx"]["series"][0]["datos"]
+        if not obs:
+            return None
+        val = obs[-1]["dato"]
+        val = float(str(val).replace(",", ""))
+        return round(val, 4)
+    except Exception:
+        return None
+
+
 import os
 import re
 import inspect
@@ -416,61 +442,6 @@ def _series_values_for_dates(d_prev: date, d_latest: date, prog: _Progress | Non
 
     used_series = {}
 
-    # === Helpers para FX (fecha exacta con fallback asof) ===
-    def _get_exact(m, d):
-        return (m.get(d.isoformat()) if isinstance(m, dict) else None)
-
-    def _asof_local(m, d):
-        try:
-            keys = sorted(k for k in m.keys() if k <= d.isoformat())
-            return (m[keys[-1]] if keys else None)
-        except Exception:
-            return None
-
-    
-    # === Fallback robusto: buscar hasta N días hábiles hacia atrás ===
-    def _bizday_back(d):
-        x = d - timedelta(days=1)
-        while x.weekday() >= 5:
-            x -= timedelta(days=1)
-        return x
-
-    def _nearest_prev_available(m, d, max_steps=5):
-        # Busca fecha exacta primero; si no, recorre hábiles hacia atrás hasta encontrar
-        dd = d
-        for _ in range(max_steps+1):
-            v = _get_exact(m, dd)
-            if v is not None:
-                return v
-            dd = _bizday_back(dd)
-        # como último recurso usa as-of
-        try:
-            keys = sorted(k for k in m.keys() if k <= d.isoformat())
-            return (m[keys[-1]] if keys else None)
-        except Exception:
-            return None
-
-    def _get_exact_or_asof(m, d):
-        v = _get_exact(m, d)
-        return v if (v is not None) else _asof_local(m, d)
-
-    def _fx_sane(x):
-        try:
-            return (x is not None) and (14.0 <= float(x) <= 25.0)
-        except Exception:
-            return False
-
-
-    # === Helpers para FX (exact date, sin márgenes) ===
-    def _get_exact(m, d):
-        return (m.get(d.isoformat()) if isinstance(m, dict) else None)
-
-    def _fx_sane(x):
-        # Rango razonable para 2024-2026 MXN/USD; ajusta si quieres más amplio
-        return (x is not None) and (14.0 <= float(x) <= 25.0)
-
-
-
     # Progreso: distribuir ~60% en fetchs
     if prog is not None:
         fetch_span = 60.0
@@ -549,15 +520,10 @@ def _series_values_for_dates(d_prev: date, d_latest: date, prog: _Progress | Non
             v_latest = (round(v_latest, rnd) if v_latest is not None else None)
         return v_prev, v_latest
 
-    fix_prev = _nearest_prev_available(m_fix, d_prev)
-    fix_latest = _nearest_prev_available(m_fix, d_latest)
-    # sanity: evita valores fuera de rango extremos; ampliamos un poco el rango para no vaciar valores válidos
-    if not _fx_sane(fix_latest): fix_latest = None
-    if (fix_prev is not None) and not _fx_sane(fix_prev): fix_prev = None
-    jpy_prev = _nearest_prev_available(m_jpy, d_prev)
-    jpy_latest = _nearest_prev_available(m_jpy, d_latest)
-    eur_prev = _nearest_prev_available(m_eur, d_prev)
-    eur_latest = _nearest_prev_available(m_eur, d_latest)
+    fix_prev   = _fetch_fix_direct(d_prev) or _asof(m_fix, d_prev)
+    fix_latest = _fetch_fix_direct(d_latest) or _asof(m_fix, d_latest)
+    jpy_prev, jpy_latest     = _two(m_jpy)
+    eur_prev, eur_latest     = _two(m_eur)
     udis_prev, udis_latest   = _two(m_udis, rnd=4)
     c28_prev, c28_latest     = _two(m_c28,  scale=100.0)
     c91_prev, c91_latest     = _two(m_c91,  scale=100.0)
@@ -621,9 +587,10 @@ def _series_values_for_dates(d_prev: date, d_latest: date, prog: _Progress | Non
         "tobj": (tobj_prev, tobj_latest),
         "uma": uma,
         "usdjpy": (usdjpy_prev, usdjpy_latest),
-        "monex_compra": (None, None),
-        "monex_venta":  (None, None),
+        "monex_compra": (compra_prev, compra_latest),
+        "monex_venta":  (venta_prev,  venta_latest),
     }
+
 # ======================
 # RSS helpers
 # ======================
@@ -703,12 +670,12 @@ def write_two_col_template(template_path: str, out_path: str, d_prev: date, d_la
         ws[f"C{r}"] = v_prev
         ws[f"D{r}"] = v_latest
 
-    write_pair("fix")  # USD FIX Banxico (SIE SF43718, exact-date)
-    # write_pair("monex_compra")  # desactivado: no oficial
-    # write_pair("monex_venta")   # desactivado: no oficial
-    write_pair("jpy")  # JPY/MXN Banxico (SIE SF46406, exact-date)
+    write_pair("fix")
+    write_pair("monex_compra")
+    write_pair("monex_venta")
+    write_pair("jpy")
     ws["C11"], ws["D11"] = values.get("usdjpy", (None, None))
-    write_pair("eur")  # EUR/MXN Banxico (SIE SF46410, exact-date)
+    write_pair("eur")
     # EURUSD 4 dec
     try:
         eur_prev, eur_latest = values.get("eur", (None, None))
