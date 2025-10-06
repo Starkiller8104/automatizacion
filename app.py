@@ -338,7 +338,6 @@ SIE_SERIES = {
     "CETES_364": "SF43945",
 }
 
-@st.cache_data(ttl=60*60)
 
 SIE_SERIES = {
     "USD_FIX":   "SF43718",
@@ -537,19 +536,19 @@ def _latest_and_previous_value_dates():
 # ======================
 # Series as-of (TIIE 182 fija)
 # ======================
+
 def _series_values_for_dates(d_prev: date, d_latest: date, prog: _Progress | None = None):
     start = (d_prev - timedelta(days=450)).isoformat()
     end = d_latest.isoformat()
 
     used_series = {}
 
-    # Progreso: distribuir ~60% en fetchs
+    # Progreso visual
+    step = 0.0
     if prog is not None:
         fetch_span = 60.0
         ops_total = 10.0  # FIX, JPY, EUR, UDIS, CETES*4, OBJETIVO
         step = fetch_span / ops_total
-    else:
-        step = 0.0
 
     def _as_map_fixed(series_id):
         obs = _sie_range(series_id, start, end)
@@ -564,61 +563,26 @@ def _series_values_for_dates(d_prev: date, d_latest: date, prog: _Progress | Non
     if prog: prog.inc(step, "Banxico SIE: UDIS")
     m_udis = _as_map_fixed(SIE_SERIES["UDIS"])
 
-    if prog: prog.inc(step, "Banxico SIE: CETES 28")
-    m_c28  = _as_map_fixed(SIE_SERIES["CETES_28"])
-    if prog: prog.inc(step, "Banxico SIE: CETES 91")
-    m_c91  = _as_map_fixed(SIE_SERIES["CETES_91"])
-    if prog: prog.inc(step, "Banxico SIE: CETES 182")
-    m_c182 = _as_map_fixed(SIE_SERIES["CETES_182"])
-    if prog: prog.inc(step, "Banxico SIE: CETES 364")
-    m_c364 = _as_map_fixed(SIE_SERIES["CETES_364"])
+    if prog: prog.inc(step, "Banxico SIE: CETES 28/91/182/364")
+    m_c28 = _as_map_fixed(SIE_SERIES["CETES_28"])
+    m_c91 = _as_map_fixed(SIE_SERIES["CETES_91"])
+    m_c182= _as_map_fixed(SIE_SERIES["CETES_182"])
+    m_c364= _as_map_fixed(SIE_SERIES["CETES_364"])
 
-    if prog: prog.inc(step, "Banxico SIE: Objetivo")
-    m_tobj = _as_map_fixed(SIE_SERIES["OBJETIVO"])
-
-    # TIIE 28/91 por SIE; 182 fija
-    def _as_map_candidates(key_logic: str):
-        sids = SIE_SERIES_CANDIDATES[key_logic]
-        sid, obs = _sie_range_first_that_has_data(sids, start, end)
-        if sid:
-            used_series[key_logic] = sid
-        else:
-            used_series[key_logic] = None
-        return _to_map_from_obs(obs)
-
-    if prog: prog.inc(step, "Banxico SIE: TIIE 28")
-    m_t28  = _as_map_candidates("TIIE_28")
-    if prog: prog.inc(step, "Banxico SIE: TIIE 91")
-    m_t91  = _as_map_candidates("TIIE_91")
-
-    # TIIE 182 fija (%)
-    def _get_fixed_tiie182():
-        default_pct = "7.9871"
-        s = _get_secret_env("TIIE182_FIXED", default_pct)
-        try:
-            return float(str(s).replace(",", "."))
-        except Exception:
-            return float(default_pct)
-    fixed_pct = _get_fixed_tiie182()
-    fixed_dec = fixed_pct / 100.0
-    t182_prev = fixed_dec
-    t182_latest = fixed_dec
-    used_series["TIIE_182"] = f"fixed:{fixed_pct}%"
-
-    uma = _safe_get_uma()
+    if prog: prog.inc(step, "Banxico SIE: Objetivo de tasa")
+    m_tobj = _as_map_fixed(SIE_SERIES["OBJETIVO"]) if "OBJETIVO" in SIE_SERIES else {}
 
     def _asof(m, d):
         keys = sorted(k for k in m.keys() if k <= d.isoformat())
         return (m[keys[-1]] if keys else None)
-
     def _two(m, scale=1.0, rnd=None):
         v_prev   = _asof(m, d_prev)
         v_latest = _asof(m, d_latest)
-        if v_prev   is not None:   v_prev   = (v_prev   / scale)
-        if v_latest is not None:   v_latest = (v_latest / scale)
+        if v_prev   is not None:   v_prev   = v_prev/scale
+        if v_latest is not None:   v_latest = v_latest/scale
         if rnd is not None:
-            v_prev   = (round(v_prev, rnd)   if v_prev   is not None else None)
-            v_latest = (round(v_latest, rnd) if v_latest is not None else None)
+            v_prev   = round(v_prev, rnd)   if v_prev   is not None else None
+            v_latest = round(v_latest, rnd) if v_latest is not None else None
         return v_prev, v_latest
 
     fix_prev   = _fetch_fix_direct(d_prev) or _asof(m_fix, d_prev)
@@ -630,71 +594,47 @@ def _series_values_for_dates(d_prev: date, d_latest: date, prog: _Progress | Non
     c91_prev, c91_latest     = _two(m_c91,  scale=100.0)
     c182_prev, c182_latest   = _two(m_c182, scale=100.0)
     c364_prev, c364_latest   = _two(m_c364, scale=100.0)
-    t28_prev, t28_latest     = _two(m_t28,  scale=100.0)
-    t91_prev, t91_latest     = _two(m_t91,  scale=100.0)
-    tobj_prev, tobj_latest   = _two(m_tobj, scale=100.0)
+    t28_prev, t28_latest     = _two(m_tobj, scale=100.0) if m_tobj else (None, None)
+    t91_prev, t91_latest     = (None, None)  # si no se usa en Excel actual
 
+    # USD/JPY cruz
     usdjpy_prev   = (fix_prev / jpy_prev)     if (fix_prev is not None and jpy_prev is not None)      else None
     usdjpy_latest = (fix_latest / jpy_latest) if (fix_latest is not None and jpy_latest is not None)  else None
 
-    mv = None
-    if "rolling_movex_for_last6" in globals():
-        try:
-            mv = rolling_movex_for_last6(window=globals().get("movex_win"))
-        except Exception:
-            mv = None
-
+    # --- MONEX / Compra-Venta USD ---
     compra_prev = compra_latest = venta_prev = venta_latest = None
-    if mv and isinstance(mv, (list, tuple)):
-        try:
-            mpct = float(globals().get("margen_pct", _get_margin_pct()))
-            compra = [(x * (1 - mpct/100.0) if x is not None else None) for x in mv]
-            venta  = [(x * (1 + mpct/100.0) if x is not None else None) for x in mv]
-            if len(compra) >= 2:
-                compra_prev, compra_latest = compra[-2], compra[-1]
-            if len(venta) >= 2:
-                venta_prev,  venta_latest  = venta[-2],  venta[-1]
-        except Exception:
-            pass
-    
-mode = (_get_secret_env("MONEX_MODE", "old") or "old").strip().lower()
-if mode == "old":
-    # usa el promedio móvil del FIX (ventana=movex_win) y aplica margen
-    mv = rolling_movex_for_last6(window=globals().get("movex_win", 20))
-    compra_prev = compra_latest = venta_prev = venta_latest = None
-    if mv and isinstance(mv, (list, tuple)):
-        try:
-            mpct = float(globals().get("margen_pct", _get_margin_pct()))
-            compra = [(x * (1 - mpct/100.0) if x is not None else None) for x in mv]
-            venta  = [(x * (1 + mpct/100.0) if x is not None else None) for x in mv]
-            if len(compra) >= 2:
-                compra_prev, compra_latest = compra[-2], compra[-1]
-            if len(venta) >= 2:
-                venta_prev,  venta_latest  = venta[-2],  venta[-1]
-        except Exception:
-            pass
-elif mode == "scrape":
-    monex = _fetch_monex_scrape() or {}
-    usd = monex.get("usd") or {}
-    compra_prev   = usd.get("compra"); compra_latest = usd.get("compra")
-    venta_prev    = usd.get("venta");  venta_latest  = usd.get("venta")
-# Fallback final a FIX ± margen si faltó algo
-mpct = _get_margin_pct()
-if fix_prev is not None and (compra_prev is None):
-    compra_prev = fix_prev * (1 - mpct/100.0)
-if fix_latest is not None and (compra_latest is None):
-    compra_latest = fix_latest * (1 - mpct/100.0)
-if fix_prev is not None and (venta_prev is None):
-    venta_prev = fix_prev * (1 + mpct/100.0)
-if fix_latest is not None and (venta_latest is None):
-    venta_latest = fix_latest * (1 + mpct/100.0)
+    mode = (_get_secret_env("MONEX_MODE", "old") or "old").strip().lower()
 
-st.session_state["used_series_ids"] = {
+    if mode == "old":
+        mv = rolling_movex_for_last6(window=globals().get("movex_win", 20))
+        if mv and isinstance(mv, (list, tuple)):
+            try:
+                mpct = float(globals().get("margen_pct", _get_margin_pct()))
+                compra = [(x * (1 - mpct/100.0) if x is not None else None) for x in mv]
+                venta  = [(x * (1 + mpct/100.0) if x is not None else None) for x in mv]
+                if len(compra) >= 2: compra_prev, compra_latest = compra[-2], compra[-1]
+                if len(venta)  >= 2: venta_prev,  venta_latest  = venta[-2],  venta[-1]
+            except Exception:
+                pass
+    elif mode == "scrape":
+        monex = _fetch_monex_scrape() or {}
+        usd = monex.get("usd") or {}
+        compra_prev   = usd.get("compra"); compra_latest = usd.get("compra")
+        venta_prev    = usd.get("venta");  venta_latest  = usd.get("venta")
+
+    # Fallback final a FIX ± margen si falta algo
+    mpct = _get_margin_pct()
+    if fix_prev is not None and (compra_prev is None):   compra_prev   = fix_prev   * (1 - mpct/100.0)
+    if fix_latest is not None and (compra_latest is None): compra_latest = fix_latest * (1 - mpct/100.0)
+    if fix_prev is not None and (venta_prev is None):    venta_prev    = fix_prev    * (1 + mpct/100.0)
+    if fix_latest is not None and (venta_latest is None):  venta_latest  = fix_latest  * (1 + mpct/100.0)
+
+    st.session_state["used_series_ids"] = {
         "TIIE_28":  st.session_state.get("used_series_ids", {}).get("TIIE_28"),
         "TIIE_91":  st.session_state.get("used_series_ids", {}).get("TIIE_91"),
-        "TIIE_182": used_series.get("TIIE_182"),
+        "TIIE_182": used_series.get("TIIE_182") if "TIIE_182" in used_series else None,
     }
-    
+
     return {
         "fix": (fix_prev, fix_latest),
         "jpy": (jpy_prev, jpy_latest),
@@ -706,9 +646,8 @@ st.session_state["used_series_ids"] = {
         "c364": (c364_prev, c364_latest),
         "t28": (t28_prev, t28_latest),
         "t91": (t91_prev, t91_latest),
-        "t182": (t182_prev, t182_latest),
         "tobj": (tobj_prev, tobj_latest),
-        "uma": uma,
+        "uma": _uma_values(),
         "usdjpy": (usdjpy_prev, usdjpy_latest),
         "monex_compra": (compra_prev, compra_latest),
         "monex_venta":  (venta_prev,  venta_latest),
