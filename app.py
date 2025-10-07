@@ -6,7 +6,7 @@ def _fetch_fix_direct(date_obj):
     """
     import os, requests
 
-# --- UMA shim (added by patch): never raises NameError if not provided elsewhere
+# --- UMA shim (added by atch): never raises NameError if not provided elsewhere
 def _uma_values():
     try:
         import streamlit as st
