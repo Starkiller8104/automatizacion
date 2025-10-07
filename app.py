@@ -280,29 +280,46 @@ def build_excel(d_prev: date, d_latest: date, values: dict) -> bytes:
         ws[f"C{r}"].number_format = "0.00%"
         ws[f"D{r}"].number_format = "0.00%"
 
-    # Rangos con nombre
-    def add_name(name, ref):
-        try:
-            existing = [dn for dn in wb.defined_names.definedName if dn.name == name]
-            for dn in existing:
-                wb.defined_names.definedName.remove(dn)
-        except Exception:
-            pass
-        wb.defined_names.append(DefinedName(name=name, attr_text=f"{ws.title}!{ref}"))
+    
+    # Rangos con nombre (compatibles con distintas versiones de openpyxl)
+    try:
+        from openpyxl.workbook.defined_name import DefinedName
+        def add_name(name, ref):
+            dn_container = wb.defined_names
+            dn = DefinedName(name=name, attr_text=f"'{ws.title}'!{ref}")
+            # eliminar existentes con el mismo nombre si el contenedor lo permite
+            try:
+                # openpyxl >=3.1: dn_container is list-like
+                existing = [d for d in getattr(dn_container, "definedName", []) if getattr(d, "name", None) == name]
+                for d in existing:
+                    dn_container.definedName.remove(d)
+            except Exception:
+                pass
+            if hasattr(dn_container, "append"):
+                dn_container.append(dn)
+            elif hasattr(dn_container, "add"):
+                dn_container.add(dn)
+            else:
+                # como último recurso, omitir sin romper
+                pass
 
-    add_name("RANGO_FECHAS", "$C$2:$D$2")
-    add_name("RANGO_USDMXN", f"$C${rows['fix']}:$D${rows['fix']}")
-    add_name("RANGO_EURMXN", f"$C${rows['eur']}:$D${rows['eur']}")
-    add_name("RANGO_JPYMXN", f"$C${rows['jpy']}:$D${rows['jpy']}")
-    add_name("RANGO_UDIS",   f"$C${rows['udis']}:$D${rows['udis']}")
-    add_name("RANGO_TOBJ",   f"$C${rows['tobj']}:$D${rows['tobj']}")
-    add_name("RANGO_TIIE28", f"$C${rows['t28']}:$D${rows['t28']}")
-    add_name("RANGO_TIIE91", f"$C${rows['t91']}:$D${rows['t91']}")
-    add_name("RANGO_TIIE182",f"$C${rows['t182']}:$D${rows['t182']}")
-    add_name("RANGO_C28",    f"$C${rows['c28']}:$D${rows['c28']}")
-    add_name("RANGO_C91",    f"$C${rows['c91']}:$D${rows['c91']}")
-    add_name("RANGO_C182",   f"$C${rows['c182']}:$D${rows['c182']}")
-    add_name("RANGO_C364",   f"$C${rows['c364']}:$D${rows['c364']}")
+        add_name("RANGO_FECHAS", "$C$2:$D$2")
+        add_name("RANGO_USDMXN", f"$C${rows['fix']}:$D${rows['fix']}")
+        add_name("RANGO_EURMXN", f"$C${rows['eur']}:$D${rows['eur']}")
+        add_name("RANGO_JPYMXN", f"$C${rows['jpy']}:$D${rows['jpy']}")
+        add_name("RANGO_UDIS",   f"$C${rows['udis']}:$D${rows['udis']}")
+        add_name("RANGO_TOBJ",   f"$C${rows['tobj']}:$D${rows['tobj']}")
+        add_name("RANGO_TIIE28", f"$C${rows['t28']}:$D${rows['t28']}")
+        add_name("RANGO_TIIE91", f"$C${rows['t91']}:$D${rows['t91']}")
+        add_name("RANGO_TIIE182",f"$C${rows['t182']}:$D${rows['t182']}")
+        add_name("RANGO_C28",    f"$C${rows['c28']}:$D${rows['c28']}")
+        add_name("RANGO_C91",    f"$C${rows['c91']}:$D${rows['c91']}")
+        add_name("RANGO_C182",   f"$C${rows['c182']}:$D${rows['c182']}")
+        add_name("RANGO_C364",   f"$C${rows['c364']}:$D${rows['c364']}")
+    except Exception:
+        # si la versión de openpyxl no soporta esta API, no interrumpimos la exportación
+        pass
+
 
     buf = io.BytesIO()
     wb.save(buf)
