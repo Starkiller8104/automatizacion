@@ -118,7 +118,7 @@ class _Progress:
 with st.expander("🔎 Diagnóstico rápido", expanded=False):
     try:
         tmps = {
-            "token_present": bool(BANXICO_TOKEN),
+            "token_present": bool(globals().get("BANXICO_TOKEN")),
             "hoy_cdmx": ( _cdmx_now().isoformat() if "_cdmx_now" in globals() else "N/D"),
         }
         st.write(tmps)
