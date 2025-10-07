@@ -117,6 +117,23 @@ class _Progress:
 # ======================
 st.set_page_config(page_title="Indicadores IMEMSA", layout="wide")
 
+# --- Hora/fecha CDMX segura para uso inmediato en nombre de archivo ---
+from datetime import datetime
+try:
+    from zoneinfo import ZoneInfo
+    _MX_TZ = ZoneInfo("America/Mexico_City")
+except Exception:
+    _MX_TZ = None
+
+def _now_str_cdmx(fmt="%Y-%m-%d %H%M%S"):
+    try:
+        if _MX_TZ:
+            return datetime.now(_MX_TZ).strftime(fmt)
+    except Exception:
+        pass
+    return datetime.now().strftime(fmt)
+
+
 def _get_secret_env(key, default=None):
     try:
         v = st.secrets.get(key)
@@ -1041,7 +1058,7 @@ if section_card('Generación de Excel', lambda: st.button("Generar Excel")):
 st.download_button(
     "Descargar Excel",
     data=(st.session_state["xlsx_bytes"] or b""),
-    file_name="Indicadores " + today_cdmx().strftime("%Y-%m-%d %H%M%S") + ".xlsx",
+    file_name="Indicadores " + _now_str_cdmx("%Y-%m-%d %H%M%S") + ".xlsx",
     mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
     disabled=(st.session_state["xlsx_bytes"] is None),
 )
