@@ -191,51 +191,64 @@ def _prev_business_day(base: date) -> date:
         d -= timedelta(days=1)
     return d
 
+
 def header_dates_effective():
     """
-    Devuelve (d_prev, d_latest) usando corte de las 12:00 en CDMX.
-    - d_latest: hoy si hora>=12:00; de lo contrario el día hábil previo
-    - d_prev:   el día hábil inmediatamente anterior a d_latest
+    Devuelve (d_prev, d_latest) usando *hoy* ajustado a día hábil:
+    - d_latest: hoy si es hábil; si no, el hábil anterior
+    - d_prev:   el hábil inmediatamente anterior a d_latest
     """
     now = today_cdmx()
-    # Definir d_latest con corte de mediodía:
-    if now.hour >= 12:
-        d_latest = now.date()
-        # Si hoy es fin de semana, retrocede al hábil previo
-        while d_latest.weekday() >= 5:
-            d_latest -= timedelta(days=1)
-    else:
-        # Antes de mediodía -> usar día hábil anterior
-        d_latest = _prev_business_day(now.date())
-    # d_prev = hábil anterior a d_latest
+    d_latest = now.date()
+    # Si es fin de semana, retrocede al hábil previo
+    while d_latest.weekday() >= 5:
+        d_latest -= timedelta(days=1)
+    # Si por algún motivo hoy aún no hay publicación de FIX,
+    # el pipeline as-of tomará el último dato <= d_latest.
     d_prev = _prev_business_day(d_latest)
-    return d_prev, d_latest
+    return (d_prev, d_latest)
 
-# ======================
-def today_cdmx():
-    try:
-        import pytz
-        tz = pytz.timezone("America/Mexico_City")
-        return datetime.now(tz).replace(tzinfo=None)
-    except Exception:
-        return datetime.now()
+def _prev_business_day(d):
+    # igual que antes (busca día hábil previo)
+    while d.weekday() == 0 or d.weekday() >= 5:
+        # si es lunes (0), retrocede a viernes; si fin de semana, retrocede
+        if d.weekday() == 0:
+            d -= timedelta(days=3)
+        else:
+            d -= timedelta(days=1)
+    return d
 
-def business_days_back(n=10, end_date=None):
-    end = (end_date or today_cdmx().date())
+def business_days_back(n, start_date):
     days = []
-    d = end
+    d = start_date
     while len(days) < n:
-        if d.weekday() < 5:
-            days.append(d)
-        d -= timedelta(days=1)
+        d = _prev_business_day(d)
+        days.append(d)
     return days  # descendente
+
+
 
 # ======================
 # Tokens / Flags
 # ======================
-BANXICO_TOKEN = _get_secret_env("banxico_token", "677aaedf11d11712aa2ccf73da4d77b6b785474eaeb2e092f6bad31b29de6609")
-INEGI_TOKEN   = _get_secret_env("inegi_token",   "0146a9ed-b70f-4ea2-8781-744b900c19d1")
-FRED_API_KEY  = _get_secret_env("fred_api_key",  "b4f11681f441da78103a3706d0dab1cf")
+# Normalización de token Banxico: admite secrets['banxico_token'], secrets['BANXICO_TOKEN']
+# y variables de entorno BANXICO_TOKEN o banxico_token.
+def _get_env_any(keys, default=None):
+    import os
+    for k in keys:
+        v = os.environ.get(k)
+        if v:
+            return v
+    return default
+
+BANXICO_TOKEN = (
+    _get_secret_env("banxico_token") or
+    _get_secret_env("BANXICO_TOKEN") or
+    _get_env_any(["BANXICO_TOKEN","banxico_token"], "")
+)
+INEGI_TOKEN   = _get_secret_env("inegi_token",   "")
+FRED_API_KEY  = _get_secret_env("fred_api_key",  "")
+
 
 MONEX_FALLBACK = (_get_secret_env("MONEX_FALLBACK", "scrape") or "scrape").strip().lower()
 def _fetch_monex_scrape():
@@ -927,10 +940,9 @@ def write_two_col_template(template_path: str, out_path: str, d_prev: date, d_la
         ws["C2"].number_format = "dd/mm/yyyy"
         ws["D2"].number_format = "dd/mm/yyyy"
 
-        # Rangos con nombre (se definen siempre sobre la hoja activa)
+        # Rangos con nombre
         from openpyxl.workbook.defined_name import DefinedName
         def add_name(name, ref):
-            # elimina si ya existe
             try:
                 existing = [dn for dn in wb.defined_names.definedName if dn.name == name]
                 for dn in existing:
@@ -953,7 +965,6 @@ def write_two_col_template(template_path: str, out_path: str, d_prev: date, d_la
         add_name("RANGO_C182",   f"$C${rows['c182']}:$D${rows['c182']}")
         add_name("RANGO_C364",   f"$C${rows['c364']}:$D${rows['c364']}")
     except Exception as _e:
-        # No interrumpir la generación por nombres; se muestra en diagnóstico si aplica.
         pass
 
     wb.save(out_path)
