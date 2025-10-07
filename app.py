@@ -1,399 +1,394 @@
 
-def _fetch_fix_direct(date_obj):
-    """
-    Obtiene el FIX (SF43718) exactamente para `date_obj` directo de Banxico SIE.
-    Requiere BANXICO_TOKEN en variables de entorno.
-    """
-    import os, requests
-
-# --- UMA shim (added by patch): never raises NameError if not provided elsewhere
-def _uma_values():
-    try:
-        import streamlit as st
-        v = st.session_state.get("uma_values")
-        if isinstance(v, dict):
-            return v
-    except Exception:
-        pass
-    return {"diaria": None, "mensual": None, "anual": None}
-    sid = "SF43718"
-    token = os.environ.get("BANXICO_TOKEN") or os.environ.get("BANXICO_API_TOKEN")
-    if not token:
-        return None
-    d = date_obj.strftime("%Y-%m-%d")
-    url = f"https://www.banxico.org.mx/SieAPIRest/service/v1/series/{sid}/datos/{d}/{d}"
-    headers = {"Bmx-Token": token}
-    try:
-        resp = requests.get(url, headers=headers, timeout=15)
-        j = resp.json()
-        obs = j["bmx"]["series"][0]["datos"]
-        if not obs:
-            return None
-        val = obs[-1]["dato"]
-        val = float(str(val).replace(",", ""))
-        return round(val, 4)
-    except Exception:
-        return None
-
-
-import os
+import io
 import re
-import inspect
-import tempfile
-from datetime import datetime, timedelta, date
-from pathlib import Path
-from xml.etree import ElementTree as ET
-
+import time
+import html
+import base64
+import pytz
+import re
+import requests
+import feedparser
+import xlsxwriter
 import streamlit as st
-# --- UI helpers import with fallback ---
-try:
-    from ui_helpers import inject_base_css, header, section_card, metric_row
-except ModuleNotFoundError:
-    def inject_base_css():
-        st.markdown(
-            """<style>
-            .im-card{padding:1rem 1.25rem;border-radius:.9rem;background:rgba(255,255,255,.03);
-                     border:1px solid rgba(255,255,255,.08);box-shadow:0 2px 8px rgba(0,0,0,.15);
-                     margin-bottom:.75rem}
-            .im-title{font-weight:700;font-size:1.1rem;margin-bottom:.25rem}
-            .im-subtle{opacity:.8;font-size:.9rem}
-            .stButton > button{border-radius:.75rem;padding:.6rem 1rem;font-weight:600}
-            div[data-testid="metric-container"]{padding:.6rem .8rem;border-radius:.75rem;
-                background:rgba(255,255,255,.03);border:1px solid rgba(255,255,255,.08)}
-            div[data-testid="stMetricDelta"] svg{display:none}
-            </style>""", unsafe_allow_html=True
-        )
-    def header(logo_path:str, title:str, subtitle:str="", updated:str|None=None):
-        cols = st.columns([1,5,3])
-        with cols[0]:
-            try: st.image(logo_path, use_container_width=True)
-            except Exception: st.write("")
-        with cols[1]:
-            st.markdown(f"### {title}")
-            if subtitle: st.markdown(f"<span class='im-subtle'>{subtitle}</span>", unsafe_allow_html=True)
-        with cols[2]:
-            if updated:
-                st.markdown(
-                    f"<div class='im-card'><div class='im-title'>Estado</div>"
-                    f"<div class='im-subtle'>Actualizado: {updated}</div></div>",
-                    unsafe_allow_html=True
-                )
-    def section_card(title:str, body_builder):
-        st.markdown(f"<div class='im-card'><div class='im-title'>{title}</div>", unsafe_allow_html=True)
-        body_builder()
-        st.markdown("</div>", unsafe_allow_html=True)
-    def metric_row(items):
-        cols = st.columns(len(items))
-        for i,(label,value,delta) in enumerate(items):
-            with cols[i]:
-                st.metric(label, value, delta if delta else None)
+from datetime import datetime, timedelta, date
+from email.utils import parsedate_to_datetime
+from pathlib import Path
+from PIL import Image
+from urllib.parse import urlparse
+from openpyxl import Workbook
+from openpyxl.styles import Alignment, Font, PatternFill
+from requests.adapters import HTTPAdapter, Retry
 
+def _fred_req_v1():
+    s = requests.Session()
+    try:
+        from requests.adapters import HTTPAdapter, Retry
+        rty = Retry(total=3, backoff_factor=0.5, status_forcelist=[429, 500, 502, 503, 504])
+        s.mount("https://", HTTPAdapter(max_retries=rty))
+    except Exception:
+        pass
+    return s
 
-# ---------- Fine-grained progress helper ----------
-class _Progress:
-    def __init__(self, placeholder):
-        self.placeholder = placeholder
-        self.value = 0
+def _fred_fetch_v1(series_id: str, start: str, end: str, api_key: str):
+    url = "https://api.stlouisfed.org/fred/series/observations"
+    params = {"series_id": series_id, "api_key": api_key, "file_type": "json",
+              "observation_start": start, "observation_end": end}
+    r = _fred_req_v1().get(url, params=params, timeout=30)
+    r.raise_for_status()
+    out = []
+    try:
+        observations = r.json().get("observations", [])
+    except Exception:
+        observations = []
+    for o in observations:
+        v = o.get("value")
+        if v not in (None, ".", ""):
+            try:
+                out.append((o["date"], float(v)))
+            except Exception:
+                pass
+    return out
+
+def _fred_write_v1(wb, series_dict, sheet_name="FRED_v2"):
+    ws = wb.add_worksheet(sheet_name)
+    fmt_bold = wb.add_format({"bold": True, "align": "center"})
+    fmt_date = wb.add_format({"num_format": "yyyy-mm-dd"})
+    fmt_num  = wb.add_format({"num_format": "#,##0.0000"})
+    headers = ["Fecha"] + list(series_dict.keys())
+    ws.write_row(0, 0, headers, fmt_bold)
+    fechas = sorted({d for vals in series_dict.values() for d, _ in vals})
+    lookup = {name: {d: v for d, v in vals} for name, vals in series_dict.items()}
+    for i, d in enumerate(fechas, start=1):
         try:
-            self._bar = placeholder.progress(0, text="")
-            self._has_text = True
-        except TypeError:
-            self._bar = placeholder.progress(0)
-            self._has_text = False
+            ws.write_datetime(i, 0, datetime.fromisoformat(d), fmt_date)
+        except Exception:
+            ws.write_string(i, 0, d)
+        for j, name in enumerate(series_dict.keys(), start=1):
+            v = lookup[name].get(d)
+            if v is not None:
+                ws.write_number(i, j, v, fmt_num)
+    last_row = 1 + len(fechas)
+    cats = f"='{sheet_name}'!$A$2:$A${last_row}"
+    for j, name in enumerate(series_dict.keys(), start=1):
+        ch = wb.add_chart({"type": "line"})
+        col_letter = chr(64 + j + 0)  # B, C, ...
+        ch.add_series({
+            "name":       f"='{sheet_name}'!${col_letter}$1",
+            "categories": cats,
+            "values":     f"='{sheet_name}'!${col_letter}$2:${col_letter}${last_row}",
+        })
+        ch.set_title({"name": name})
+        ch.set_y_axis({"num_format": "#,##0.0000"})
+        ws.insert_chart(3 + (j-1)*16, 4, ch, {"x_scale": 1.2, "y_scale": 1.1})
+    ws.set_column(0, 0, 12)
+    ws.set_column(1, len(series_dict), 16)
+    return ws
 
-    def set(self, v, text=None):
-        v = max(0, min(100, int(v)))
-        self.value = v
-        if self._has_text and text is not None:
-            self._bar.progress(v, text=text)
-        else:
-            self._bar.progress(v)
-
-    def inc(self, delta, text=None):
-        self.set(self.value + delta, text=text)
-
-
-def _has_any(values: dict) -> bool:
+def _mx_news_get_v1(max_items=12):
+    feeds = [
+        ("Google News MX – Economía",
+         "https://news.google.com/rss/headlines/section/topic/BUSINESS?hl=es-419&gl=MX&ceid=MX:es-419"),
+        ("Google News MX – BMV",
+         "https://news.google.com/rss/search?q=Bolsa%20Mexicana%20de%20Valores&hl=es-419&gl=MX&ceid=MX:es-419"),
+        ("Google News MX – Banxico",
+         "https://news.google.com/rss/search?q=Banxico&hl=es-419&gl=MX&ceid=MX:es-419"),
+        ("Google News MX – Inflación INEGI",
+         "https://news.google.com/rss/search?q=inflaci%C3%B3n%20M%C3%A9xico%20INEGI&hl=es-419&gl=MX&ceid=MX:es-419"),
+    ]
+    items = []
     try:
-        for k, v in (values or {}).items():
-            a, b = v if isinstance(v, (list, tuple)) else (None, None)
-            if (a is not None) or (b is not None):
-                return True
+        import feedparser as _fp
+    except Exception:
+        return items
+    for source, url in feeds:
+        try:
+            fp = _fp.parse(url)
+            for e in fp.get("entries", []):
+                title = (e.get("title") or "").strip()
+                link  = (e.get("link") or "").strip()
+                pub   = e.get("published") or e.get("updated") or ""
+                try:
+                    dt = parsedate_to_datetime(pub) if pub else None
+                except Exception:
+                    dt = None
+                items.append({"title": title, "link": link, "published_dt": dt, "source": source})
+        except Exception:
+            continue
+    items.sort(key=lambda x: x["published_dt"] or datetime(1970,1,1), reverse=True)
+    return items[:max_items]
+
+def _mx_news_write_v1(wb, news_list, sheet_name="Noticias_RSS"):
+    if not news_list:
+        return None
+    ws = wb.add_worksheet(sheet_name)
+    fmt_bold = wb.add_format({"bold": True})
+    fmt_link = wb.add_format({"font_color": "blue", "underline": 1})
+    fmt_date = wb.add_format({"num_format": "yyyy-mm-dd hh:mm"})
+    ws.write_row(0, 0, ["Título", "Link", "Fecha", "Fuente"], fmt_bold)
+    for i, n in enumerate(news_list, start=1):
+        ws.write_string(i, 0, n.get("title",""))
+        link = n.get("link","")
+        if link:
+            ws.write_url(i, 1, link, fmt_link, string="Abrir")
+        dt = n.get("published_dt")
+        if dt:
+            try:
+                ws.write_datetime(i, 2, dt, fmt_date)
+            except Exception:
+                ws.write_string(i, 2, str(dt))
+        ws.write_string(i, 3, n.get("source",""))
+    ws.set_column(0, 0, 80); ws.set_column(1, 1, 12)
+    ws.set_column(2, 2, 20); ws.set_column(3, 3, 18)
+    return ws
+
+import warnings
+warnings.filterwarnings("ignore", category=DeprecationWarning)
+
+DEBUG = False  
+
+def _noop(*args, **kwargs):
+    """Función vacía para suprimir salidas visibles."""
+    return None
+
+if not DEBUG:
+    
+    import builtins as _b
+    _b.print = _noop
+
+   
+    try:
+        st.write   = _noop   
+        st.json    = _noop   
+        st.success = _noop   
+        
     except Exception:
         pass
-    return False
-# ======================
-# Config / Branding
-# --- Diagnóstico mínimo (no bloqueante) ---
-with st.expander("🔎 Diagnóstico rápido", expanded=False):
-    try:
-        tmps = {
-            "token_present": bool(globals().get("BANXICO_TOKEN")),
-            "hoy_cdmx": ( _cdmx_now().isoformat() if "_cdmx_now" in globals() else "N/D"),
-        }
-        st.write(tmps)
-    except Exception as _e:
-        st.write({"diag_error": str(_e)})
-
-# ======================
-st.set_page_config(page_title="Indicadores IMEMSA", layout="wide")
-
-# --- Zona horaria CDMX y helpers de fecha/tiempo (cargados temprano) ---
-from datetime import datetime, timedelta
-try:
-    from zoneinfo import ZoneInfo
-    _MX_TZ = ZoneInfo("America/Mexico_City")
-except Exception:
-    _MX_TZ = None
-
-def _cdmx_now():
-    try:
-        if _MX_TZ:
-            return datetime.now(_MX_TZ)
-    except Exception:
-        pass
-    return datetime.now()
-
-# Polyfill: define today_cdmx si aún no existe cuando el módulo se evalúa
-try:
-    today_cdmx  # type: ignore
-except NameError:
-    def today_cdmx():
-        return _cdmx_now()
 
 
-# --- Hora/fecha CDMX segura para uso inmediato en nombre de archivo ---
-from datetime import datetime
-try:
-    from zoneinfo import ZoneInfo
-    _MX_TZ = ZoneInfo("America/Mexico_City")
-except Exception:
-    _MX_TZ = None
+st.set_page_config(page_title="IMEMSA - Indicadores", layout="wide")
 
-def _now_str_cdmx(fmt="%Y-%m-%d %H%M%S"):
-    try:
-        if _MX_TZ:
-            return datetime.now(_MX_TZ).strftime(fmt)
-    except Exception:
-        pass
-    return datetime.now().strftime(fmt)
+st.markdown("""
+<style>
+/* ---------- Layout general ---------- */
+.block-container { padding-top: 1.5rem; }
 
+/* Encabezado */
+.imemsa-header {
+  display: flex; gap: 1.25rem; align-items: center; 
+  margin-bottom: 0.75rem;
+}
 
-def _get_secret_env(key, default=None):
-    try:
-        v = st.secrets.get(key)
-    except Exception:
-        v = None
-    if v is None:
-        v = os.environ.get(key) or os.environ.get(key.upper())
-    return v if v is not None else default
+/* Logo */
+.imemsa-logo img {
+  max-height: 5px;        
+  width: auto;
+  border-radius: 10px;
+}
 
-# Optional clean UI (toggle with HIDE_DEFAULT_UI; default=on)
-if str((_get_secret_env("HIDE_DEFAULT_UI", "1"))).strip().lower() in ("1","true","yes","on"):
-    st.markdown(
-        "<style>#MainMenu{visibility:hidden;} footer{visibility:hidden;} header{visibility:hidden;}</style>",
-        unsafe_allow_html=True
-    )
+/* Títulos */
+.imemsa-title {
+  line-height: 1.1;
+}
+.imemsa-title h1 {
+  margin: 0 0 0.25rem 0; 
+  font-size: clamp(1.6rem, 2.4vw, 2.2rem);
+  font-weight: 500;
+}
+.imemsa-title h3 {
+  margin: 0; 
+  font-weight: 500; 
+  opacity: 0.95;
+}
 
-LOGO_PATH = str((Path(__file__).parent / "logo.png").resolve())
-TEMPLATE_PATH = str((Path(__file__).parent / "Indicadores_template_2col.xlsx").resolve())
+/* Línea divisoria con colores del logo */
+.imemsa-divider {
+  height: 6px;
+  width: 100%;
+  border-radius: 999px;
+  margin: 0.75rem 0 1rem 0;
+  background: linear-gradient(90deg, #0A4FA3 0%, #0A4FA3 40%, #E32028 40%, #E32028 60%, #0A4FA3 60%, #0A4FA3 100%);
+}
 
-# ======================
-# Password (opcional)
-# ======================
-APP_PASSWORD = _get_secret_env("app_password")
-if not APP_PASSWORD:
-    APP_PASSWORD = _get_secret_env("APP_PASSWORD")
+/* Espaciado inferior tras el header */
+.imemsa-spacer { height: 12px; }
+</style>
+""", unsafe_allow_html=True)
 
-def _password_ok(p: str) -> bool:
-    if not APP_PASSWORD:
-        return True
-    return str(p) == str(APP_PASSWORD)
-
-if "auth_ok" not in st.session_state:
-    st.session_state["auth_ok"] = False
-
-
-inject_base_css()
-from datetime import datetime
-try:
-    import pytz
-    updated_str = datetime.now(pytz.timezone("America/Mexico_City")).strftime("%Y-%m-%d %H:%M (CDMX)")
-except Exception:
-    updated_str = datetime.now().strftime("%Y-%m-%d %H:%M")
-header(
-    logo_path=LOGO_PATH,
-    title="Indicadores de Tipo de Cambio",
-    subtitle="IMEMSA · Reporte ejecutivo",
-    updated=updated_str
+st.markdown(
+    """
+    <div class="imemsa-header">
+      <div class="imemsa-logo">
+        <img src="logo.png" alt="IMEMSA logo">
+      </div>
+      <div class="imemsa-title">
+        <h1>Indicadores de Tipo de Cambio</h1>
+      </div>
+    </div>
+    <div class="imemsa-divider"></div>
+    <div class="imemsa-spacer"></div>
+    """,
+    unsafe_allow_html=True
 )
 
+import os, pytz as _pytz_for_login  
 
-st.markdown("---")
+def _get_app_password() -> str:
+    try:
+        return st.secrets["APP_PASSWORD"]
+    except Exception:
+        pass
+    if os.getenv("APP_PASSWORD"):
+        return os.getenv("APP_PASSWORD")
+    return "imemsa79"  
 
-if not st.session_state["auth_ok"]:
-    with st.form("login_form"):
-        st.subheader("Acceso")
-        pwd = st.text_input("Password", type="password")
-        submit = st.form_submit_button("Entrar")
-        if submit:
-            if _password_ok(pwd):
-                st.session_state["auth_ok"] = True
-                st.rerun()
-            else:
-                st.error("Password incorrecto")
+def _check_password() -> bool:
+    if "auth_ok" not in st.session_state:
+        st.session_state.auth_ok = False
+    def _try_login():
+        pw = st.session_state.get("password_input", "")
+        st.session_state.auth_ok = (pw == _get_app_password())
+        st.session_state.password_input = ""
+    if st.session_state.auth_ok:
+        return True
+    st.title("🔒 Acceso restringido")
+    st.text_input("Contraseña", type="password", key="password_input", on_change=_try_login, placeholder="Escribe tu contraseña…")
     st.stop()
 
-# ======================
-# Utilidades de fecha
-# --- Encabezados efectivos (respeta corte 12:00 CDMX) ---
-def _prev_business_day(base: date) -> date:
-    d = base - timedelta(days=1)
-    while d.weekday() >= 5:  # 5=Sat,6=Sun
-        d -= timedelta(days=1)
-    return d
+CDMX = pytz.timezone("America/Mexico_City")
 
+def today_cdmx():
+    return datetime.now(CDMX).date()
 
+def now_ts():
+    return datetime.now(CDMX).strftime("%Y-%m-%d %H:%M:%S")
 
-
-def header_dates_effective():
-    """
-    (d_prev, d_latest) con corte 12:00 CDMX:
-    - Si hora < 12: d_latest = día hábil anterior
-    - Si hora >= 12: d_latest = hoy (si es hábil; si no, retrocede hasta hábil)
-    - d_prev = hábil anterior a d_latest
-    """
-    now = _cdmx_now() if '_cdmx_now' in globals() else now_cdmx()
-    d = now.date()
-
-    def is_business(dd):
-        return dd.weekday() < 5
-
-    def prev_business(dd):
-        if dd.weekday() == 0:
-            return dd - timedelta(days=3)
-        while dd.weekday() >= 5:
-            dd -= timedelta(days=1)
-        if dd.weekday() in (1,2,3,4):
-            return dd - timedelta(days=1)
-        return dd
-
-    while not is_business(d):
-        d -= timedelta(days=1)
-
-    if now.hour < 12:
-        d_latest = prev_business(d)
-    else:
-        d_latest = d
-
-    d_prev = prev_business(d_latest)
-    return (d_prev, d_latest)
-
-
-def _prev_business_day(d):
-    # Lunes → retrocede a viernes; fines de semana → retrocede a viernes
-    if d.weekday() == 0:  # lunes
-        return d - timedelta(days=3)
-    while d.weekday() >= 5:  # sábado/domingo
-        d -= timedelta(days=1)
-    # Si ya es martes-viernes, regresa un día; si es lunes ya se manejó arriba
-    if d.weekday() in (1,2,3,4):
-        return d - timedelta(days=1)
-    return d
-
-def business_days_back(n, start_date):
-    days = []
-    d = start_date
-    while len(days) < n:
-        d = _prev_business_day(d)
-        days.append(d)
-    return days  # descendente
-
-
-
-
-# ======================
-# Tokens / Flags
-# ======================
-# Normalización de token Banxico: admite secrets['banxico_token'], secrets['BANXICO_TOKEN']
-# y variables de entorno BANXICO_TOKEN o banxico_token.
-def _get_env_any(keys, default=None):
-    import os
-    for k in keys:
-        v = os.environ.get(k)
-        if v:
-            return v
-    return default
-
-BANXICO_TOKEN = (
-    _get_secret_env("banxico_token") or
-    _get_secret_env("BANXICO_TOKEN") or
-    _get_env_any(["BANXICO_TOKEN","banxico_token"], "")
-)
-INEGI_TOKEN   = _get_secret_env("inegi_token",   "")
-FRED_API_KEY  = _get_secret_env("fred_api_key",  "")
-
-
-MONEX_FALLBACK = (_get_secret_env("MONEX_FALLBACK", "scrape") or "scrape").strip().lower()
-def _fetch_monex_scrape():
-    """
-    Intenta extraer compra/venta USD y EUR desde https://www.monex.com.mx/.
-    Devuelve {'usd': {'compra': float, 'venta': float}, 'eur': {...}} o None.
-    """
+def try_float(x):
     try:
-        import re, requests
-        try:
-            from bs4 import BeautifulSoup
-        except Exception:
-            BeautifulSoup = None
-        resp = requests.get("https://www.monex.com.mx/", headers={"User-Agent":"Mozilla/5.0"}, timeout=15)
-        resp.raise_for_status()
-        html = resp.text
-        # Obtener texto
-        if BeautifulSoup:
-            soup = BeautifulSoup(html, "html.parser")
-            txt = soup.get_text(" ", strip=True)
-        else:
-            txt = re.sub(r"<[^>]+>", " ", html)
-            txt = re.sub(r"\s+", " ", txt)
-        def parse_many(txt):
-            out = {}
-            pats = [
-                r"(USD)\s*([0-9]+(?:[\.,][0-9]+)?)\s*/\s*([0-9]+(?:[\.,][0-9]+)?)",
-                r"(EUR)\s*([0-9]+(?:[\.,][0-9]+)?)\s*/\s*([0-9]+(?:[\.,][0-9]+)?)",
-                r"(USD|D[oó]lar)[^0-9]{0,40}Compra[^0-9]{0,12}([0-9]+(?:[\.,][0-9]+)?)\D+Venta[^0-9]{0,12}([0-9]+(?:[\.,][0-9]+)?)",
-                r"(EUR|Euro)[^0-9]{0,40}Compra[^0-9]{0,12}([0-9]+(?:[\.,][0-9]+)?)\D+Venta[^0-9]{0,12}([0-9]+(?:[\.,][0-9]+)?)",
-            ]
-            for pat in pats:
-                for m in re.finditer(pat, txt, flags=re.I):
-                    cur = m.group(1).upper()
-                    c = float(m.group(2).replace(",", "."))
-                    v = float(m.group(3).replace(",", "."))
-                    if "USD" in cur:
-                        out["usd"] = {"compra": c, "venta": v}
-                    elif "EUR" in cur:
-                        out["eur"] = {"compra": c, "venta": v}
-            return out
-        out = parse_many(txt)
-        return out or None
+        return float(str(x).replace(",", "").strip())
+    except:
+        return None
+
+def logo_image_or_emoji():
+    p = Path("logo.png")
+    return "🛟" if not p.exists() else "logo.png"
+
+def logo_base64(max_height_px: int = 40):
+    """Devuelve base64 de logo.png si existe; si no, None."""
+    try:
+        p = Path("logo.png")
+        if not p.exists():
+            return None
+        im = Image.open(p)
+        w, h = im.size
+        if h > max_height_px:
+            im = im.resize((int(w * max_height_px / h), max_height_px))
+        bio = io.BytesIO()
+        im.save(bio, format="PNG")
+        return base64.b64encode(bio.getvalue()).decode("ascii")
     except Exception:
         return None
 
 
-def _get_margin_pct():
+BANXICO_TOKEN = "677aaedf11d11712aa2ccf73da4d77b6b785474eaeb2e092f6bad31b29de6609"
+INEGI_TOKEN   = "0146a9ed-b70f-4ea2-8781-744b900c19d1"
+FRED_TOKEN    = "b4f11681f441da78103a3706d0dab1cf"  
+
+def fred_fetch_series(series_id: str, start: str | None = None, end: str | None = None, units: str = "lin"):
+    """
+    Consulta FRED 
+    """
     try:
-        v = _get_secret_env("MARGEN_PCT")
-        if v is None:
-            return 0.20
-        return float(v)
+        token = FRED_TOKEN.strip()
     except Exception:
-        return 0.20
+        token = ""
+    if not token:
+        return []
+    params = {"series_id": series_id, "api_key": token, "file_type": "json", "units": units}
+    if start: params["observation_start"] = start
+    if end:   params["observation_end"]   = end
+    try:
+        r = requests.get("https://api.stlouisfed.org/fred/series/observations", params=params, timeout=20)
+        if r.status_code != 200:
+            return []
+        data = r.json().get("observations", [])
+        out = []
+        for row in data:
+            d = row.get("date")
+            v = row.get("value")
+            try:
+                v = float(v)
+            except Exception:
+                v = None
+            out.append({"date": d, "value": v})
+        return out
+    except Exception:
+        return []
 
-# ======================
-# Series SIE (base) + candidatos para TIIE 28/91/182
-# ======================
 
-# === Old stable helpers (restored) ===
+TZ_MX = pytz.timezone("America/Mexico_City")
+
+
+st.set_page_config(
+    page_title="Indicadores Tipos de Cambio",
+    page_icon=logo_image_or_emoji(),
+    layout="centered"
+)
+_check_password() 
+
+
+st.markdown("""
+<style>
+#MainMenu {visibility: hidden;}      /* oculta hamburguesa */
+footer {visibility: hidden;}         /* oculta footer */
+
+.app-header {
+  position: sticky; top: 0; z-index: 999;
+  background: white; border-bottom: 1px solid #eee;
+  display: flex; align-items: center; gap: 16px;
+  padding: 8px 6px;
+}
+.app-header img.logo { height: 40px; }
+.app-header .titles h1 {
+  font-size: 20px; margin: 0;
+}
+.app-header .titles p {
+  margin: 0; color: #666;
+}
+</style>
+""", unsafe_allow_html=True)
+
+_logo_b64 = logo_base64()
+if _logo_b64:
+    st.markdown(
+        f"""
+        <div class="app-header">
+          <img class="logo" src="data:image/png;base64,{_logo_b64}" alt="logo"/>
+          <div class="titles">
+            <h1>Indicadores (últimos 5 días) + Noticias</h1>
+            <p> </p>
+          </div>
+        </div>
+        """,
+        unsafe_allow_html=True
+    )
+else:
+   
+    st.title("📈 Indicadores (últimos 5 días) + Noticias")
+    st.caption("Excel con tipos de cambio, noticias y gráficos.")
+
+if _logo_b64:
+ 
+    st.sidebar.image(f"data:image/png;base64,{_logo_b64}", use_container_width=True)
+
+def http_session(timeout=15):
+    s = requests.Session()
+    retries = Retry(total=3, backoff_factor=0.8,
+                    status_forcelist=[429, 500, 502, 503, 504],
+                    allowed_methods=frozenset(["GET"]))
+    s.mount("https://", HTTPAdapter(max_retries=retries))
+    s.mount("http://", HTTPAdapter(max_retries=retries))
+    s.request = (lambda orig: (lambda *a, **k: orig(*a, timeout=k.pop("timeout", timeout), **k)))(s.request)
+    return s
 
 def parse_any_date(s: str):
     """Devuelve datetime naive (sin tz)."""
@@ -406,11 +401,79 @@ def parse_any_date(s: str):
             pass
     return None
 
-def try_float(x):
+def _check_tokens():
+    missing = []
+    if not BANXICO_TOKEN.strip(): missing.append("BANXICO_TOKEN")
+    if not INEGI_TOKEN.strip():   missing.append("INEGI_TOKEN")
+    if missing:
+        st.error("Faltan tokens: " + ", ".join(missing))
+        st.stop()
+
+@st.cache_data(ttl=60*30)
+def sie_opportuno(series_id):
+    url = f"https://www.banxico.org.mx/SieAPIRest/service/v1/series/{series_id}/datos/oportuno"
+    headers = {"Bmx-Token": BANXICO_TOKEN}
+    r = http_session().get(url, headers=headers, timeout=15)
+    r.raise_for_status()
+    return r.json()
+
+def sie_latest(series_id):
     try:
-        return float(str(x).replace(",", "").strip())
+        data = sie_opportuno(series_id)
+        serie = data["bmx"]["series"][0]["datos"]
+        if not serie: return None, None
+        last = serie[-1]
+        return last["fecha"], try_float(last["dato"])
     except:
-        return None
+        return None, None
+
+@st.cache_data(ttl=60*30)
+def sie_range(series_id: str, start_iso: str, end_iso: str):
+    url = f"https://www.banxico.org.mx/SieAPIRest/service/v1/series/{series_id}/datos/{start_iso}/{end_iso}"
+    headers = {"Bmx-Token": BANXICO_TOKEN}
+    r = http_session(20).get(url, headers=headers, timeout=20)
+    r.raise_for_status()
+    j = r.json()
+    series = j.get("bmx", {}).get("series", [])
+    if not series:
+        return []
+    return series[0].get("datos", []) or []
+
+def sie_last_n(series_id: str, n: int = 6):
+    end = today_cdmx()
+    start = end - timedelta(days=2*365)
+    obs = sie_range(series_id, start.isoformat(), end.isoformat())
+    vals = []
+    for o in obs:
+        f = o.get("fecha"); v = try_float(o.get("dato"))
+        if f and (v is not None):
+            vals.append((f, v))
+    if not vals:
+        return []
+    vals.sort(key=lambda x: parse_any_date(x[0]) or datetime.utcnow())
+    return vals[-n:]
+
+def _ffill_by_dates(map_vals: dict, dates: list):
+    # keys are ISO-like strings. choose last available <= date
+    from datetime import datetime
+    def to_dt(s):
+        try:
+            if "/" in s:
+                return datetime.strptime(s, "%d/%m/%Y").date()
+            return datetime.fromisoformat(s).date()
+        except Exception:
+            return None
+    pairs = sorted([(to_dt(k), v) for k,v in map_vals.items() if to_dt(k)], key=lambda x: x[0])
+    out = []
+    last = None
+    for ds in dates:
+        d = to_dt(ds)
+        if d is None:
+            out.append(None); continue
+        while pairs and pairs[0][0] <= d:
+            last = pairs.pop(0)[1]
+        out.append(last)
+    return out
 
 def rolling_movex_for_last6(window:int=20):
     end = today_cdmx()
@@ -446,746 +509,531 @@ SIE_SERIES = {
     "CETES_364": "SF43945",
 }
 
+@st.cache_data(ttl=60*60)
+def get_uma(inegi_token: str):
+    """
+    UMA nacional: 620706 (diaria), 620707 (mensual), 620708 (anual)
+    Retorna: {'fecha','diaria','mensual','anual','_status','_source'}
+    """
+    base = "https://www.inegi.org.mx/app/api/indicadores/desarrolladores/jsonxml/INDICATOR"
+    ids = "620706,620707,620708"
+    urls = [
+        f"{base}/{ids}/es/00/true/BISE/2.0/{inegi_token}?type=json",
+        f"{base}/{ids}/es/00/true/BIE/2.0/{inegi_token}?type=json",  
+    ]
 
-SIE_SERIES = {
-    "USD_FIX":   "SF43718",
-    "EUR_MXN":   "SF46410",
-    "JPY_MXN":   "SF46406",
-    "UDIS":      "SP68257",
-    "CETES_28":  "SF43936",
-    "CETES_91":  "SF43939",
-    "CETES_182": "SF43942",
-    "CETES_364": "SF43945",
-    "OBJETIVO":  "SF61745",
-    "TIIE_28":   "SF60648",
-    "TIIE_91":   "SF60649",
-    "TIIE_182":  "SF60650",
-}
-
-def _parse_candidates_env(name: str, default_list):
-    raw = _get_secret_env(name)
-    if raw:
-        return [s.strip() for s in str(raw).split(",") if s.strip()]
-    return default_list
-
-SIE_SERIES_CANDIDATES = {
-    "TIIE_28":  _parse_candidates_env("SERIES_OVERRIDE__TIIE_28",  [SIE_SERIES["TIIE_28"]]),
-    "TIIE_91":  _parse_candidates_env("SERIES_OVERRIDE__TIIE_91",  [SIE_SERIES["TIIE_91"]]),
-    "TIIE_182": _parse_candidates_env("SERIES_OVERRIDE__TIIE_182", [SIE_SERIES["TIIE_182"]]),
-}
-
-def _has(name: str) -> bool:
-    return name in globals()
-
-def _parse_any_date(s):
-    try:
-        from dateutil import parser as _p
-        return _p.parse(s)
-    except Exception:
+    def _num(x):
         try:
-            return datetime.fromisoformat(s)
-        except Exception:
+            return float(str(x).replace(",", ""))
+        except:
             return None
 
-def _try_float(x):
-    try:
-        if x is None or (isinstance(x, str) and str(x).strip() == ""):
-            return None
-        return float(str(x).replace(",", ""))
-    except Exception:
-        return None
-
-# ======================
-# Banxico SIE helpers
-# ======================
-def _sie_range(series_id: str, start: str, end: str):
-    if _has("sie_range"):
+    last_err = None
+    for u in urls:
         try:
-            return sie_range(series_id, start, end)
-        except Exception:
-            pass
-    token = BANXICO_TOKEN
-    if not token:
-        return []
-    import requests
-    url = f"https://www.banxico.org.mx/SieAPIRest/service/v1/series/{series_id}/datos/{start}/{end}"
-    try:
-        r = requests.get(url, timeout=20, headers={"User-Agent": "Mozilla/5.0", "Bmx-Token": token})
-        r.raise_for_status()
-        data = r.json()
-        series = data.get("bmx", {}).get("series", [])
-        if not series:
-            return []
-        return series[0].get("datos", []) or []
-    except Exception:
-        return []
-
-
-# --- Compatibility shim (old function name used by rolling_movex_for_last6) ---
-def sie_range(series_id: str, start: str, end: str):
-    """Backwards-compatible wrapper -> _sie_range"""
-    return _sie_range(series_id, start, end)
-
-
-def _sie_range_first_that_has_data(series_ids, start: str, end: str):
-    for sid in series_ids:
-        datos = _sie_range(sid, start, end)
-        if datos:
-            return sid, datos
-    return None, []
-
-def _to_map_from_obs(obs_list):
-    m = {}
-    for o in obs_list or []:
-        d = _parse_any_date(o.get("fecha")); v = _try_float(o.get("dato"))
-        if d and (v is not None):
-            m[d.date().isoformat()] = v
-    return m
-
-# ======================
-# UMA helpers
-# ======================
-def _safe_get_uma():
-    if _has("get_uma"):
-        try:
-            sig = inspect.signature(get_uma)
-            if len(sig.parameters) >= 1:
-                return get_uma(INEGI_TOKEN)
-            else:
-                return get_uma()
-        except Exception:
-            try:
-                base = getattr(get_uma, "__wrapped__", get_uma)
-                sig = inspect.signature(base)
-                if len(sig.parameters) >= 1:
-                    return base(INEGI_TOKEN)
-                else:
-                    return base()
-            except Exception:
-                pass
-    try:
-        import requests
-        resp = requests.get("https://www.inegi.org.mx/temas/uma/", timeout=20, headers={"User-Agent": "Mozilla/5.0"})
-        if resp.ok:
-            txt = resp.text
-            y = today_cdmx().year
-            m = re.search(rf">{y}<.*?\$\s*([0-9]+\.?[0-9]*)\s*,\s*\$\s*([0-9,\.]+)\s*,\s*\$\s*([0-9,\.]+)", txt, flags=re.S)
-            if m:
-                diario  = _try_float(m.group(1))
-                mensual = _try_float(m.group(2))
-                anual   = _try_float(m.group(3))
-                return {"diario": diario, "mensual": mensual, "anual": anual}
-    except Exception:
-        pass
-    UMA_MAP = {
-        2025: {"diario": 113.14, "mensual": 3439.46, "anual": 41273.52},
-        2024: {"diario": 108.57, "mensual": 3300.53, "anual": 39606.36},
-        2023: {"diario": 103.74, "mensual": 3153.70, "anual": 37844.40},
-    }
-    y = today_cdmx().year
-    if y in UMA_MAP:
-        return UMA_MAP[y]
-    def _sf(name):
-        v = _get_secret_env(name)
-        if v is None or str(v).strip() == "":
-            return None
-        try:
-            return float(str(v).replace(",", ""))
-        except Exception:
-            return None
-    return {"diario": _sf("uma_diario"), "mensual": _sf("uma_mensual"), "anual": _sf("uma_anual")}
-
-# ======================
-# FRED helpers (inflación EUA)
-# ======================
-def _fred_inflation_yoy_map():
-    if not FRED_API_KEY:
-        return {}
-    import requests
-    url = f"https://api.stlouisfed.org/fred/series/observations?series_id=CPIAUCSL&api_key={FRED_API_KEY}&file_type=json&frequency=m&observation_start=2010-01-01"
-    try:
-        r = requests.get(url, timeout=20); r.raise_for_status()
-        data = r.json()
-        obs = data.get("observations", [])
-        vals = {}
-        for o in obs:
-            try:
-                v = float(o["value"])
-            except Exception:
+            r = http_session(20).get(u, timeout=20)
+            if r.status_code != 200:
+                last_err = f"HTTP {r.status_code}"
                 continue
-            vals[o["date"][:7]] = v
-        yoy = {}
-        for k, v in vals.items():
-            y, m = k.split("-")
-            prev = f"{int(y)-1}-{m}"
-            if prev in vals:
-                yoy[k] = (v / vals[prev]) - 1.0
-        return yoy
-    except Exception:
-        return {}
+            data = r.json()
+            series = data.get("Series") or data.get("series") or []
+            if not series:
+                last_err = "Sin 'Series'"; continue
 
-def _fred_last_sept_oct_yoy():
-    yoy = _fred_inflation_yoy_map()
-    if not yoy:
-        return (None, None)
-    avail = sorted(yoy.keys())
-    cutoff = today_cdmx().strftime("%Y-%m")
-    sep_candidates = [k for k in avail if k.endswith("-09") and k <= cutoff]
-    oct_candidates = [k for k in avail if k.endswith("-10") and k <= cutoff]
-    sep = yoy.get(sep_candidates[-1]) if sep_candidates else None
-    octo = yoy.get(oct_candidates[-1]) if oct_candidates else None
-    return (sep, octo)
+            def last_obs(s):
+                obs = s.get("OBSERVATIONS") or s.get("observations") or []
+                return obs[-1] if obs else None
 
-# ======================
-# Fechas clave por FIX
-# ======================
-def _latest_and_previous_value_dates():
-    # Fechas de encabezado efectivas (independientes de disponibilidad de FIX)
-    return header_dates_effective()
+            d_obs = last_obs(series[0]); m_obs = last_obs(series[1]) if len(series)>1 else None
+            a_obs = last_obs(series[2]) if len(series)>2 else None
 
-    latest = have[-1]
-    prevs = [d for d in have if d < latest]
-    prev = (prevs[-1] if prevs else next(d for d in business_days_back(10, latest) if d < latest))
-    return (prev, latest)
+            def get_v(o):
+                if not o: return None
+                return _num(o.get("OBS_VALUE") or o.get("value"))
+            def get_f(o):
+                if not o: return None
+                return o.get("TIME_PERIOD") or o.get("periodo") or o.get("time_period") or o.get("fecha")
 
-# ======================
-# Series as-of (TIIE 182 fija)
-# ======================
+            return {
+                "fecha": get_f(d_obs) or get_f(m_obs) or get_f(a_obs),
+                "diaria":  get_v(d_obs),
+                "mensual": get_v(m_obs),
+                "anual":   get_v(a_obs),
+                "_status": "ok",
+                "_source": "INEGI",
+            }
+        except Exception as e:
+            last_err = str(e)
+            continue
 
-def _series_values_for_dates(d_prev: date, d_latest: date, prog: _Progress | None = None):
-    start = (d_prev - timedelta(days=450)).isoformat()
-    end = d_latest.isoformat()
+    return {"fecha": None, "diaria": None, "mensual": None, "anual": None,
+            "_status": f"err: {last_err}", "_source": "fallback"}
 
-    used_series = {}
-
-    # Progreso visual
-    step = 0.0
-    if prog is not None:
-        fetch_span = 60.0
-        ops_total = 10.0  # FIX, JPY, EUR, UDIS, CETES*4, OBJETIVO
-        step = fetch_span / ops_total
-
-    def _as_map_fixed(series_id):
-        obs = _sie_range(series_id, start, end)
-        return _to_map_from_obs(obs)
-
-    if prog: prog.inc(step, "Banxico SIE: USD FIX")
-    m_fix  = _as_map_fixed(SIE_SERIES["USD_FIX"])
-    if prog: prog.inc(step, "Banxico SIE: JPY/MXN")
-    m_jpy  = _as_map_fixed(SIE_SERIES["JPY_MXN"])
-    if prog: prog.inc(step, "Banxico SIE: EUR/MXN")
-    m_eur  = _as_map_fixed(SIE_SERIES["EUR_MXN"])
-    if prog: prog.inc(step, "Banxico SIE: UDIS")
-    m_udis = _as_map_fixed(SIE_SERIES["UDIS"])
-
-    if prog: prog.inc(step, "Banxico SIE: CETES 28/91/182/364")
-    m_c28 = _as_map_fixed(SIE_SERIES["CETES_28"])
-    m_c91 = _as_map_fixed(SIE_SERIES["CETES_91"])
-    m_c182= _as_map_fixed(SIE_SERIES["CETES_182"])
-    m_c364= _as_map_fixed(SIE_SERIES["CETES_364"])
-
-    if prog: prog.inc(step, "Banxico SIE: Objetivo de tasa")
-    m_tobj = _as_map_fixed(SIE_SERIES["OBJETIVO"]) if "OBJETIVO" in SIE_SERIES else {}
-
-    def _asof(m, d):
-        keys = sorted(k for k in m.keys() if k <= d.isoformat())
-        return (m[keys[-1]] if keys else None)
-    def _two(m, scale=1.0, rnd=None):
-        v_prev   = _asof(m, d_prev)
-        v_latest = _asof(m, d_latest)
-        if v_prev   is not None:   v_prev   = v_prev/scale
-        if v_latest is not None:   v_latest = v_latest/scale
-        if rnd is not None:
-            v_prev   = round(v_prev, rnd)   if v_prev   is not None else None
-            v_latest = round(v_latest, rnd) if v_latest is not None else None
-        return v_prev, v_latest
-
-    fix_prev   = _fetch_fix_direct(d_prev) or _asof(m_fix, d_prev)
-    fix_latest = _fetch_fix_direct(d_latest) or _asof(m_fix, d_latest)
-    jpy_prev, jpy_latest     = _two(m_jpy)
-    eur_prev, eur_latest     = _two(m_eur)
-    udis_prev, udis_latest   = _two(m_udis, rnd=4)
-    c28_prev, c28_latest     = _two(m_c28,  scale=100.0)
-    c91_prev, c91_latest     = _two(m_c91,  scale=100.0)
-    c182_prev, c182_latest   = _two(m_c182, scale=100.0)
-    c364_prev, c364_latest   = _two(m_c364, scale=100.0)
-    tobj_prev, tobj_latest = _two(m_tobj, scale=100.0) if m_tobj else (None, None)
-    t28_prev, t28_latest = (None, None)
-    t91_prev, t91_latest = (None, None)  # si no se usa en Excel actual
-
-    # USD/JPY cruz
-    usdjpy_prev   = (fix_prev / jpy_prev)     if (fix_prev is not None and jpy_prev is not None)      else None
-    usdjpy_latest = (fix_latest / jpy_latest) if (fix_latest is not None and jpy_latest is not None)  else None
-
-    # --- MONEX / Compra-Venta USD ---
-    compra_prev = compra_latest = venta_prev = venta_latest = None
-    mode = (_get_secret_env("MONEX_MODE", "old") or "old").strip().lower()
-
-    if mode == "old":
-        mv = rolling_movex_for_last6(window=globals().get("movex_win", 20))
-        if mv and isinstance(mv, (list, tuple)):
-            try:
-                mpct = float(globals().get("margen_pct", _get_margin_pct()))
-                compra = [(x * (1 - mpct/100.0) if x is not None else None) for x in mv]
-                venta  = [(x * (1 + mpct/100.0) if x is not None else None) for x in mv]
-                if len(compra) >= 2: compra_prev, compra_latest = compra[-2], compra[-1]
-                if len(venta)  >= 2: venta_prev,  venta_latest  = venta[-2],  venta[-1]
-            except Exception:
-                pass
-    elif mode == "scrape":
-        monex = _fetch_monex_scrape() or {}
-        usd = monex.get("usd") or {}
-        compra_prev   = usd.get("compra"); compra_latest = usd.get("compra")
-        venta_prev    = usd.get("venta");  venta_latest  = usd.get("venta")
-
-    # Fallback final a FIX ± margen si falta algo
-    mpct = _get_margin_pct()
-    if fix_prev is not None and (compra_prev is None):   compra_prev   = fix_prev   * (1 - mpct/100.0)
-    if fix_latest is not None and (compra_latest is None): compra_latest = fix_latest * (1 - mpct/100.0)
-    if fix_prev is not None and (venta_prev is None):    venta_prev    = fix_prev    * (1 + mpct/100.0)
-    if fix_latest is not None and (venta_latest is None):  venta_latest  = fix_latest  * (1 + mpct/100.0)
-
-    st.session_state["used_series_ids"] = {
-        "TIIE_28":  st.session_state.get("used_series_ids", {}).get("TIIE_28"),
-        "TIIE_91":  st.session_state.get("used_series_ids", {}).get("TIIE_91"),
-        "TIIE_182": used_series.get("TIIE_182") if "TIIE_182" in used_series else None,
-    }
-
-    return {
-        "fix": (fix_prev, fix_latest),
-        "jpy": (jpy_prev, jpy_latest),
-        "eur": (eur_prev, eur_latest),
-        "udis": (udis_prev, udis_latest),
-        "c28": (c28_prev, c28_latest),
-        "c91": (c91_prev, c91_latest),
-        "c182": (c182_prev, c182_latest),
-        "c364": (c364_prev, c364_latest),
-        "t28": (t28_prev, t28_latest),
-        "t91": (t91_prev, t91_latest),
-        "tobj": (tobj_prev, tobj_latest),
-        "uma": (_uma_values() if "st" in globals() or "streamlit" in sys.modules else {"diaria": None, "mensual": None, "anual": None}),
-        "usdjpy": (usdjpy_prev, usdjpy_latest),
-        "monex_compra": (compra_prev, compra_latest),
-        "monex_venta":  (venta_prev,  venta_latest),
-    }
-
-# ======================
-# RSS helpers
-# ======================
-RSS_FEEDS = [
-    ("Google News MX – Economía",
-     "https://news.google.com/rss/headlines/section/topic/BUSINESS?hl=es-419&gl=MX&ceid=MX:es-419"),
-    ("Google News MX – BMV",
-     "https://news.google.com/rss/search?q=Bolsa%20Mexicana%20de%20Valores&hl=es-419&gl=MX&ceid=MX:es-419"),
-    ("Google News MX – Banxico",
-     "https://news.google.com/rss/search?q=Banxico&hl=es-419&gl=MX&ceid=MX:es-419"),
-    ("Google News MX – Inflación INEGI",
-     "https://news.google.com/rss/search?q=inflaci%C3%B3n%20M%C3%A9xico%20INEGI&hl=es-419&gl=MX&ceid=MX:es-419"),
-]
-
-def fetch_rss_items(url: str, max_items: int = 12):
-    import requests
+def _probe(fn, ok_condition):
+    t0 = time.time()
     try:
-        r = requests.get(url, timeout=20, headers={"User-Agent": "Mozilla/5.0"})
-        r.raise_for_status()
-        root = ET.fromstring(r.content)
-        items = []
-        for item in root.findall(".//item"):
-            title = (item.findtext("title") or "").strip()
-            link = (item.findtext("link") or "").strip()
-            pubDate = (item.findtext("pubDate") or "").strip()
-            source = ""
-            s = item.find("source")
-            if s is not None and (s.text or "").strip():
-                source = s.text.strip()
-            items.append({"title": title, "link": link, "pubDate": pubDate, "source": source})
-            if len(items) >= max_items:
-                break
-        return items
-    except Exception:
-        return []
+        res = fn()
+        ms = int((time.time() - t0)*1000)
+        ok = ok_condition(res)
+        return ("ok" if ok else "warn"), ("OK" if ok else "Parcial"), ms
+    except Exception as e:
+        return ("err", "Error", 0)
 
-# ======================
-# Writer 2 columnas + hoja RSS con estilo Arial 12 y sin grid
-# ======================
-def write_two_col_template(template_path: str, out_path: str, d_prev: date, d_latest: date, values: dict, prog: _Progress | None = None):
-    from openpyxl import load_workbook
-    from openpyxl.styles import Font, Alignment, PatternFill
-    wb = load_workbook(template_path)
-    if prog:
-        prog.set(65, "Escribiendo hoja principal…")
-    ws = wb.active
+def _render_sidebar_status():
+    st.sidebar.header("🔎 Estado de fuentes")
+    st.sidebar.caption(f"Última verificación: {now_ts()}")
 
-    # Fechas
-    ws["C2"].value = d_prev
-    ws["D2"].value = d_latest
-    ws["C2"].number_format = "dd/mm/yyyy"
-    ws["D2"].number_format = "dd/mm/yyyy"
+    b_status, b_msg, b_ms = _probe(lambda: sie_latest(SIE_SERIES["USD_FIX"]),
+                                   lambda res: "ok" if isinstance(res, tuple) and res[0] and (res[1] is not None) else "err")
+    i_status, i_msg, i_ms = _probe(lambda: get_uma(INEGI_TOKEN),
+                                   lambda res: "ok" if isinstance(res, dict) and (res.get("diaria") is not None) else ("warn" if isinstance(res, dict) else "err"))
+    f_status, f_msg, f_ms = ("warn", "Sin token (fallback)", 0) if not FRED_TOKEN.strip() else ("ok", "OK", 0)
 
-    rows = {
-        "fix":   5,
-        "monex_compra": 6,
-        "monex_venta":  7,
-        "jpy":   10,
-        "eur":   14,
-        "udis":  18,
-        "tobj":  21,
-        "t28":   22,
-        "t91":   23,
-        "t182":  24,
-        "c28":   27,
-        "c91":   28,
-        "c182":  29,
-        "c364":  30,
-    }
+    def badge(status, label, msg, ms):
+        dot = "🟢" if status=="ok" else ("🟡" if status=="warn" else "🔴")
+        st.sidebar.write(f"{dot} **{label}** — {msg} · {ms} ms")
 
-    def write_pair(key, round_to=None):
-        r = rows[key]
-        v_prev, v_latest = values.get(key, (None, None))
-        if round_to is not None:
-            v_prev   = (round(v_prev, round_to)   if v_prev   is not None else None)
-            v_latest = (round(v_latest, round_to) if v_latest is not None else None)
-        ws[f"C{r}"] = v_prev
-        ws[f"D{r}"] = v_latest
+    badge(b_status, "Banxico (SIE)", b_msg, b_ms)
+    badge(i_status, "INEGI (UMA)",  i_msg, i_ms)
+    badge(f_status, "FRED (USA)",   f_msg, f_ms)
 
-    write_pair("fix")
-    write_pair("monex_compra")
-    write_pair("monex_venta")
-    write_pair("jpy")
-    ws["C11"], ws["D11"] = values.get("usdjpy", (None, None))
-    write_pair("eur")
-    # EURUSD 4 dec
-    try:
-        eur_prev, eur_latest = values.get("eur", (None, None))
-        fix_prev, fix_latest = values.get("fix", (None, None))
-        eurusd_prev   = (eur_prev  / fix_prev)   if (eur_prev  and fix_prev)  else None
-        eurusd_latest = (eur_latest/ fix_latest) if (eur_latest and fix_latest) else None
-    except Exception:
-        eurusd_prev = eurusd_latest = None
-    ws["C15"] = (round(eurusd_prev, 4) if eurusd_prev is not None else None)
-    ws["D15"] = (round(eurusd_latest, 4) if eurusd_latest is not None else None)
+    st.sidebar.divider()
 
-    write_pair("udis", round_to=4)
-    write_pair("tobj")
-    write_pair("t28")
-    write_pair("t91")
-    write_pair("t182")
-    write_pair("c28")
-    write_pair("c91")
-    write_pair("c182")
-    write_pair("c364")
+with st.sidebar.expander("🔑 Tokens de APIs", expanded=False):
+    st.caption("Si ingresas un token aquí, la app lo usará en lugar del definido en el código.")
+    token_banxico_input = st.text_input("BANXICO_TOKEN", value="", type="password")
+    token_inegi_input   = st.text_input("INEGI_TOKEN",   value="", type="password")
+    
+    if token_banxico_input.strip():
+        BANXICO_TOKEN = token_banxico_input.strip()
+    if token_inegi_input.strip():
+        INEGI_TOKEN = token_inegi_input.strip()
 
-    # UMA en B33-B35
-    uma = values.get("uma", {})
-    ws["B33"] = uma.get("diario")
-    ws["B34"] = uma.get("mensual")
-    ws["B35"] = uma.get("anual")
+    with st.sidebar.expander("Herramientas"):
+        c1, c2 = st.columns(2)
+        if c1.button("Limpiar cachés Banxico"):
+            sie_opportuno.clear(); sie_range.clear()
+        if c2.button("Limpiar caché UMA"):
+            get_uma.clear()
+    with st.sidebar.expander("Diagnóstico UMA"):
+        if st.button("Probar INEGI ahora"):
+            res = get_uma(INEGI_TOKEN)
 
-    # Inflación EUA
-    def _as_pct_decimal(x):
-        if x is None:
-            return None
-        try:
-            x = float(x)
-            if abs(x) > 1:
-                x = x / 100.0
-            return x
-        except Exception:
-            return None
 
-    try:
-        sep_yoy, oct_yoy = _fred_last_sept_oct_yoy()
-        us_sep = _get_secret_env("us_inflation_sep")
-        us_oct = _get_secret_env("us_inflation_oct")
-        if sep_yoy is None and us_sep is not None:
-            sep_yoy = _as_pct_decimal(us_sep)
-        if oct_yoy is None and us_oct is not None:
-            oct_yoy = _as_pct_decimal(us_oct)
-        ws["B42"] = sep_yoy
-        ws["B41"] = oct_yoy
-        ws["B41"].number_format = "0.00%"
-        ws["B42"].number_format = "0.00%"
-    except Exception:
-        pass
 
-    if prog:
-        prog.set(82, "Aplicando limpieza/formatos…")
-    # Eliminar hojas no deseadas si existen
-    for sheet_name in ["Lógica de datos", "Metadatos"]:
-        if sheet_name in wb.sheetnames:
-            del wb[sheet_name]
 
-    if prog:
-        prog.set(86, "Generando hoja RSS…")
-    # Hoja RSS con estilo Arial 12 y sin grid
-    news_ws = wb.create_sheet("Noticias Financieras RSS")
-    header = ["Fuente", "Título", "Fecha (CDMX)", "Link"]
-    news_ws.append(header)
-    header_font = Font(name="Arial", size=12, bold=True, color="FFFFFF")
-    header_fill = PatternFill(start_color="4F81BD", end_color="4F81BD", fill_type="solid")
-    for col_idx in range(1, len(header)+1):
-        c = news_ws.cell(row=1, column=col_idx)
-        c.font = header_font
-        c.fill = header_fill
-        c.alignment = Alignment(vertical="center")
 
-    def _parse_pubdate(s):
-        try:
-            from email.utils import parsedate_to_datetime
-            dt = parsedate_to_datetime(s)
-            try:
-                import pytz
-                tz = pytz.timezone("America/Mexico_City")
-                if dt.tzinfo:
-                    dt = dt.astimezone(tz).replace(tzinfo=None)
-            except Exception:
-                pass
-            return dt
-        except Exception:
-            return None
 
-    for idx_feed, (fuente, url) in enumerate(RSS_FEEDS, start=1):
-        if prog:
-            prog.inc(12.0 / max(1, len(RSS_FEEDS)), f"RSS: {fuente}")
-        items = fetch_rss_items(url, max_items=12)
-        for it in items:
-            title = it.get("title") or ""
-            link  = it.get("link") or ""
-            pub   = it.get("pubDate") or ""
-            dt    = _parse_pubdate(pub)
-            if dt is None:
-                row = [f"{fuente} · {it.get('source')}" if it.get("source") else fuente,
-                       title, pub, link]
-            else:
-                row = [f"{fuente} · {it.get('source')}" if it.get("source") else fuente,
-                       title, dt, link]
-            news_ws.append(row)
+with st.expander("📄 Selecciona las Hojas del Excel que contendra tu archivo", expanded=True):
+    st.caption("Activa/desactiva hojas opcionales del archivo Excel")
+    want_fred   = st.checkbox("Agregar hoja FRED", value=st.session_state.get("want_fred", True))
+    want_news   = st.checkbox("Agregar hoja Noticias_RSS", value=st.session_state.get("want_news", True))
+    want_charts = st.checkbox("Agregar hoja 'Gráficos' (últimos 12)", value=st.session_state.get("want_charts", True))
+    want_raw    = st.checkbox("Agregar hoja 'Datos crudos' (últimos 12)", value=st.session_state.get("want_raw", True))
+    st.session_state["want_fred"] = want_fred
+    st.session_state["want_news"] = want_news
+    st.session_state["want_charts"] = want_charts
+    st.session_state["want_raw"] = want_raw
 
-    # Arial 12 toda la hoja, sin gridlines
-    news_ws.sheet_view.showGridLines = False
-    max_r = news_ws.max_row
-    max_c = news_ws.max_column
-    for r in range(1, max_r+1):
-        for c in range(1, max_c+1):
-            cell = news_ws.cell(row=r, column=c)
-            if r == 1:
-                cell.font = Font(name="Arial", size=12, bold=True, color="FFFFFF")
-                cell.alignment = Alignment(vertical="center")
-            else:
-                if cell.hyperlink:
-                    cell.font = Font(name="Arial", size=12, color="0563C1")
-                else:
-                    cell.font = Font(name="Arial", size=12)
-                if c == 2:
-                    cell.alignment = Alignment(wrap_text=True, vertical="top")
-                else:
-                    cell.alignment = Alignment(vertical="top")
+# Parámetros fijos (Opciones retiradas del UI)
+movex_win = 5
+margen_pct = 0.20  # 0.20% por lado
+import os
+UMA_DIARIA = 0.0
+try:
+    UMA_DIARIA = float(st.secrets.get("UMA_DIARIA", os.getenv("UMA_DIARIA","0") or "0"))
+except Exception:
+    UMA_DIARIA = 0.0
+uma_manual = UMA_DIARIA
 
-    # Anchos
-    widths = {1: 28, 2: 100, 3: 22, 4: 60}
-    for idx, w in widths.items():
-        news_ws.column_dimensions[chr(64+idx)].width = w
 
-    # Fechas con formato
-    for r in range(2, max_r+1):
-        c3 = news_ws.cell(row=r, column=3)
-        if isinstance(c3.value, datetime):
-            c3.number_format = "dd/mm/yyyy HH:MM"
-            c3.alignment = Alignment(vertical="top")
-        else:
-            c3.alignment = Alignment(vertical="top")
-        c4 = news_ws.cell(row=r, column=4)
-        if isinstance(c4.value, str) and c4.value.startswith("http"):
-            c4.hyperlink = c4.value
-            c4.style = "Hyperlink"
+_check_tokens()
+_render_sidebar_status()
 
-    news_ws.freeze_panes = "A2"
+if st.button("Generar Excel"):
+    def pad6(lst): return ([None]*(6-len(lst)))+lst if len(lst) < 6 else lst[-6:]
+    none6 = [None]*6
+
+    fix6 = pad6([v for _, v in sie_last_n(SIE_SERIES["USD_FIX"], n=6)])
+    
+    eur6 = pad6([v for _, v in sie_last_n(SIE_SERIES["EUR_MXN"], n=6)])
+    jpy6 = pad6([v for _, v in sie_last_n(SIE_SERIES["JPY_MXN"], n=6)])
 
     
-    # === Formatos de número y Rangos con Nombre ===
-    try:
-        # Formatos: FX 4 decimales, UDIS 6 decimales, Tasas como % con 2 decimales.
-        fx_rows = [rows["fix"], rows["eur"], rows["jpy"]]
-        udis_row = rows["udis"]
-        tasa_rows = [rows["tobj"], rows["t28"], rows["t91"], rows["t182"], rows["c28"], rows["c91"], rows["c182"], rows["c364"]]
-
-        for r in fx_rows:
-            for col in ("C","D"):
-                ws[f"{col}{r}"].number_format = "0.0000"
-
-        for col in ("C","D"):
-            ws[f"{col}{udis_row}"].number_format = "0.000000"
-
-        for r in tasa_rows:
-            for col in ("C","D"):
-                ws[f"{col}{r}"].number_format = "0.00%"
-
-        # Fechas
-        ws["C2"].number_format = "dd/mm/yyyy"
-        ws["D2"].number_format = "dd/mm/yyyy"
-
-        # Rangos con nombre
-        from openpyxl.workbook.defined_name import DefinedName
-        def add_name(name, ref):
-            try:
-                existing = [dn for dn in wb.defined_names.definedName if dn.name == name]
-                for dn in existing:
-                    wb.defined_names.definedName.remove(dn)
-            except Exception:
-                pass
-            wb.defined_names.append(DefinedName(name=name, attr_text=f"{ws.title}!{ref}"))
-
-        add_name("RANGO_FECHAS", f"$C$2:$D$2")
-        add_name("RANGO_USDMXN", f"$C${rows['fix']}:$D${rows['fix']}")
-        add_name("RANGO_EURMXN", f"$C${rows['eur']}:$D${rows['eur']}")
-        add_name("RANGO_JPYMXN", f"$C${rows['jpy']}:$D${rows['jpy']}")
-        add_name("RANGO_UDIS",   f"$C${rows['udis']}:$D${rows['udis']}")
-        add_name("RANGO_TOBJ",   f"$C${rows['tobj']}:$D${rows['tobj']}")
-        add_name("RANGO_TIIE28", f"$C${rows['t28']}:$D${rows['t28']}")
-        add_name("RANGO_TIIE91", f"$C${rows['t91']}:$D${rows['t91']}")
-        add_name("RANGO_TIIE182",f"$C${rows['t182']}:$D${rows['t182']}")
-        add_name("RANGO_C28",    f"$C${rows['c28']}:$D${rows['c28']}")
-        add_name("RANGO_C91",    f"$C${rows['c91']}:$D${rows['c91']}")
-        add_name("RANGO_C182",   f"$C${rows['c182']}:$D${rows['c182']}")
-        add_name("RANGO_C364",   f"$C${rows['c364']}:$D${rows['c364']}")
-    except Exception as _e:
-        pass
+    movex_series = rolling_movex_for_last6(window=movex_win)
+    movex6 = pad6(movex_series)
 
     
-    # === Rangos con nombre seguros (compatibles con versiones de openpyxl) ===
+    cetes28_6 = pad6([v for _, v in sie_last_n(SIE_SERIES["CETES_28"], n=6)])
+    cetes91_6 = pad6([v for _, v in sie_last_n(SIE_SERIES["CETES_91"], n=6)])
+    cetes182_6 = pad6([v for _, v in sie_last_n(SIE_SERIES["CETES_182"], n=6)])
+    cetes364_6 = pad6([v for _, v in sie_last_n(SIE_SERIES["CETES_364"], n=6)])
+
+    
+    uma = get_uma(INEGI_TOKEN)
+    if uma.get("diaria") is None and uma_manual > 0:
+        uma["diaria"]  = uma_manual
+        uma["mensual"] = uma_manual * 30.4
+        uma["anual"]   = uma["mensual"] * 12
+
+
+    fred_rows = None
     try:
-        from openpyxl.workbook.defined_name import DefinedName
-        def _add_name_safe(name, ref):
-            dn_container = wb.defined_names
-            dn = DefinedName(name=name, attr_text=f"'{ws.title}'!{ref}")
-            # eliminar existentes con el mismo nombre si la estructura lo permite
+        if add_fred and fred_id.strip() and isinstance(fred_start, (datetime, date)) and isinstance(fred_end, (datetime, date)):
+            fred_rows = fred_fetch_series(
+                series_id=fred_id.strip(),
+                start=fred_start.isoformat(),
+                end=fred_end.isoformat(),
+                units=fred_units
+            )
+    except NameError:
+        fred_rows = None  
+    bio = io.BytesIO()
+    wb = xlsxwriter.Workbook(bio, {'in_memory': True})
+
+
+    fmt_bold  = wb.add_format({'bold': True})
+    fmt_hdr   = wb.add_format({'bold': True, 'bg_color': '#F2F2F2', 'align':'center'})
+    fmt_num4  = wb.add_format({'num_format': '0.0000'})
+    fmt_num6  = wb.add_format({'num_format': '0.000000'})
+    fmt_wrap  = wb.add_format({'text_wrap': True})
+
+    
+    _fix_pairs = sie_last_n(SIE_SERIES["USD_FIX"], n=6)
+    header_dates = [d for d,_ in _fix_pairs]
+    if len(header_dates) < 6:
+        header_dates = ([""]*(6-len(header_dates))) + header_dates
+
+    def _as_map(pairs): return {d:v for d,v in pairs}
+    m_fix  = _as_map(sie_last_n(SIE_SERIES["USD_FIX"], 6))
+    m_eur  = _as_map(sie_last_n(SIE_SERIES["EUR_MXN"], 6))
+    m_jpy  = _as_map(sie_last_n(SIE_SERIES["JPY_MXN"], 6))
+    m_udis = _as_map(sie_last_n(SIE_SERIES["UDIS"],    6))
+    m_c28  = _as_map(sie_last_n(SIE_SERIES["CETES_28"],6))
+    m_c91  = _as_map(sie_last_n(SIE_SERIES["CETES_91"],6))
+    m_c182 = _as_map(sie_last_n(SIE_SERIES["CETES_182"],6))
+    m_c364 = _as_map(sie_last_n(SIE_SERIES["CETES_364"],6))
+    cetes28 = _ffill_by_dates(m_c28, header_dates)
+    cetes91 = _ffill_by_dates(m_c91, header_dates)
+    cetes182 = _ffill_by_dates(m_c182, header_dates)
+    cetes364 = _ffill_by_dates(m_c364, header_dates)
+
+
+    try:
+        movex6  
+    except NameError:
+        movex6 = rolling_movex_for_last6(window=movex_win)
+    compra = [(x*(1 - margen_pct/100) if x is not None else None) for x in movex6]
+    venta  = [(x*(1 + margen_pct/100) if x is not None else None) for x in movex6]
+
+    usd_jpy = []
+    eur_usd = []
+    for d in header_dates:
+        u = m_fix.get(d); j = m_jpy.get(d); e = m_eur.get(d)
+        usd_jpy.append((u/j) if (u and j) else None)
+        eur_usd.append((e/u) if (e and u) else None)
+
+    try:
+        uma  
+    except NameError:
+        uma = get_uma(INEGI_TOKEN)
+
+    def _last_or_none(series_pairs): 
+        return series_pairs[-1][1] if series_pairs else None
+
+        
+    # TIIE (Banxico SIE) - usar histórico y alinear por fechas del encabezado
+    m_t28  = _as_map(sie_last_n(SIE_SERIES["TIIE_28"],  20))
+    m_t91  = _as_map(sie_last_n(SIE_SERIES["TIIE_91"],  20))
+    m_t182 = _as_map(sie_last_n(SIE_SERIES["TIIE_182"], 20))
+    # Objetivo (tasa de política monetaria)
+    m_obj  = _as_map(sie_last_n("SF61745", 20))
+
+    tiie28 = _ffill_by_dates(m_t28,  header_dates)
+    tiie91 = _ffill_by_dates(m_t91,  header_dates)
+    tiie182= _ffill_by_dates(m_t182, header_dates)
+    tiie_obj = _ffill_by_dates(m_obj, header_dates)
+
+
+    # --- Fallback robusto para TIIE 182 días ---
+    try:
+        # Si todo quedó en None (no hubo match de fechas o no hay histórico),
+        # intentamos con el dato oportuno y/o el último disponible de SIE.
+        if all(v is None for v in tiie182):
+            v182_op = None
             try:
-                existing = [d for d in getattr(dn_container, "definedName", []) if getattr(d, "name", None) == name]
-                for d in existing:
-                    dn_container.definedName.remove(d)
+                _, v182_op = sie_latest(SIE_SERIES["TIIE_182"], BANXICO_TOKEN)
             except Exception:
-                pass
-            if hasattr(dn_container, "append"):
-                dn_container.append(dn)
-            elif hasattr(dn_container, "add"):
-                dn_container.add(dn)
+                v182_op = None
+            if v182_op is not None:
+                # Replicamos el oportuno a las 6 columnas
+                tiie182 = [round(float(v182_op), 4)] * len(header_dates)
             else:
-                # Si no soporta, no rompemos el guardado
-                pass
-
-        _add_name_safe("RANGO_FECHAS", "$C$2:$D$2")
-        _add_name_safe("RANGO_USDMXN", f"$C${rows['fix']}:$D${rows['fix']}")
-        _add_name_safe("RANGO_EURMXN", f"$C${rows['eur']}:$D${rows['eur']}")
-        _add_name_safe("RANGO_JPYMXN", f"$C${rows['jpy']}:$D${rows['jpy']}")
-        _add_name_safe("RANGO_UDIS",   f"$C${rows['udis']}:$D${rows['udis']}")
-        _add_name_safe("RANGO_TOBJ",   f"$C${rows['tobj']}:$D${rows['tobj']}")
-        _add_name_safe("RANGO_TIIE28", f"$C${rows['t28']}:$D${rows['t28']}")
-        _add_name_safe("RANGO_TIIE91", f"$C${rows['t91']}:$D${rows['t91']}")
-        _add_name_safe("RANGO_TIIE182",f"$C${rows['t182']}:$D${rows['t182']}")
-        _add_name_safe("RANGO_C28",    f"$C${rows['c28']}:$D${rows['c28']}")
-        _add_name_safe("RANGO_C91",    f"$C${rows['c91']}:$D${rows['c91']}")
-        _add_name_safe("RANGO_C182",   f"$C${rows['c182']}:$D${rows['c182']}")
-        _add_name_safe("RANGO_C364",   f"$C${rows['c364']}:$D${rows['c364']}")
+                # Como segunda opción, tomamos el último 'last_n' y replicamos
+                try:
+                    _pairs182 = sie_last_n(SIE_SERIES["TIIE_182"], 6, BANXICO_TOKEN)
+                    _last = _pairs182[-1][1] if _pairs182 else None
+                    if _last is not None:
+                        tiie182 = [round(float(_last), 4)] * len(header_dates)
+                except Exception:
+                    pass
     except Exception:
         pass
+    # --- /fallback ---
+    ws = wb.add_worksheet("Indicadores")
+    ws.set_column(0, 6, 16)
 
-    wb.save(out_path)
-    if prog:
-        prog.set(100, "Archivo listo.")
+    ws.write(1, 0, "Fecha:", fmt_bold)
+    for i, d in enumerate(header_dates):
+        ws.write(1, 1+i, d)
 
-# ======================
-# Exportador (no usado por el botón, lo dejo por compatibilidad)
-# ======================
-def export_indicadores_2col_bytes():
-    d_prev, d_latest = _latest_and_previous_value_dates()
-    vals = _series_values_for_dates(d_prev, d_latest)
-    tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".xlsx")
-    tmp.close()
-    write_two_col_template(TEMPLATE_PATH, tmp.name, d_prev, d_latest, vals)
-    with open(tmp.name, "rb") as f:
-        content = f.read()
+    ws.write(3, 0, "TIPOS DE CAMBIO:", fmt_bold)
+    ws.write(5, 0, "DÓLAR AMERICANO.", fmt_bold)
+    ws.write(6, 0, "Dólar/Pesos:")
+    for i, d in enumerate(header_dates):
+        ws.write(6, 1+i, m_fix.get(d), fmt_num4)
+    ws.write(7, 0, "MONEX:")
+
+    ws.write(8, 0, "Compra:")
+    for i, v in enumerate(compra):
+        ws.write(8, 1+i, v, fmt_num6)
+    ws.write(9, 0, "Venta:")
+    for i, v in enumerate(venta):
+        ws.write(9, 1+i, v, fmt_num6)
+    # Asegura explícitamente las celdas G9/G10 (columna 6, fila 8 y 9)
     try:
-        os.unlink(tmp.name)
+        if compra: ws.write(8, 6, compra[-1], fmt_num6)
+        if venta:  ws.write(9, 6, venta[-1],  fmt_num6)
     except Exception:
         pass
-    return content, d_prev, d_latest
 
-# ======================
-# Diagnóstico (oculto por defecto)
-# ======================
-SHOW_DIAGNOSTICS = str((_get_secret_env("SHOW_DIAGNOSTICS", "0"))).strip().lower() in ("1","true","yes","on")
-if SHOW_DIAGNOSTICS:
-    with st.expander("Diagnóstico / Fechas y tokens", expanded=False):
-        d_prev, d_latest = _latest_and_previous_value_dates()
-        used = st.session_state.get("used_series_ids", {})
-        st.write({
-            "dia_anterior (C2)": d_prev.strftime("%d/%m/%Y"),
-            "dia_actual (D2)": today_cdmx().strftime("%d/%m/%Y"),
-            "banxico_token_detectado": bool(BANXICO_TOKEN),
-            "inegi_token_detectado": bool(INEGI_TOKEN),
-            "fred_api_key_detectada": bool(FRED_API_KEY),
-            "monex_fallback": MONEX_FALLBACK,
-            "margen_pct": _get_margin_pct(),
-            "TIIE_28_series_usada": used.get("TIIE_28"),
-            "TIIE_91_series_usada": used.get("TIIE_91"),
-            "TIIE_182_series_usada": used.get("TIIE_182"),
-            "nota_TIIE182": "Se usa TIIE182 fija (secrets/env TIIE182_FIXED, default 7.9871%).",
+
+    ws.write(11, 0, "YEN JAPONÉS.", fmt_bold)
+    ws.write(12, 0, "Yen Japonés/Peso:")
+    for i, d in enumerate(header_dates):
+        ws.write(12, 1+i, m_jpy.get(d), fmt_num6)
+    ws.write(13, 0, "Dólar/Yen Japonés:")
+    for i, v in enumerate(usd_jpy):
+        ws.write(13, 1+i, v, fmt_num6)
+
+    ws.write(15, 0, "EURO.", fmt_bold)
+    ws.write(16, 0, "Euro/Peso:")
+    for i, d in enumerate(header_dates):
+        ws.write(16, 1+i, m_eur.get(d), fmt_num6)
+    ws.write(17, 0, "Euro/Dólar:")
+    for i, v in enumerate(eur_usd):
+        ws.write(17, 1+i, v, fmt_num6)
+
+    ws.write(19, 0, "UDIS:", fmt_bold)
+    ws.write(21, 0, "UDIS: ")
+    for i, d in enumerate(header_dates):
+        ws.write(21, 1+i, m_udis.get(d), fmt_num6)
+
+    ws.write(23, 0, "TASAS TIIE:", fmt_bold)
+    ws.write(25, 0, "TIIE objetivo:")
+    ws.write(26, 0, "TIIE 28 Días:")
+    ws.write(27, 0, "TIIE 91 Días:")
+    ws.write(28, 0, "TIIE 182 Días:")
+    for i in range(6):
+        ws.write(25, 1+i, tiie_obj[i])
+        ws.write(26, 1+i, tiie28[i])
+        ws.write(27, 1+i, tiie91[i])
+        ws.write(28, 1+i, tiie182[i])
+    ws.write(30, 0, "CETES:", fmt_bold)
+    ws.write(32, 0, "CETES 28 Días:")
+    ws.write(33, 0, "CETES 91 Días:")
+    ws.write(34, 0, "CETES 182 Días:")
+    ws.write(35, 0, "CETES 364 Días:")
+    for i in range(6):
+        ws.write(32, 1+i, cetes28[i])
+        ws.write(33, 1+i, cetes91[i])
+        ws.write(34, 1+i, cetes182[i])
+        ws.write(35, 1+i, cetes364[i])
+    ws.write(37, 0, "UMA:", fmt_bold)
+    ws.write(39, 0, "Diario:");  ws.write(39, 1, uma.get("diaria"))
+    ws.write(40, 0, "Mensual:"); ws.write(40, 1, uma.get("mensual"))
+    ws.write(41, 0, "Anual:");   ws.write(41, 1, uma.get("anual"))
+
+do_raw = globals().get('do_raw', True)
+if do_raw and ('wb' in globals()):
+    ws3 = wb.add_worksheet("Datos crudos")
+    ws3.write(0,0,"Serie", fmt_hdr); ws3.write(0,1,"Fecha", fmt_hdr); ws3.write(0,2,"Valor", fmt_hdr)
+    def _dump(ws_sheet, start_row, tag, pairs):
+        r = start_row
+        for d, v in pairs:
+            ws_sheet.write(r, 0, tag)
+            ws_sheet.write(r, 1, d)
+            ws_sheet.write(r, 2, v)
+            r += 1
+
+        return r
+
+    r = 1
+    r = _dump(ws3, r, "USD/MXN (FIX)", sie_last_n(SIE_SERIES["USD_FIX"], 6))
+    r = _dump(ws3, r, "EUR/MXN",       sie_last_n(SIE_SERIES["EUR_MXN"], 6))
+    r = _dump(ws3, r, "JPY/MXN",       sie_last_n(SIE_SERIES["JPY_MXN"], 6))
+    r = _dump(ws3, r, "UDIS",          sie_last_n(SIE_SERIES["UDIS"],    6))
+    r = _dump(ws3, r, "CETES 28d (%)", sie_last_n(SIE_SERIES["CETES_28"],6))
+    r = _dump(ws3, r, "CETES 91d (%)", sie_last_n(SIE_SERIES["CETES_91"],6))
+    r = _dump(ws3, r, "CETES 182d (%)",sie_last_n(SIE_SERIES["CETES_182"],6))
+    r = _dump(ws3, r, "CETES 364d (%)",sie_last_n(SIE_SERIES["CETES_364"],6))
+    ws3.set_column(0, 0, 18); ws3.set_column(1, 1, 12); ws3.set_column(2, 2, 16)
+
+    
+do_charts = globals().get('do_charts', True)
+if do_charts and ('wb' in globals()):
+    ws4 = wb.add_worksheet("Gráficos")
+    chart1 = wb.add_chart({'type': 'line'})
+    chart1.add_series({
+    'name':       "USD/MXN (FIX)",
+    'categories': "=Indicadores!$B$2:$G$2",
+    'values':     "=Indicadores!$B$7:$G$7",
+    })
+    chart1.set_title({'name': 'USD/MXN (FIX)'})
+    ws4.insert_chart('B2', chart1, {'x_scale': 1.3, 'y_scale': 1.2})
+
+    chart2 = wb.add_chart({'type': 'line'})
+    for row in (33,34,35,36):
+        chart2.add_series({
+            'name':       f"=Indicadores!$A${row}",
+            'categories': "=Indicadores!$B$2:$G$2",
+            'values':     f"=Indicadores!$B${row}:$G${row}",
         })
+    chart2.set_title({'name': 'CETES (%)'})
+    ws4.insert_chart('B18', chart2, {'x_scale': 1.3, 'y_scale': 1.2})
 
-# ======================
-# UI
-# ======================
-if "xlsx_bytes" not in st.session_state:
-    st.session_state["xlsx_bytes"] = None
 
-# Contenedor para la barra de progreso (aparece debajo del botón)
-_progress_placeholder = st.empty()
+try:
+        if fred_rows:
+            wsname  = f"FRED_{fred_id[:25]}"
+            wsfred  = wb.add_worksheet(wsname)
 
-if section_card('Generación de Excel', lambda: st.button("Generar Excel")):
-    prog = _Progress(_progress_placeholder)
-    prog.set(5, "Preparando fechas…")
-    d_prev, d_latest = _latest_and_previous_value_dates()
-    prog.set(10, "Preparando consultas…")
-    vals = _series_values_for_dates(d_prev, d_latest, prog)
-    # Validaciones para evitar Excels vacíos
-    if not globals().get("BANXICO_TOKEN"):
-        st.error("No se detectó BANXICO_TOKEN (secrets o variable de entorno).")
-        st.stop()
-    if not _has_any(vals):
-        st.error("SIE no regresó datos (token inválido/expirado o red bloqueada).")
-        st.stop()
-    prog.set(64, "Construyendo archivo…")
-    tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".xlsx")
-    tmp.close()
-    write_two_col_template(TEMPLATE_PATH, tmp.name, d_prev, d_latest, vals, prog)
-    with open(tmp.name, "rb") as f:
-        st.session_state["xlsx_bytes"] = f.read()
+            fmt_bold = wb.add_format({"bold": True})
+            fmt_num  = wb.add_format({"num_format": "#,##0.0000"})
+            fmt_date = wb.add_format({"num_format": "yyyy-mm-dd"})
+
+            
+            wsfred.write(0, 0, f"FRED – {fred_id}", fmt_bold)
+            wsfred.write(1, 0, f"Generado: {today_cdmx('%Y-%m-%d %H:%M')} (CDMX)")
+            wsfred.write_row(3, 0, ["date", fred_id], fmt_bold)
+
+            
+            r_start = 4
+            r = r_start
+            valid_count = 0
+
+            for row in fred_rows:
+                d = row.get("date")
+                v = row.get("value")
+
+                
+                try:
+                    dt = pd.to_datetime(d).to_pydatetime()
+                    wsfred.write_datetime(r, 0, dt, fmt_date)
+                except Exception:
+                    wsfred.write(r, 0, str(d))
+
+                
+                try:
+                    if v is not None:
+                        v_float = float(v)
+                        if not pd.isna(v_float):
+                            wsfred.write_number(r, 1, v_float, fmt_num)
+                            valid_count += 1
+                        else:
+                            wsfred.write_blank(r, 1, None)
+                    else:
+                        wsfred.write_blank(r, 1, None)
+                except Exception:
+                    wsfred.write_blank(r, 1, None)
+
+                r += 1
+
+            wsfred.set_column(0, 0, 12)
+            wsfred.set_column(1, 1, 16)
+
+            if valid_count >= 2:
+                first_excel_row = r_start + 1
+                last_excel_row  = r
+                ch = wb.add_chart({"type": "line"})
+                ch.add_series({
+                    "name": fred_id,
+                    "categories": f"={wsname}!$A${first_excel_row}:$A${last_excel_row}",
+                    "values":     f"={wsname}!$B${first_excel_row}:$B${last_excel_row}",
+                })
+                ch.set_title({"name": f"{fred_id} (FRED)"})
+                ch.set_y_axis({"num_format": "#,##0.0000"})
+                wsfred.insert_chart("D4", ch, {"x_scale": 1.2, "y_scale": 1.2})
+except Exception as _e:
+        pass
+
+try:
+    fred_key = ""
     try:
-        os.unlink(tmp.name)
+        fred_key = st.secrets.get("FRED_API_KEY", "").strip()
     except Exception:
         pass
-    prog.set(100, "Listo!!!")
-    st.success("Listo!!!")
+    if fred_key and st.session_state.get('want_fred', True):
+        end_dt = datetime.now()
+        start_dt = end_dt - timedelta(days=180)
+        fred_series = {
+            "US 10Y (DGS10)": "DGS10",
+            "Fed Funds (DFF)": "DFF",
+            "MXN/USD (DEXMXUS)": "DEXMXUS",
+        }
+        fred_data = {}
+        for label, sid in fred_series.items():
+            try:
+                fred_data[label] = _fred_fetch_v1(
+                    sid,
+                    start_dt.strftime("%Y-%m-%d"),
+                    end_dt.strftime("%Y-%m-%d"),
+                    fred_key
+                )
+            except Exception:
+                fred_data[label] = []
+        if any(len(v) > 0 for v in fred_data.values()):
+            _fred_write_v1(wb, fred_data, sheet_name="FRED_v2")
 
-st.download_button(
+    _news = []
+    try:
+        _news = _mx_news_get_v1(max_items=12)
+    except Exception:
+        _news = []
+    if _news and st.session_state.get('want_news', True):
+        _mx_news_write_v1(wb, _news, sheet_name="Noticias_RSS")
+except Exception:
+    pass
+
+try:
+    wb.close()
+    try:
+        st.session_state['xlsx_bytes'] = bio.getvalue()
+    except Exception:
+        pass
+except NameError:
+    pass
+except Exception:
+    pass
+    st.download_button(
     "Descargar Excel",
-    data=(st.session_state["xlsx_bytes"] or b""),
-    file_name="Indicadores " + _now_str_cdmx("%Y-%m-%d %H%M%S") + ".xlsx",
-    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-    disabled=(st.session_state["xlsx_bytes"] is None),
-)
+        data=bio.getvalue(),
+        file_name=f"indicadores_{today_cdmx()}.xlsx",
+        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        )
+    
 
-# --- Safe SIE range (always available) ---
-def _safe_sie_range(series_id: str, start: str, end: str):
-    import requests
-    import os
-    token = os.environ.get("BANXICO_TOKEN","")
-    url = f"https://www.banxico.org.mx/SieAPIRest/service/v1/series/{series_id}/datos/{start}/{end}"
-    headers = {"User-Agent":"Mozilla/5.0"}
-    if token:
-        headers["Bmx-Token"] = token
-    r = requests.get(url, headers=headers, timeout=30)
-    r.raise_for_status()
-    data = r.json()
-    series = data.get("bmx",{}).get("series",[])
-    return series[0].get("datos",[]) if series else []
+
+
+try:
+    xbytes = st.session_state.get('xlsx_bytes')
+    if xbytes:
+        st.download_button(
+            'Descargar Excel',
+            data=xbytes,
+            file_name=f"indicadores_{today_cdmx()}.xlsx",
+            mime='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+            use_container_width=True
+        )
+except Exception:
+    pass
