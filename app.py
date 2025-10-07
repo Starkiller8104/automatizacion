@@ -117,6 +117,30 @@ class _Progress:
 # ======================
 st.set_page_config(page_title="Indicadores IMEMSA", layout="wide")
 
+# --- Zona horaria CDMX y helpers de fecha/tiempo (cargados temprano) ---
+from datetime import datetime, timedelta
+try:
+    from zoneinfo import ZoneInfo
+    _MX_TZ = ZoneInfo("America/Mexico_City")
+except Exception:
+    _MX_TZ = None
+
+def _cdmx_now():
+    try:
+        if _MX_TZ:
+            return datetime.now(_MX_TZ)
+    except Exception:
+        pass
+    return datetime.now()
+
+# Polyfill: define today_cdmx si aún no existe cuando el módulo se evalúa
+try:
+    today_cdmx  # type: ignore
+except NameError:
+    def today_cdmx():
+        return _cdmx_now()
+
+
 # --- Hora/fecha CDMX segura para uso inmediato en nombre de archivo ---
 from datetime import datetime
 try:
@@ -209,30 +233,30 @@ def _prev_business_day(base: date) -> date:
     return d
 
 
+
 def header_dates_effective():
     """
     Devuelve (d_prev, d_latest) usando *hoy* ajustado a día hábil:
     - d_latest: hoy si es hábil; si no, el hábil anterior
     - d_prev:   el hábil inmediatamente anterior a d_latest
     """
-    now = today_cdmx()
+    now = _cdmx_now()
     d_latest = now.date()
     # Si es fin de semana, retrocede al hábil previo
     while d_latest.weekday() >= 5:
         d_latest -= timedelta(days=1)
-    # Si por algún motivo hoy aún no hay publicación de FIX,
-    # el pipeline as-of tomará el último dato <= d_latest.
     d_prev = _prev_business_day(d_latest)
     return (d_prev, d_latest)
 
 def _prev_business_day(d):
-    # igual que antes (busca día hábil previo)
-    while d.weekday() == 0 or d.weekday() >= 5:
-        # si es lunes (0), retrocede a viernes; si fin de semana, retrocede
-        if d.weekday() == 0:
-            d -= timedelta(days=3)
-        else:
-            d -= timedelta(days=1)
+    # Lunes → retrocede a viernes; fines de semana → retrocede a viernes
+    if d.weekday() == 0:  # lunes
+        return d - timedelta(days=3)
+    while d.weekday() >= 5:  # sábado/domingo
+        d -= timedelta(days=1)
+    # Si ya es martes-viernes, regresa un día; si es lunes ya se manejó arriba
+    if d.weekday() in (1,2,3,4):
+        return d - timedelta(days=1)
     return d
 
 def business_days_back(n, start_date):
@@ -242,6 +266,7 @@ def business_days_back(n, start_date):
         d = _prev_business_day(d)
         days.append(d)
     return days  # descendente
+
 
 
 
