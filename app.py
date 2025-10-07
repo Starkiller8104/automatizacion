@@ -904,6 +904,58 @@ def write_two_col_template(template_path: str, out_path: str, d_prev: date, d_la
 
     news_ws.freeze_panes = "A2"
 
+    
+    # === Formatos de número y Rangos con Nombre ===
+    try:
+        # Formatos: FX 4 decimales, UDIS 6 decimales, Tasas como % con 2 decimales.
+        fx_rows = [rows["fix"], rows["eur"], rows["jpy"]]
+        udis_row = rows["udis"]
+        tasa_rows = [rows["tobj"], rows["t28"], rows["t91"], rows["t182"], rows["c28"], rows["c91"], rows["c182"], rows["c364"]]
+
+        for r in fx_rows:
+            for col in ("C","D"):
+                ws[f"{col}{r}"].number_format = "0.0000"
+
+        for col in ("C","D"):
+            ws[f"{col}{udis_row}"].number_format = "0.000000"
+
+        for r in tasa_rows:
+            for col in ("C","D"):
+                ws[f"{col}{r}"].number_format = "0.00%"
+
+        # Fechas
+        ws["C2"].number_format = "dd/mm/yyyy"
+        ws["D2"].number_format = "dd/mm/yyyy"
+
+        # Rangos con nombre (se definen siempre sobre la hoja activa)
+        from openpyxl.workbook.defined_name import DefinedName
+        def add_name(name, ref):
+            # elimina si ya existe
+            try:
+                existing = [dn for dn in wb.defined_names.definedName if dn.name == name]
+                for dn in existing:
+                    wb.defined_names.definedName.remove(dn)
+            except Exception:
+                pass
+            wb.defined_names.append(DefinedName(name=name, attr_text=f"{ws.title}!{ref}"))
+
+        add_name("RANGO_FECHAS", f"$C$2:$D$2")
+        add_name("RANGO_USDMXN", f"$C${rows['fix']}:$D${rows['fix']}")
+        add_name("RANGO_EURMXN", f"$C${rows['eur']}:$D${rows['eur']}")
+        add_name("RANGO_JPYMXN", f"$C${rows['jpy']}:$D${rows['jpy']}")
+        add_name("RANGO_UDIS",   f"$C${rows['udis']}:$D${rows['udis']}")
+        add_name("RANGO_TOBJ",   f"$C${rows['tobj']}:$D${rows['tobj']}")
+        add_name("RANGO_TIIE28", f"$C${rows['t28']}:$D${rows['t28']}")
+        add_name("RANGO_TIIE91", f"$C${rows['t91']}:$D${rows['t91']}")
+        add_name("RANGO_TIIE182",f"$C${rows['t182']}:$D${rows['t182']}")
+        add_name("RANGO_C28",    f"$C${rows['c28']}:$D${rows['c28']}")
+        add_name("RANGO_C91",    f"$C${rows['c91']}:$D${rows['c91']}")
+        add_name("RANGO_C182",   f"$C${rows['c182']}:$D${rows['c182']}")
+        add_name("RANGO_C364",   f"$C${rows['c364']}:$D${rows['c364']}")
+    except Exception as _e:
+        # No interrumpir la generación por nombres; se muestra en diagnóstico si aplica.
+        pass
+
     wb.save(out_path)
     if prog:
         prog.set(100, "Archivo listo.")
