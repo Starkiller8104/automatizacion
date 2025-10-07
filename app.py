@@ -112,6 +112,16 @@ class _Progress:
     def inc(self, delta, text=None):
         self.set(self.value + delta, text=text)
 
+
+def _has_any(values: dict) -> bool:
+    try:
+        for k, v in (values or {}).items():
+            a, b = v if isinstance(v, (list, tuple)) else (None, None)
+            if (a is not None) or (b is not None):
+                return True
+    except Exception:
+        pass
+    return False
 # ======================
 # Config / Branding
 # --- Diagnóstico mínimo (no bloqueante) ---
@@ -245,19 +255,40 @@ def _prev_business_day(base: date) -> date:
 
 
 
+
 def header_dates_effective():
     """
-    Devuelve (d_prev, d_latest) usando *hoy* ajustado a día hábil:
-    - d_latest: hoy si es hábil; si no, el hábil anterior
-    - d_prev:   el hábil inmediatamente anterior a d_latest
+    (d_prev, d_latest) con corte 12:00 CDMX:
+    - Si hora < 12: d_latest = día hábil anterior
+    - Si hora >= 12: d_latest = hoy (si es hábil; si no, retrocede hasta hábil)
+    - d_prev = hábil anterior a d_latest
     """
-    now = _cdmx_now()
-    d_latest = now.date()
-    # Si es fin de semana, retrocede al hábil previo
-    while d_latest.weekday() >= 5:
-        d_latest -= timedelta(days=1)
-    d_prev = _prev_business_day(d_latest)
+    now = _cdmx_now() if '_cdmx_now' in globals() else now_cdmx()
+    d = now.date()
+
+    def is_business(dd):
+        return dd.weekday() < 5
+
+    def prev_business(dd):
+        if dd.weekday() == 0:
+            return dd - timedelta(days=3)
+        while dd.weekday() >= 5:
+            dd -= timedelta(days=1)
+        if dd.weekday() in (1,2,3,4):
+            return dd - timedelta(days=1)
+        return dd
+
+    while not is_business(d):
+        d -= timedelta(days=1)
+
+    if now.hour < 12:
+        d_latest = prev_business(d)
+    else:
+        d_latest = d
+
+    d_prev = prev_business(d_latest)
     return (d_prev, d_latest)
+
 
 def _prev_business_day(d):
     # Lunes → retrocede a viernes; fines de semana → retrocede a viernes
@@ -1116,6 +1147,13 @@ if section_card('Generación de Excel', lambda: st.button("Generar Excel")):
     d_prev, d_latest = _latest_and_previous_value_dates()
     prog.set(10, "Preparando consultas…")
     vals = _series_values_for_dates(d_prev, d_latest, prog)
+    # Validaciones para evitar Excels vacíos
+    if not globals().get("BANXICO_TOKEN"):
+        st.error("No se detectó BANXICO_TOKEN (secrets o variable de entorno).")
+        st.stop()
+    if not _has_any(vals):
+        st.error("SIE no regresó datos (token inválido/expirado o red bloqueada).")
+        st.stop()
     prog.set(64, "Construyendo archivo…")
     tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".xlsx")
     tmp.close()
