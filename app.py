@@ -2105,7 +2105,7 @@ try:
     except Exception:
         pass
     # === End requested modification ===
-wb.close()
+    wb.close()
     try:
         st.session_state['xlsx_bytes'] = bio.getvalue()
         prog.progress(100, text="Listo ✅")
