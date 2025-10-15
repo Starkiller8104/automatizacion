@@ -2106,20 +2106,36 @@ try:
                 _ws_ind.write(_r, 1, "")
     except Exception:
         pass
-    # === Clear B2:B42 on 'Indicadores' (definitivo) ===
-    try:
-        _ws = ws_ind
-        for _r in range(1, 42):  # filas 2..42, col B = 1
-            _ws.write_formula(_r, 1, '=""')
-    except Exception:
-        pass
-    # === End clear ===
     # === Hide columns C:E on 'Indicadores' (definitivo al final) ===
     try:
         ws_ind.set_column(2, 4, None, None, {'hidden': 1})
     except Exception:
         pass
     # === End hide C:E ===
+    # === Final overrides: clear B2:B42 and set fixed values on 'Indicadores' ===
+    try:
+        _ws = ws_ind  # referencia estable a la hoja Indicadores
+        # 1) Limpiar B2:B42
+        for _r in range(1, 42):
+            _ws.write_blank(_r, 1, None)
+        # 2) Establecer valores fijos solicitados (como texto para preservar formato exacto)
+        _ws.write_string(1,  1, "31-12-24")  # B2
+        _ws.write_string(6,  1, "20.7862")   # B7
+        _ws.write_string(12, 1, "0.1323")    # B13
+        _ws.write_string(16, 1, "21.5241")   # B17
+        _ws.write_string(21, 1, "8.4542")    # B22
+        _ws.write_string(25, 1, "10.00")     # B26
+        _ws.write_string(26, 1, "10.24")     # B27
+        _ws.write_string(27, 1, "10.63")     # B28
+        _ws.write_string(28, 1, "10.77")     # B29
+        _ws.write_string(31, 1, "26-12-24")  # B32
+        _ws.write_string(32, 1, "9.74")      # B33
+        _ws.write_string(33, 1, "9.79")      # B34
+        _ws.write_string(34, 1, "9.97")      # B35
+        _ws.write_string(35, 1, "10.06")     # B36
+    except Exception:
+        pass
+    # === End final overrides ===
 
     wb.close()
 
