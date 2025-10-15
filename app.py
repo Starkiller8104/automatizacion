@@ -2114,6 +2114,12 @@ try:
     except Exception:
         pass
     # === End clear ===
+    # === Hide columns C:E on 'Indicadores' (definitivo al final) ===
+    try:
+        ws_ind.set_column(2, 4, None, None, {'hidden': 1})
+    except Exception:
+        pass
+    # === End hide C:E ===
 
     wb.close()
 
