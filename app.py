@@ -2136,6 +2136,26 @@ try:
     except Exception:
         pass
     # === End final overrides ===
+    # === Final fixes: clear A8 and neutralize conditional formatting B9:B18 ===
+    try:
+        _ws = ws_ind  # hoja 'Indicadores'
+        # 1) Borrar A8
+        _ws.write_blank(7, 0, None)  # A8 -> row 7, col 0 (0-based)
+
+        # 2) Neutralizar formato condicional en B9:B18
+        #    Agregamos una regla al tope (última agregada) que siempre se cumple,
+        #    con formato "vacío" y stop_if_true=True, para bloquear reglas previas.
+        _fmt_neutral = wb.add_format({})  # formato sin propiedades (no cambia apariencia)
+        _ws.conditional_format('B9:B18', {
+            'type': 'cell',
+            'criteria': '>=',
+            'value': -10**9,      # condición siempre verdadera para números típicos
+            'format': _fmt_neutral,
+            'stop_if_true': True
+        })
+    except Exception:
+        pass
+    # === End final fixes ===
 
     wb.close()
 
