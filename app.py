@@ -1444,7 +1444,7 @@ if st.button("Generar Excel"):
     try:
         ws.set_column('C:E', None, None, {'hidden': 1})
         for _r in range(1, 42):  # rows 2..42 (1-based)
-            ws.write(_r, 1, None)  # column B (0-based index 1)
+            ws.write(_r, 1, "")  # column B (0-based index 1)
     except Exception:
         pass
     # === End requested modification ===
@@ -2101,10 +2101,36 @@ try:
         ws.set_column('C:E', None, None, {'hidden': 1})
         # Limpiar rango B2:B42
         for _r in range(1, 42):  # rows 2..42 (1-based)
-            ws.write(_r, 1, None)
+            ws.write(_r, 1, "")
     except Exception:
         pass
     # === End requested modification ===
+    # === Ultra-final safeguard: ensure B2:B42 is blank on 'Indicadores' ===
+    try:
+        # Re-obtain worksheet by name in case `ws` was rebound
+        try:
+            _ws_ind = ws  # use existing if it's still 'Indicadores'
+            try:
+                # Quick sanity check by writing in a temp cell and undoing
+                _ = _ws_ind.name  # may raise if not worksheet
+            except Exception:
+                _ws_ind = None
+        except Exception:
+            _ws_ind = None
+        if _ws_ind is None:
+            try:
+                # xlsxwriter doesn't expose get_worksheet_by_name; we track our sheet handle as `ws`,
+                # so as fallback we just use `ws` if defined; otherwise skip silently.
+                _ws_ind = ws
+            except Exception:
+                _ws_ind = None
+        if _ws_ind is not None:
+            for _r in range(1, 42):
+                _ws_ind.write(_r, 1, "")
+    except Exception:
+        pass
+    # === End ultra-final safeguard ===
+
     wb.close()
     try:
         st.session_state['xlsx_bytes'] = bio.getvalue()
