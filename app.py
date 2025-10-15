@@ -2088,75 +2088,45 @@ try:
     try:
         st.session_state['xlsx_bytes'] = bio.getvalue()
 
-        # === Post-proceso: copiar valores a la plantilla usando mapeo A->B ===
+        # === Post-proceso a plantilla con mapeo (seguro, valores únicamente) ===
         try:
             template_path = Path("Indicadores_template_2col.xlsx")
-            if template_path.exists():
+            mapping_path  = Path("Indicadores_map.xlsx")  # <-- coloca aquí tu archivo de mapeo A->B
+
+            if template_path.exists() and mapping_path.exists():
                 raw_bytes = bio.getvalue()
-                wb_data = load_workbook(io.BytesIO(raw_bytes), data_only=False)
-                ws_data = wb_data["Indicadores"] if "Indicadores" in wb_data.sheetnames else wb_data[wb_data.sheetnames[0]]
+                wb_src = load_workbook(io.BytesIO(raw_bytes), data_only=True)
+                ws_src = wb_src["Indicadores"] if "Indicadores" in wb_src.sheetnames else wb_src[wb_src.sheetnames[0]]
 
-                wb_tmpl = load_workbook(template_path)
-                ws_tmpl = wb_tmpl["Indicadores"] if "Indicadores" in wb_tmpl.sheetnames else wb_tmpl[wb_tmpl.sheetnames[0]]
+                wb_dst = load_workbook(template_path)
+                ws_dst = wb_dst["Indicadores"] if "Indicadores" in wb_dst.sheetnames else wb_dst[wb_dst.sheetnames[0]]
 
-                # Buscar archivo de mapeo en el directorio actual
-                mapping_path = None
-                try:
-                    import glob
-                    for f in glob.glob("*.xlsx"):
-                        if f == template_path.name:
-                            continue
-                        try:
-                            _wbm = load_workbook(f, read_only=True, data_only=True)
-                            _ws0 = _wbm[_wbm.sheetnames[0]]
-                            h1 = (_ws0["A1"].value or "").strip().lower()
-                            h2 = (_ws0["B1"].value or "").strip().lower()
-                            if ("indicadores" in h1 and "archivo" in h1) and ("indicadores" in h2 and "plantilla" in h2):
-                                mapping_path = Path(f)
-                                break
-                        except Exception:
-                            pass
-                except Exception:
-                    mapping_path = None
+                wb_map = load_workbook(mapping_path, read_only=True, data_only=True)
+                ws_map = wb_map[wb_map.sheetnames[0]]
 
-                MAPPINGS = []
-                if mapping_path is not None and mapping_path.exists():
-                    try:
-                        wb_map = load_workbook(mapping_path, read_only=True, data_only=True)
-                        ws_map = wb_map[wb_map.sheetnames[0]]
-                        r = 2
-                        import re as _re
-                        cell_pat = _re.compile(r"^[A-Z]+[0-9]+$")
-                        while True:
-                            src = ws_map[f"A{r}"].value
-                            dst = ws_map[f"B{r}"].value
-                            if src is None and dst is None:
-                                break
-                            if isinstance(src, str) and isinstance(dst, str):
-                                src = src.strip().upper()
-                                dst = dst.strip().upper()
-                                if cell_pat.match(src) and cell_pat.match(dst):
-                                    MAPPINGS.append((src, dst))
-                            r += 1
-                    except Exception:
-                        MAPPINGS = []
-
-                if not MAPPINGS:
-                    MAPPINGS = [
-                        ("B2","B2"), ("B7","B7"), ("B13","B13"), ("B17","B17"),
-                        ("B22","B22"), ("B26","B26"), ("B27","B27"), ("B28","B28"),
-                        ("B29","B29"), ("B32","B32"), ("B33","B33"), ("B34","B34"),
-                        ("B35","B35"), ("B36","B36"),
-                    ]
-
-                for src, dst in MAPPINGS:
-                    try:
-                        ws_tmpl[dst].value = ws_data[src].value
-                    except Exception:
-                        pass
+                # Validamos encabezados (A1 y B1) y leemos pares hasta fila vacía
+                import re as _re
+                cell_pat = _re.compile(r"^[A-Z]+[0-9]+$")
+                r = 2
+                while True:
+                    src = ws_map[f"A{r}"].value
+                    dst = ws_map[f"B{r}"].value
+                    if src is None and dst is None:
+                        break
+                    if isinstance(src, str) and isinstance(dst, str):
+                        src = src.strip().upper()
+                        dst = dst.strip().upper()
+                        if cell_pat.match(src) and cell_pat.match(dst):
+                            try:
+                                val = ws_src[src].value
+                                if val is not None:  # NO sobreescribimos con None
+                                    ws_dst[dst].value = val
+                            except Exception:
+                                pass
+                    r += 1
 
                 out = io.BytesIO()
-                wb_tmpl.save(out)
+                wb_dst.save(out)
                 out.seek(0)
                 st.session_state['xlsx_bytes'] = out.getvalue()
                 try:
@@ -2164,19 +2134,25 @@ try:
                 except Exception:
                     pass
             else:
+                # Si faltan archivos, conservar el original
                 st.session_state['xlsx_bytes'] = bio.getvalue()
                 try:
-                    st.session_state['xlsx_filename'] = f"indicadores_{today_cdmx()}.xlsx"
+                    if 'xlsx_filename' not in st.session_state:
+                        st.session_state['xlsx_filename'] = f"indicadores_{today_cdmx()}.xlsx"
                 except Exception:
                     pass
         except Exception:
+            # Cualquier error: mantener el archivo original
             try:
                 st.session_state['xlsx_bytes'] = bio.getvalue()
-                st.session_state['xlsx_filename'] = f"indicadores_{today_cdmx()}.xlsx"
+                if 'xlsx_filename' not in st.session_state:
+                    st.session_state['xlsx_filename'] = f"indicadores_{today_cdmx()}.xlsx"
             except Exception:
                 pass
-        # === Fin post-proceso de plantilla ===
+        # === Fin post-proceso a plantilla ===
 
+
+        
         prog.progress(100, text="Listo ✅")
         time.sleep(0.3)
         try:
