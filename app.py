@@ -2086,7 +2086,6 @@ try:
         pass
     wb.close()
     try:
-        \1
         # === Post-proceso plantilla: mapeo explícito (wrapper creado) ===
         try:
             template_path = Path("Indicadores_template_2col.xlsx")
