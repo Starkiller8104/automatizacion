@@ -2094,7 +2094,18 @@ try:
     except Exception:
         
         pass
-    wb.close()
+    
+    # === Requested modification (Ariel, 2025-10-15) FINAL PASS ===
+    try:
+        # Ocultar columnas C:E
+        ws.set_column('C:E', None, None, {'hidden': 1})
+        # Limpiar rango B2:B42
+        for _r in range(1, 42):  # rows 2..42 (1-based)
+            ws.write(_r, 1, None)
+    except Exception:
+        pass
+    # === End requested modification ===
+wb.close()
     try:
         st.session_state['xlsx_bytes'] = bio.getvalue()
         prog.progress(100, text="Listo ✅")
