@@ -1436,18 +1436,6 @@ if st.button("Generar Excel"):
         pass
 
     ws.set_column(0, 6, 16)
-    
-
-    # === Requested modification (Ariel, 2025-10-15) ===
-    # 1) Ocultar columnas C, D y E
-    # 2) Borrar datos del rango B2:B42
-    try:
-        ws.set_column('C:E', None, None, {'hidden': 1})
-        for _r in range(1, 42):  # rows 2..42 (1-based)
-            ws.write(_r, 1, "")  # column B (0-based index 1)
-    except Exception:
-        pass
-    # === End requested modification ===
     try:
         ws.insert_image(
         'A1',
@@ -2094,17 +2082,6 @@ try:
     except Exception:
         
         pass
-    
-    # === Requested modification (Ariel, 2025-10-15) FINAL PASS ===
-    try:
-        # Ocultar columnas C:E
-        ws.set_column('C:E', None, None, {'hidden': 1})
-        # Limpiar rango B2:B42
-        for _r in range(1, 42):  # rows 2..42 (1-based)
-            ws.write(_r, 1, "")
-    except Exception:
-        pass
-    # === End requested modification ===
     # === Ultra-final safeguard: ensure B2:B42 is blank on 'Indicadores' ===
     try:
         # Re-obtain worksheet by name in case `ws` was rebound
@@ -2129,38 +2106,16 @@ try:
                 _ws_ind.write(_r, 1, "")
     except Exception:
         pass
-    # === End ultra-final safeguard ===
-    # === Final blanking of B2:B42 on 'Indicadores' (robusto) ===
+    # === Clear B2:B42 on 'Indicadores' (definitivo) ===
     try:
-        # Aseguramos usar siempre la referencia estable ws_ind
-        try:
-            _ws = ws_ind
-        except NameError:
-            _ws = None
-        if _ws is not None:
-            for _r in range(1, 42):  # filas 2..42 (base 1)
-                # write_blank deja celda realmente en blanco
-                _ws.write_blank(_r, 1, None)
+        _ws = ws_ind
+        for _r in range(1, 42):  # filas 2..42, col B = 1
+            _ws.write_formula(_r, 1, '=""')
     except Exception:
         pass
-    # === End final blanking ===
+    # === End clear ===
 
     wb.close()
-
-    # === Strong clear B2:B42 on 'Indicadores' ===
-    try:
-        _ws = None
-        try:
-            _ws = ws_ind
-        except Exception:
-            pass
-        if _ws is not None:
-            for _r in range(1, 42):
-                _ws.write_string(_r, 1, "")
-                _ws.write_blank(_r, 1, None)
-    except Exception:
-        pass
-    # === End strong clear ===
 
     try:
         st.session_state['xlsx_bytes'] = bio.getvalue()
