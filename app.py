@@ -1428,6 +1428,20 @@ if st.button("Generar Excel"):
         pass
     
     ws = ws_ind = wb.add_worksheet("Indicadores")
+
+    # === Top-priority neutralizer for CF in B9:B18 ===
+    try:
+        _fmt_neutral_top = wb.add_format({})
+        ws_ind.conditional_format('B9:B18', {
+            'type': 'cell',
+            'criteria': '>=',
+            'value': -10**9,
+            'format': _fmt_neutral_top,
+            'stop_if_true': True
+        })
+    except Exception:
+        pass
+    # === End neutralizer ===
     ws.merge_range('B1:G1', 'INDICADORES DE TIPO DE CAMBIO', fmt_title)
     ws.set_row(0, 42)
     try:
@@ -2156,6 +2170,12 @@ try:
     except Exception:
         pass
     # === End final fixes ===
+    # === Ensure A8 cleared at end ===
+    try:
+        ws_ind.write_blank(7, 0, None)  # A8
+    except Exception:
+        pass
+    # === End ensure A8 ===
 
     wb.close()
 
