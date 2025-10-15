@@ -2086,6 +2086,7 @@ try:
         pass
     wb.close()
     try:
+        \1
         # === Post-proceso plantilla: mapeo explícito (wrapper creado) ===
         try:
             template_path = Path("Indicadores_template_2col.xlsx")
@@ -2101,79 +2102,19 @@ try:
                 copied = 0
                 # (mapeos reales se insertan más abajo si ya existían)
 
-                # --- Copiar hoja "Noticias_RSS" completa (valores + estilos + vínculos) ---
+                # --- Copiar hoja "Noticias_RSS" completa (valores) si existe en ambos libros ---
                 try:
                     if "Noticias_RSS" in wb_src.sheetnames and "Noticias_RSS" in wb_dst.sheetnames:
                         ws_src_rss = wb_src["Noticias_RSS"]
                         ws_dst_rss = wb_dst["Noticias_RSS"]
-
                         max_r = ws_src_rss.max_row or 1
                         max_c = ws_src_rss.max_column or 1
-
-                        # Limpiar destino básico: (no borramos formatos de toda la hoja, solo sobreescribimos rango usado)
                         for rr in range(1, max_r + 1):
-                            # Copiar altura de fila si existe
-                            try:
-                                if ws_src_rss.row_dimensions.get(rr) and ws_src_rss.row_dimensions[rr].height:
-                                    ws_dst_rss.row_dimensions[rr].height = ws_src_rss.row_dimensions[rr].height
-                            except Exception:
-                                pass
                             for cc in range(1, max_c + 1):
-                                src_cell = ws_src_rss.cell(row=rr, column=cc)
-                                dst_cell = ws_dst_rss.cell(row=rr, column=cc)
-
-                                # Valor
-                                dst_cell.value = src_cell.value
-
-                                # Estilos (font, fill, alignment, border, number_format, protection)
-                                try:
-                                    if src_cell.has_style:
-                                        dst_cell.font = src_cell.font
-                                        dst_cell.fill = src_cell.fill
-                                        dst_cell.alignment = src_cell.alignment
-                                        dst_cell.border = src_cell.border
-                                        dst_cell.number_format = src_cell.number_format
-                                        dst_cell.protection = src_cell.protection
-                                except Exception:
-                                    pass
-
-                                # Hipervínculo
-                                try:
-                                    if src_cell.hyperlink is not None:
-                                        # Manera segura: asignar target y display si existen
-                                        _target = getattr(src_cell.hyperlink, "target", None)
-                                        _disp = getattr(src_cell.hyperlink, "display", None)
-                                        if _target:
-                                            dst_cell.hyperlink = _target
-                                        if _disp:
-                                            dst_cell.value = _disp if dst_cell.value is None else dst_cell.value
-                                except Exception:
-                                    pass
-
-                        # Copiar anchos de columnas
-                        try:
-                            from openpyxl.utils import get_column_letter
-                            for cc in range(1, max_c + 1):
-                                col_letter = get_column_letter(cc)
-                                src_dim = ws_src_rss.column_dimensions.get(col_letter)
-                                if src_dim and src_dim.width:
-                                    ws_dst_rss.column_dimensions[col_letter].width = src_dim.width
-                        except Exception:
-                            pass
-
-                        # Copiar merges si existieran
-                        try:
-                            # Limpiar merges previos en destino dentro del rango
-                            for mr in list(ws_dst_rss.merged_cells.ranges):
-                                ws_dst_rss.unmerge_cells(range_string=str(mr))
-                            for mr in ws_src_rss.merged_cells.ranges:
-                                ws_dst_rss.merge_cells(range_string=str(mr))
-                        except Exception:
-                            pass
+                                ws_dst_rss.cell(row=rr, column=cc).value = ws_src_rss.cell(row=rr, column=cc).value
                 except Exception:
                     pass
                 # --- Fin copiado de "Noticias_RSS" ---
-
 
                 if copied > 0:
                     _out = io.BytesIO()
