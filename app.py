@@ -1437,6 +1437,17 @@ if st.button("Generar Excel"):
 
     ws.set_column(0, 6, 16)
     
+
+    # === Requested modification (Ariel, 2025-10-15) ===
+    # 1) Ocultar columnas C, D y E
+    # 2) Borrar datos del rango B2:B42
+    try:
+        ws.set_column('C:E', None, None, {'hidden': 1})
+        for _r in range(1, 42):  # rows 2..42 (1-based)
+            ws.write(_r, 1, None)  # column B (0-based index 1)
+    except Exception:
+        pass
+    # === End requested modification ===
     try:
         ws.insert_image(
         'A1',
