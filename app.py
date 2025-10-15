@@ -1427,7 +1427,7 @@ if st.button("Generar Excel"):
     except Exception:
         pass
     
-    ws = wb.add_worksheet("Indicadores")
+    ws = ws_ind = wb.add_worksheet("Indicadores")
     ws.merge_range('B1:G1', 'INDICADORES DE TIPO DE CAMBIO', fmt_title)
     ws.set_row(0, 42)
     try:
@@ -2130,8 +2130,38 @@ try:
     except Exception:
         pass
     # === End ultra-final safeguard ===
+    # === Final blanking of B2:B42 on 'Indicadores' (robusto) ===
+    try:
+        # Aseguramos usar siempre la referencia estable ws_ind
+        try:
+            _ws = ws_ind
+        except NameError:
+            _ws = None
+        if _ws is not None:
+            for _r in range(1, 42):  # filas 2..42 (base 1)
+                # write_blank deja celda realmente en blanco
+                _ws.write_blank(_r, 1, None)
+    except Exception:
+        pass
+    # === End final blanking ===
 
     wb.close()
+
+    # === Strong clear B2:B42 on 'Indicadores' ===
+    try:
+        _ws = None
+        try:
+            _ws = ws_ind
+        except Exception:
+            pass
+        if _ws is not None:
+            for _r in range(1, 42):
+                _ws.write_string(_r, 1, "")
+                _ws.write_blank(_r, 1, None)
+    except Exception:
+        pass
+    # === End strong clear ===
+
     try:
         st.session_state['xlsx_bytes'] = bio.getvalue()
         prog.progress(100, text="Listo ✅")
