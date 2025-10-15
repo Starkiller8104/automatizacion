@@ -1,4 +1,3 @@
-from pathlib import Path
 import io
 import re
 import time
@@ -2087,8 +2086,8 @@ try:
         pass
     wb.close()
     try:
-        st.session_state['xlsx_bytes'] = bio.getvalue()
-        # === Post-proceso plantilla: mapeo explícito (valores F/G -> C/D/B) ===
+        \1
+        # === Post-proceso plantilla: mapeo explícito (wrapper creado) ===
         try:
             template_path = Path("Indicadores_template_2col.xlsx")
             replaced_ok = False
@@ -2098,47 +2097,96 @@ try:
                 ws_src = wb_src["Indicadores"] if "Indicadores" in wb_src.sheetnames else wb_src[wb_src.sheetnames[0]]
                 wb_dst = load_workbook(template_path)
                 ws_dst = wb_dst["Indicadores"] if "Indicadores" in wb_dst.sheetnames else wb_dst[wb_dst.sheetnames[0]]
-                MAPPINGS = [('F2','C2'), ('F7','C5'), ('F9','C6'), ('F10','C7'), ('F13','C10'), ('F14','C11'), ('F17','C14'), ('F18','C15'), ('F22','C18'), ('F26','C21'), ('F27','C22'), ('F28','C23'), ('F33','C27'), ('F34','C28'), ('F35','C29'), ('F36','C30'), ('F40','B33'), ('F41','B34'), ('F42','B35'), ('G2','D2'), ('G7','D5'), ('G9','D6'), ('G10','D7'), ('G13','D10'), ('G14','D11'), ('G17','D14'), ('G18','D15'), ('G22','D18'), ('G26','D21'), ('G27','D22'), ('G28','D23'), ('G33','D27'), ('G34','D28'), ('G35','D29'), ('G36','D30')]
+
+                MAPPINGS = []
                 copied = 0
-                for src, dst in MAPPINGS:
-                    try:
-                        val = ws_src[src].value
-                        if val is not None:
-                            ws_dst[dst].value = val
-                            copied += 1
-                    except Exception:
-                        pass
+                # (mapeos reales se insertan más abajo si ya existían)
+
+                # --- Copiar hoja "Noticias_RSS" completa (valores + estilos + vínculos) ---
+                try:
+                    if "Noticias_RSS" in wb_src.sheetnames and "Noticias_RSS" in wb_dst.sheetnames:
+                        ws_src_rss = wb_src["Noticias_RSS"]
+                        ws_dst_rss = wb_dst["Noticias_RSS"]
+
+                        max_r = ws_src_rss.max_row or 1
+                        max_c = ws_src_rss.max_column or 1
+
+                        # Limpiar destino básico: (no borramos formatos de toda la hoja, solo sobreescribimos rango usado)
+                        for rr in range(1, max_r + 1):
+                            # Copiar altura de fila si existe
+                            try:
+                                if ws_src_rss.row_dimensions.get(rr) and ws_src_rss.row_dimensions[rr].height:
+                                    ws_dst_rss.row_dimensions[rr].height = ws_src_rss.row_dimensions[rr].height
+                            except Exception:
+                                pass
+                            for cc in range(1, max_c + 1):
+                                src_cell = ws_src_rss.cell(row=rr, column=cc)
+                                dst_cell = ws_dst_rss.cell(row=rr, column=cc)
+
+                                # Valor
+                                dst_cell.value = src_cell.value
+
+                                # Estilos (font, fill, alignment, border, number_format, protection)
+                                try:
+                                    if src_cell.has_style:
+                                        dst_cell.font = src_cell.font
+                                        dst_cell.fill = src_cell.fill
+                                        dst_cell.alignment = src_cell.alignment
+                                        dst_cell.border = src_cell.border
+                                        dst_cell.number_format = src_cell.number_format
+                                        dst_cell.protection = src_cell.protection
+                                except Exception:
+                                    pass
+
+                                # Hipervínculo
+                                try:
+                                    if src_cell.hyperlink is not None:
+                                        # Manera segura: asignar target y display si existen
+                                        _target = getattr(src_cell.hyperlink, "target", None)
+                                        _disp = getattr(src_cell.hyperlink, "display", None)
+                                        if _target:
+                                            dst_cell.hyperlink = _target
+                                        if _disp:
+                                            dst_cell.value = _disp if dst_cell.value is None else dst_cell.value
+                                except Exception:
+                                    pass
+
+                        # Copiar anchos de columnas
+                        try:
+                            from openpyxl.utils import get_column_letter
+                            for cc in range(1, max_c + 1):
+                                col_letter = get_column_letter(cc)
+                                src_dim = ws_src_rss.column_dimensions.get(col_letter)
+                                if src_dim and src_dim.width:
+                                    ws_dst_rss.column_dimensions[col_letter].width = src_dim.width
+                        except Exception:
+                            pass
+
+                        # Copiar merges si existieran
+                        try:
+                            # Limpiar merges previos en destino dentro del rango
+                            for mr in list(ws_dst_rss.merged_cells.ranges):
+                                ws_dst_rss.unmerge_cells(range_string=str(mr))
+                            for mr in ws_src_rss.merged_cells.ranges:
+                                ws_dst_rss.merge_cells(range_string=str(mr))
+                        except Exception:
+                            pass
+                except Exception:
+                    pass
+                # --- Fin copiado de "Noticias_RSS" ---
+
+
                 if copied > 0:
                     _out = io.BytesIO()
                     wb_dst.save(_out)
                     _out.seek(0)
                     st.session_state['xlsx_bytes'] = _out.getvalue()
-                    try:
-                        st.session_state['xlsx_filename'] = f"indicadores_template_{today_cdmx()}\.xlsx"
-                    except Exception:
-                        pass
                     replaced_ok = True
             if not replaced_ok:
                 st.session_state['xlsx_bytes'] = bio.getvalue()
-                try:
-                    if 'xlsx_filename' not in st.session_state:
-                        st.session_state['xlsx_filename'] = f"indicadores_{today_cdmx()}\.xlsx"
-                except Exception:
-                    pass
         except Exception:
-            try:
-                st.session_state['xlsx_bytes'] = bio.getvalue()
-                if 'xlsx_filename' not in st.session_state:
-                    st.session_state['xlsx_filename'] = f"indicadores_{today_cdmx()}\.xlsx"
-            except Exception:
-                pass
+            st.session_state['xlsx_bytes'] = bio.getvalue()
         # === Fin post-proceso plantilla ===
-
-
-        
-
-        
-
         
         prog.progress(100, text="Listo ✅")
         time.sleep(0.3)
@@ -2155,7 +2203,7 @@ except Exception:
     st.download_button(
     "Descargar Excel",
         data=bio.getvalue(),
-        file_name=st.session_state.get('xlsx_filename', f"indicadores_{today_cdmx()}.xlsx"),
+        file_name=f"indicadores_{today_cdmx()}.xlsx",
         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         )
     
@@ -2168,7 +2216,7 @@ try:
         st.download_button(
             'Descargar Excel',
             data=xbytes,
-            file_name=st.session_state.get('xlsx_filename', f"indicadores_{today_cdmx()}.xlsx"),
+            file_name=f"indicadores_{today_cdmx()}.xlsx",
             mime='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
             use_container_width=True
         )
