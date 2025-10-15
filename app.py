@@ -2118,27 +2118,62 @@ try:
                     except Exception:
                         pass
 
-                # --- Copiar hoja "Noticias_RSS" completa (valores + estilos + vínculos) ---
+                
+                # --- Copiar hoja "Noticias_RSS" completa (robusto: valores + estilos + vínculos) ---
                 try:
-                    if "Noticias_RSS" in wb_src.sheetnames and "Noticias_RSS" in wb_dst.sheetnames:
-                        ws_src_rss = wb_src["Noticias_RSS"]
-                        ws_dst_rss = wb_dst["Noticias_RSS"]
+                    # Localizar hoja fuente (preferir exacto, si no, por substring 'noticias')
+                    src_name = None
+                    for nm in wb_src.sheetnames:
+                        if nm == "Noticias_RSS":
+                            src_name = nm; break
+                    if src_name is None:
+                        for nm in wb_src.sheetnames:
+                            if "noticias" in nm.lower():
+                                src_name = nm; break
+
+                    # Localizar/crear hoja destino en plantilla
+                    dst_name = None
+                    for nm in wb_dst.sheetnames:
+                        if nm == "Noticias_RSS":
+                            dst_name = nm; break
+                    if dst_name is None:
+                        for nm in wb_dst.sheetnames:
+                            if "noticias" in nm.lower():
+                                dst_name = nm; break
+                    if dst_name is None:
+                        dst_name = "Noticias_RSS"
+                        wb_dst.create_sheet(dst_name)
+
+                    if src_name is not None and dst_name is not None:
+                        ws_src_rss = wb_src[src_name]
+                        ws_dst_rss = wb_dst[dst_name]
 
                         max_r = ws_src_rss.max_row or 1
                         max_c = ws_src_rss.max_column or 1
 
+                        # Limpiar merges previos en destino (para evitar solapamientos)
+                        try:
+                            for mr in list(ws_dst_rss.merged_cells.ranges):
+                                ws_dst_rss.unmerge_cells(range_string=str(mr))
+                        except Exception:
+                            pass
+
+                        # Copiar celdas (valor, estilos, vínculo) y alturas/anchos
                         for rr in range(1, max_r + 1):
                             # Altura de fila
                             try:
-                                if ws_src_rss.row_dimensions.get(rr) and ws_src_rss.row_dimensions[rr].height:
-                                    ws_dst_rss.row_dimensions[rr].height = ws_src_rss.row_dimensions[rr].height
+                                rd = ws_src_rss.row_dimensions.get(rr)
+                                if rd and rd.height:
+                                    ws_dst_rss.row_dimensions[rr].height = rd.height
                             except Exception:
                                 pass
                             for cc in range(1, max_c + 1):
                                 src_cell = ws_src_rss.cell(row=rr, column=cc)
                                 dst_cell = ws_dst_rss.cell(row=rr, column=cc)
+
                                 # Valor
                                 dst_cell.value = src_cell.value
+
                                 # Estilos
                                 try:
                                     if src_cell.has_style:
@@ -2150,6 +2185,7 @@ try:
                                         dst_cell.protection = src_cell.protection
                                 except Exception:
                                     pass
+
                                 # Hipervínculo
                                 try:
                                     if src_cell.hyperlink is not None:
@@ -2157,13 +2193,13 @@ try:
                                         display = getattr(src_cell.hyperlink, "display", None)
                                         if target:
                                             dst_cell.hyperlink = target
-                                        if display and dst_cell.value is None:
+                                        if display and (dst_cell.value is None or dst_cell.value == ""):
                                             dst_cell.value = display
                                 except Exception:
                                     pass
+
                         # Anchos de columnas
                         try:
-                            from openpyxl.utils import get_column_letter
                             for cc in range(1, max_c + 1):
                                 col_letter = get_column_letter(cc)
                                 src_dim = ws_src_rss.column_dimensions.get(col_letter)
@@ -2171,10 +2207,9 @@ try:
                                     ws_dst_rss.column_dimensions[col_letter].width = src_dim.width
                         except Exception:
                             pass
-                        # Merges
+
+                        # Replicar merges
                         try:
-                            for mr in list(ws_dst_rss.merged_cells.ranges):
-                                ws_dst_rss.unmerge_cells(range_string=str(mr))
                             for mr in ws_src_rss.merged_cells.ranges:
                                 ws_dst_rss.merge_cells(range_string=str(mr))
                         except Exception:
@@ -2182,6 +2217,7 @@ try:
                 except Exception:
                     pass
                 # --- Fin copia Noticias_RSS ---
+
 
                 # Guardar SIEMPRE la plantilla (aunque no haya habido celdas copiadas)
                 _out = io.BytesIO()
