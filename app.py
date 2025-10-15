@@ -2088,78 +2088,54 @@ try:
     wb.close()
     try:
         st.session_state['xlsx_bytes'] = bio.getvalue()
-
-        # === Post-proceso a plantilla con mapeo (robusto) ===
+        # === Post-proceso plantilla: mapeo explícito (valores F/G -> C/D/B) ===
         try:
             template_path = Path("Indicadores_template_2col.xlsx")
-            mapping_path  = Path("Indicadores_map.xlsx")
             replaced_ok = False
-
-            if template_path.exists() and mapping_path.exists():
+            if template_path.exists():
                 raw_bytes = bio.getvalue()
-                # Fuente: lo que acabamos de generar
-                wb_src = load_workbook(io.BytesIO(raw_bytes), data_only=False)  # capturar strings y números tal cual
+                wb_src = load_workbook(io.BytesIO(raw_bytes), data_only=False)
                 ws_src = wb_src["Indicadores"] if "Indicadores" in wb_src.sheetnames else wb_src[wb_src.sheetnames[0]]
-
-                # Destino: plantilla
                 wb_dst = load_workbook(template_path)
                 ws_dst = wb_dst["Indicadores"] if "Indicadores" in wb_dst.sheetnames else wb_dst[wb_dst.sheetnames[0]]
-
-                # Mapeo
-                wb_map = load_workbook(mapping_path, read_only=True, data_only=True)
-                ws_map = wb_map[wb_map.sheetnames[0]]
-
-                import re as _re
-                cell_pat = _re.compile(r"^[A-Z]+[1-9][0-9]*$")
+                MAPPINGS = [('F2','C2'), ('F7','C5'), ('F9','C6'), ('F10','C7'), ('F13','C10'), ('F14','C11'), ('F17','C14'), ('F18','C15'), ('F22','C18'), ('F26','C21'), ('F27','C22'), ('F28','C23'), ('F33','C27'), ('F34','C28'), ('F35','C29'), ('F36','C30'), ('F40','B33'), ('F41','B34'), ('F42','B35'), ('G2','D2'), ('G7','D5'), ('G9','D6'), ('G10','D7'), ('G13','D10'), ('G14','D11'), ('G17','D14'), ('G18','D15'), ('G22','D18'), ('G26','D21'), ('G27','D22'), ('G28','D23'), ('G33','D27'), ('G34','D28'), ('G35','D29'), ('G36','D30')]
                 copied = 0
-                r = 2
-                while True:
-                    src = ws_map[f"A{r}"].value
-                    dst = ws_map[f"B{r}"].value
-                    if src is None and dst is None:
-                        break
-                    if isinstance(src, str) and isinstance(dst, str):
-                        src_u = src.strip().upper()
-                        dst_u = dst.strip().upper()
-                        if cell_pat.match(src_u) and cell_pat.match(dst_u):
-                            try:
-                                val = ws_src[src_u].value
-                                if val is not None:
-                                    ws_dst[dst_u].value = val
-                                    copied += 1
-                            except Exception:
-                                pass
-                    r += 1
-
+                for src, dst in MAPPINGS:
+                    try:
+                        val = ws_src[src].value
+                        if val is not None:
+                            ws_dst[dst].value = val
+                            copied += 1
+                    except Exception:
+                        pass
                 if copied > 0:
                     _out = io.BytesIO()
                     wb_dst.save(_out)
                     _out.seek(0)
                     st.session_state['xlsx_bytes'] = _out.getvalue()
                     try:
-                        st.session_state['xlsx_filename'] = f"indicadores_template_{today_cdmx()}.xlsx"
+                        st.session_state['xlsx_filename'] = f"indicadores_template_{today_cdmx()}\.xlsx"
                     except Exception:
                         pass
                     replaced_ok = True
-
             if not replaced_ok:
-                # fallback: conservar archivo original
                 st.session_state['xlsx_bytes'] = bio.getvalue()
                 try:
                     if 'xlsx_filename' not in st.session_state:
-                        st.session_state['xlsx_filename'] = f"indicadores_{today_cdmx()}.xlsx"
+                        st.session_state['xlsx_filename'] = f"indicadores_{today_cdmx()}\.xlsx"
                 except Exception:
                     pass
         except Exception:
-            # Cualquier error: mantener archivo original
             try:
                 st.session_state['xlsx_bytes'] = bio.getvalue()
                 if 'xlsx_filename' not in st.session_state:
-                    st.session_state['xlsx_filename'] = f"indicadores_{today_cdmx()}.xlsx"
+                    st.session_state['xlsx_filename'] = f"indicadores_{today_cdmx()}\.xlsx"
             except Exception:
                 pass
-        # === Fin post-proceso a plantilla ===
+        # === Fin post-proceso plantilla ===
 
+
+        
 
         
 
