@@ -8,6 +8,7 @@ import re
 import requests
 import feedparser
 import xlsxwriter
+from openpyxl import load_workbook
 import streamlit as st
 from datetime import datetime, timedelta, date
 from email.utils import parsedate_to_datetime
@@ -1427,21 +1428,7 @@ if st.button("Generar Excel"):
     except Exception:
         pass
     
-    ws = ws_ind = wb.add_worksheet("Indicadores")
-
-    # === Top-priority neutralizer for CF in B9:B18 ===
-    try:
-        _fmt_neutral_top = wb.add_format({})
-        ws_ind.conditional_format('B9:B18', {
-            'type': 'cell',
-            'criteria': '>=',
-            'value': -10**9,
-            'format': _fmt_neutral_top,
-            'stop_if_true': True
-        })
-    except Exception:
-        pass
-    # === End neutralizer ===
+    ws = wb.add_worksheet("Indicadores")
     ws.merge_range('B1:G1', 'INDICADORES DE TIPO DE CAMBIO', fmt_title)
     ws.set_row(0, 42)
     try:
@@ -1450,6 +1437,7 @@ if st.button("Generar Excel"):
         pass
 
     ws.set_column(0, 6, 16)
+    
     try:
         ws.insert_image(
         'A1',
@@ -2096,91 +2084,99 @@ try:
     except Exception:
         
         pass
-    # === Ultra-final safeguard: ensure B2:B42 is blank on 'Indicadores' ===
-    try:
-        # Re-obtain worksheet by name in case `ws` was rebound
-        try:
-            _ws_ind = ws  # use existing if it's still 'Indicadores'
-            try:
-                # Quick sanity check by writing in a temp cell and undoing
-                _ = _ws_ind.name  # may raise if not worksheet
-            except Exception:
-                _ws_ind = None
-        except Exception:
-            _ws_ind = None
-        if _ws_ind is None:
-            try:
-                # xlsxwriter doesn't expose get_worksheet_by_name; we track our sheet handle as `ws`,
-                # so as fallback we just use `ws` if defined; otherwise skip silently.
-                _ws_ind = ws
-            except Exception:
-                _ws_ind = None
-        if _ws_ind is not None:
-            for _r in range(1, 42):
-                _ws_ind.write(_r, 1, "")
-    except Exception:
-        pass
-    # === Hide columns C:E on 'Indicadores' (definitivo al final) ===
-    try:
-        ws_ind.set_column(2, 4, None, None, {'hidden': 1})
-    except Exception:
-        pass
-    # === End hide C:E ===
-    # === Final overrides: clear B2:B42 and set fixed values on 'Indicadores' ===
-    try:
-        _ws = ws_ind  # referencia estable a la hoja Indicadores
-        # 1) Limpiar B2:B42
-        for _r in range(1, 42):
-            _ws.write_blank(_r, 1, None)
-        # 2) Establecer valores fijos solicitados (como texto para preservar formato exacto)
-        _ws.write_string(1,  1, "31-12-24")  # B2
-        _ws.write_string(6,  1, "20.7862")   # B7
-        _ws.write_string(12, 1, "0.1323")    # B13
-        _ws.write_string(16, 1, "21.5241")   # B17
-        _ws.write_string(21, 1, "8.4542")    # B22
-        _ws.write_string(25, 1, "10.00")     # B26
-        _ws.write_string(26, 1, "10.24")     # B27
-        _ws.write_string(27, 1, "10.63")     # B28
-        _ws.write_string(28, 1, "10.77")     # B29
-        _ws.write_string(31, 1, "26-12-24")  # B32
-        _ws.write_string(32, 1, "9.74")      # B33
-        _ws.write_string(33, 1, "9.79")      # B34
-        _ws.write_string(34, 1, "9.97")      # B35
-        _ws.write_string(35, 1, "10.06")     # B36
-    except Exception:
-        pass
-    # === End final overrides ===
-    # === Final fixes: clear A8 and neutralize conditional formatting B9:B18 ===
-    try:
-        _ws = ws_ind  # hoja 'Indicadores'
-        # 1) Borrar A8
-        _ws.write_blank(7, 0, None)  # A8 -> row 7, col 0 (0-based)
-
-        # 2) Neutralizar formato condicional en B9:B18
-        #    Agregamos una regla al tope (última agregada) que siempre se cumple,
-        #    con formato "vacío" y stop_if_true=True, para bloquear reglas previas.
-        _fmt_neutral = wb.add_format({})  # formato sin propiedades (no cambia apariencia)
-        _ws.conditional_format('B9:B18', {
-            'type': 'cell',
-            'criteria': '>=',
-            'value': -10**9,      # condición siempre verdadera para números típicos
-            'format': _fmt_neutral,
-            'stop_if_true': True
-        })
-    except Exception:
-        pass
-    # === End final fixes ===
-    # === Ensure A8 cleared at end ===
-    try:
-        ws_ind.write_blank(7, 0, None)  # A8
-    except Exception:
-        pass
-    # === End ensure A8 ===
-
     wb.close()
-
     try:
         st.session_state['xlsx_bytes'] = bio.getvalue()
+
+        # === Post-proceso: copiar valores a la plantilla usando mapeo A->B ===
+        try:
+            template_path = Path("Indicadores_template_2col.xlsx")
+            if template_path.exists():
+                raw_bytes = bio.getvalue()
+                wb_data = load_workbook(io.BytesIO(raw_bytes), data_only=False)
+                ws_data = wb_data["Indicadores"] if "Indicadores" in wb_data.sheetnames else wb_data[wb_data.sheetnames[0]]
+
+                wb_tmpl = load_workbook(template_path)
+                ws_tmpl = wb_tmpl["Indicadores"] if "Indicadores" in wb_tmpl.sheetnames else wb_tmpl[wb_tmpl.sheetnames[0]]
+
+                # Buscar archivo de mapeo en el directorio actual
+                mapping_path = None
+                try:
+                    import glob
+                    for f in glob.glob("*.xlsx"):
+                        if f == template_path.name:
+                            continue
+                        try:
+                            _wbm = load_workbook(f, read_only=True, data_only=True)
+                            _ws0 = _wbm[_wbm.sheetnames[0]]
+                            h1 = (_ws0["A1"].value or "").strip().lower()
+                            h2 = (_ws0["B1"].value or "").strip().lower()
+                            if ("indicadores" in h1 and "archivo" in h1) and ("indicadores" in h2 and "plantilla" in h2):
+                                mapping_path = Path(f)
+                                break
+                        except Exception:
+                            pass
+                except Exception:
+                    mapping_path = None
+
+                MAPPINGS = []
+                if mapping_path is not None and mapping_path.exists():
+                    try:
+                        wb_map = load_workbook(mapping_path, read_only=True, data_only=True)
+                        ws_map = wb_map[wb_map.sheetnames[0]]
+                        r = 2
+                        import re as _re
+                        cell_pat = _re.compile(r"^[A-Z]+[0-9]+$")
+                        while True:
+                            src = ws_map[f"A{r}"].value
+                            dst = ws_map[f"B{r}"].value
+                            if src is None and dst is None:
+                                break
+                            if isinstance(src, str) and isinstance(dst, str):
+                                src = src.strip().upper()
+                                dst = dst.strip().upper()
+                                if cell_pat.match(src) and cell_pat.match(dst):
+                                    MAPPINGS.append((src, dst))
+                            r += 1
+                    except Exception:
+                        MAPPINGS = []
+
+                if not MAPPINGS:
+                    MAPPINGS = [
+                        ("B2","B2"), ("B7","B7"), ("B13","B13"), ("B17","B17"),
+                        ("B22","B22"), ("B26","B26"), ("B27","B27"), ("B28","B28"),
+                        ("B29","B29"), ("B32","B32"), ("B33","B33"), ("B34","B34"),
+                        ("B35","B35"), ("B36","B36"),
+                    ]
+
+                for src, dst in MAPPINGS:
+                    try:
+                        ws_tmpl[dst].value = ws_data[src].value
+                    except Exception:
+                        pass
+
+                out = io.BytesIO()
+                wb_tmpl.save(out)
+                out.seek(0)
+                st.session_state['xlsx_bytes'] = out.getvalue()
+                try:
+                    st.session_state['xlsx_filename'] = f"indicadores_template_{today_cdmx()}.xlsx"
+                except Exception:
+                    pass
+            else:
+                st.session_state['xlsx_bytes'] = bio.getvalue()
+                try:
+                    st.session_state['xlsx_filename'] = f"indicadores_{today_cdmx()}.xlsx"
+                except Exception:
+                    pass
+        except Exception:
+            try:
+                st.session_state['xlsx_bytes'] = bio.getvalue()
+                st.session_state['xlsx_filename'] = f"indicadores_{today_cdmx()}.xlsx"
+            except Exception:
+                pass
+        # === Fin post-proceso de plantilla ===
+
         prog.progress(100, text="Listo ✅")
         time.sleep(0.3)
         try:
@@ -2196,7 +2192,7 @@ except Exception:
     st.download_button(
     "Descargar Excel",
         data=bio.getvalue(),
-        file_name=f"indicadores_{today_cdmx()}.xlsx",
+        file_name=st.session_state.get('xlsx_filename', f"indicadores_{today_cdmx()}.xlsx"),
         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         )
     
@@ -2209,7 +2205,7 @@ try:
         st.download_button(
             'Descargar Excel',
             data=xbytes,
-            file_name=f"indicadores_{today_cdmx()}.xlsx",
+            file_name=st.session_state.get('xlsx_filename', f"indicadores_{today_cdmx()}.xlsx"),
             mime='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
             use_container_width=True
         )
